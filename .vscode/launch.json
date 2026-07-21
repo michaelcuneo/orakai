@@ -1,0 +1,55 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch OrakaiEditor (Development)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
+            "args": [
+                "${workspaceFolder}\\Orakai.uproject"
+            ],
+            "cwd": "C:\\Program Files\\Epic Games\\UE_5.8",
+            "stopAtEntry": false,
+            "preLaunchTask": "OrakaiEditor Win64 Development Build",
+            "visualizerFile": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Extras\\VisualStudioDebugging\\Unreal.natvis",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Launch OrakaiEditor (DebugGame)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Binaries\\Win64\\UnrealEditor-Win64-DebugGame.exe",
+            "args": [
+                "${workspaceFolder}\\Orakai.uproject"
+            ],
+            "cwd": "C:\\Program Files\\Epic Games\\UE_5.8",
+            "stopAtEntry": false,
+            "preLaunchTask": "OrakaiEditor Win64 DebugGame Build",
+            "visualizerFile": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Extras\\VisualStudioDebugging\\Unreal.natvis",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Launch Orakai Game (Development)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
+            "args": [
+                "${workspaceFolder}\\Orakai.uproject",
+                "-game"
+            ],
+            "cwd": "C:\\Program Files\\Epic Games\\UE_5.8",
+            "stopAtEntry": false,
+            "preLaunchTask": "OrakaiEditor Win64 Development Build",
+            "visualizerFile": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Extras\\VisualStudioDebugging\\Unreal.natvis",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Attach to UnrealEditor",
+            "type": "cppvsdbg",
+            "request": "attach",
+            "processId": "${command:pickProcess}",
+            "visualizerFile": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Extras\\VisualStudioDebugging\\Unreal.natvis"
+        }
+    ]
+}

@@ -1,0 +1,78 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "OrakaiEditor Win64 Development Build",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "type": "shell",
+            "command": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Build\\BatchFiles\\Build.bat",
+            "args": [
+                "OrakaiEditor",
+                "Win64",
+                "Development",
+                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                "-waitmutex"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "OrakaiEditor Win64 DebugGame Build",
+            "group": "build",
+            "type": "shell",
+            "command": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Build\\BatchFiles\\Build.bat",
+            "args": [
+                "OrakaiEditor",
+                "Win64",
+                "DebugGame",
+                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                "-waitmutex"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Orakai Win64 Development Build",
+            "group": "build",
+            "type": "shell",
+            "command": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Build\\BatchFiles\\Build.bat",
+            "args": [
+                "Orakai",
+                "Win64",
+                "Development",
+                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                "-waitmutex"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "OrakaiEditor Win64 Development Rebuild",
+            "group": "build",
+            "type": "shell",
+            "command": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Build\\BatchFiles\\Rebuild.bat",
+            "args": [
+                "OrakaiEditor",
+                "Win64",
+                "Development",
+                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                "-waitmutex"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "OrakaiEditor Win64 Development Clean",
+            "group": "build",
+            "type": "shell",
+            "command": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Build\\BatchFiles\\Clean.bat",
+            "args": [
+                "OrakaiEditor",
+                "Win64",
+                "Development",
+                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                "-waitmutex"
+            ],
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}
