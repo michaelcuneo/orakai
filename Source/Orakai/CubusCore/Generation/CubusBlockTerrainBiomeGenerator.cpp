@@ -10,140 +10,87 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
     const UCubusGeologyProfile* GeologyProfile
 )
 {
-    if (
-        !IsValid(GeologyProfile) ||
-        !GeologyProfile->bGenerateBiomes
-    )
+    if (!IsValid(GeologyProfile) || !GeologyProfile->bGenerateBiomes)
     {
         return;
     }
 
-    const FIntVector ChunkCoordinate =
-        Chunk.GetChunkCoordinate();
+    const FIntVector ChunkCoordinate = Chunk.GetChunkCoordinate();
+    const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
+    const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
+    const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
+    const float Frequency = FMath::Max(0.000001f, GeologyProfile->BiomeFrequency);
 
-    const int32 BaseX =
-        ChunkCoordinate.X *
-        Cubus::ChunkSize;
-
-    const int32 BaseY =
-        ChunkCoordinate.Y *
-        Cubus::ChunkSize;
-
-    const int32 BaseZ =
-        ChunkCoordinate.Z *
-        Cubus::ChunkSize;
-
-    const float Frequency =
-        FMath::Max(
-            0.000001f,
-            GeologyProfile->BiomeFrequency
-        );
-
-    const int32 PlainsMaterialId =
-        FMath::Max(
-            1,
-            GeologyProfile->PlainsSurfaceMaterialId
-        );
-
-    const int32 ForestMaterialId =
-        FMath::Max(
-            1,
-            GeologyProfile->ForestSurfaceMaterialId
-        );
-
-    const int32 RockyMaterialId =
-        FMath::Max(
-            1,
-            GeologyProfile->RockySurfaceMaterialId
-        );
-
-    const int32 WetlandMaterialId =
-        FMath::Max(
-            1,
-            GeologyProfile->WetlandSurfaceMaterialId
-        );
+    const int32 PlainsMaterialId = FMath::Max(1, GeologyProfile->PlainsSurfaceMaterialId);
+    const int32 ForestMaterialId = FMath::Max(1, GeologyProfile->ForestSurfaceMaterialId);
+    const int32 RockyMaterialId = FMath::Max(1, GeologyProfile->RockySurfaceMaterialId);
+    const int32 WetlandMaterialId = FMath::Max(1, GeologyProfile->WetlandSurfaceMaterialId);
 
     int32 PlainsCount = 0;
     int32 ForestCount = 0;
     int32 RockyCount = 0;
     int32 WetlandCount = 0;
+    int32 BuriedColumnCount = 0;
 
-    for (
-        int32 LocalY = 0;
-        LocalY < Cubus::ChunkSize;
-        ++LocalY
-    )
+    for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
     {
-        const int32 WorldY =
-            BaseY +
-            LocalY;
+        const int32 WorldY = BaseY + LocalY;
 
-        for (
-            int32 LocalX = 0;
-            LocalX < Cubus::ChunkSize;
-            ++LocalX
-        )
+        for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
         {
-            const int32 SurfaceLocalZ =
-                FindSurfaceLocalZ(
-                    Chunk,
-                    LocalX,
-                    LocalY
-                );
+            const int32 SurfaceLocalZ = FindSurfaceLocalZ(Chunk, LocalX, LocalY);
 
             if (SurfaceLocalZ == INDEX_NONE)
             {
                 continue;
             }
 
-            const FCubusBlockVoxel* AboveVoxel =
-                SurfaceLocalZ + 1 < Cubus::ChunkSize
-                    ? Chunk.GetVoxel(
-                        LocalX,
-                        LocalY,
-                        SurfaceLocalZ + 1
-                    )
-                    : nullptr;
-
-            if (
-                AboveVoxel != nullptr &&
-                AboveVoxel->IsWater()
-            )
+            // A solid voxel at the upper boundary means this column may continue
+            // into the chunk above. It is not safe to treat this as a world surface.
+            if (SurfaceLocalZ == Cubus::ChunkSize - 1)
             {
+                ++BuriedColumnCount;
                 continue;
             }
 
-            const int32 WestSurface =
-                FindSurfaceLocalZ(
-                    Chunk,
-                    FMath::Max(0, LocalX - 1),
-                    LocalY
-                );
+            const FCubusBlockVoxel* AboveVoxel = Chunk.GetVoxel(
+                LocalX,
+                LocalY,
+                SurfaceLocalZ + 1
+            );
 
-            const int32 EastSurface =
-                FindSurfaceLocalZ(
-                    Chunk,
-                    FMath::Min(Cubus::ChunkSize - 1, LocalX + 1),
-                    LocalY
-                );
+            if (
+                AboveVoxel != nullptr &&
+                (AboveVoxel->MaterialId > 0 || AboveVoxel->IsWater())
+            )
+            {
+                ++BuriedColumnCount;
+                continue;
+            }
 
-            const int32 SouthSurface =
-                FindSurfaceLocalZ(
-                    Chunk,
-                    LocalX,
-                    FMath::Max(0, LocalY - 1)
-                );
-
-            const int32 NorthSurface =
-                FindSurfaceLocalZ(
-                    Chunk,
-                    LocalX,
-                    FMath::Min(Cubus::ChunkSize - 1, LocalY + 1)
-                );
+            const int32 WestSurface = FindSurfaceLocalZ(
+                Chunk,
+                FMath::Max(0, LocalX - 1),
+                LocalY
+            );
+            const int32 EastSurface = FindSurfaceLocalZ(
+                Chunk,
+                FMath::Min(Cubus::ChunkSize - 1, LocalX + 1),
+                LocalY
+            );
+            const int32 SouthSurface = FindSurfaceLocalZ(
+                Chunk,
+                LocalX,
+                FMath::Max(0, LocalY - 1)
+            );
+            const int32 NorthSurface = FindSurfaceLocalZ(
+                Chunk,
+                LocalX,
+                FMath::Min(Cubus::ChunkSize - 1, LocalY + 1)
+            );
 
             int32 MinimumNeighbourSurface = SurfaceLocalZ;
             int32 MaximumNeighbourSurface = SurfaceLocalZ;
-
             const int32 NeighbourSurfaces[] =
             {
                 WestSurface,
@@ -159,49 +106,33 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
                     continue;
                 }
 
-                MinimumNeighbourSurface =
-                    FMath::Min(
-                        MinimumNeighbourSurface,
-                        NeighbourSurface
-                    );
-
-                MaximumNeighbourSurface =
-                    FMath::Max(
-                        MaximumNeighbourSurface,
-                        NeighbourSurface
-                    );
+                MinimumNeighbourSurface = FMath::Min(
+                    MinimumNeighbourSurface,
+                    NeighbourSurface
+                );
+                MaximumNeighbourSurface = FMath::Max(
+                    MaximumNeighbourSurface,
+                    NeighbourSurface
+                );
             }
 
-            const float LocalSlope =
-                static_cast<float>(
-                    MaximumNeighbourSurface -
-                    MinimumNeighbourSurface
-                );
+            const float LocalSlope = static_cast<float>(
+                MaximumNeighbourSurface - MinimumNeighbourSurface
+            );
+            const int32 WorldX = BaseX + LocalX;
+            const int32 SurfaceWorldZ = BaseZ + SurfaceLocalZ;
+            const float RiverDistance = SampleRiverDistance(
+                WorldX,
+                WorldY,
+                GeologyProfile
+            );
+            const float BiomeNoise = SampleBiomeNoise(
+                WorldX,
+                WorldY,
+                Frequency
+            );
 
-            const int32 WorldX =
-                BaseX +
-                LocalX;
-
-            const int32 SurfaceWorldZ =
-                BaseZ +
-                SurfaceLocalZ;
-
-            const float RiverDistance =
-                SampleRiverDistance(
-                    WorldX,
-                    WorldY,
-                    GeologyProfile
-                );
-
-            const float BiomeNoise =
-                SampleBiomeNoise(
-                    WorldX,
-                    WorldY,
-                    Frequency
-                );
-
-            int32 SelectedMaterialId =
-                PlainsMaterialId;
+            int32 SelectedMaterialId = PlainsMaterialId;
 
             if (
                 GeologyProfile->bGenerateRivers &&
@@ -220,9 +151,7 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
                 SelectedMaterialId = RockyMaterialId;
                 ++RockyCount;
             }
-            else if (
-                BiomeNoise >= GeologyProfile->ForestThreshold
-            )
+            else if (BiomeNoise >= GeologyProfile->ForestThreshold)
             {
                 SelectedMaterialId = ForestMaterialId;
                 ++ForestCount;
@@ -232,39 +161,33 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
                 ++PlainsCount;
             }
 
-            FCubusBlockVoxel* SurfaceVoxel =
-                Chunk.GetVoxel(
-                    LocalX,
-                    LocalY,
-                    SurfaceLocalZ
-                );
+            FCubusBlockVoxel* SurfaceVoxel = Chunk.GetVoxel(
+                LocalX,
+                LocalY,
+                SurfaceLocalZ
+            );
 
-            if (
-                SurfaceVoxel == nullptr ||
-                SurfaceVoxel->IsWater()
-            )
+            if (SurfaceVoxel == nullptr || SurfaceVoxel->IsWater())
             {
                 continue;
             }
 
-            SurfaceVoxel->MaterialId =
-                SelectedMaterialId;
+            SurfaceVoxel->MaterialId = SelectedMaterialId;
         }
     }
 
     UE_LOG(
         LogTemp,
         Display,
-        TEXT(
-            "Cubus biomes chunk (%d, %d, %d): plains %d, forest %d, rocky %d, wetland %d"
-        ),
+        TEXT("Cubus biomes chunk (%d, %d, %d): plains %d, forest %d, rocky %d, wetland %d, buried skipped %d"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
         ChunkCoordinate.Z,
         PlainsCount,
         ForestCount,
         RockyCount,
-        WetlandCount
+        WetlandCount,
+        BuriedColumnCount
     );
 }
 
@@ -274,18 +197,9 @@ int32 FCubusBlockTerrainBiomeGenerator::FindSurfaceLocalZ(
     const int32 LocalY
 )
 {
-    for (
-        int32 LocalZ = Cubus::ChunkSize - 1;
-        LocalZ >= 0;
-        --LocalZ
-    )
+    for (int32 LocalZ = Cubus::ChunkSize - 1; LocalZ >= 0; --LocalZ)
     {
-        const FCubusBlockVoxel* Voxel =
-            Chunk.GetVoxel(
-                LocalX,
-                LocalY,
-                LocalZ
-            );
+        const FCubusBlockVoxel* Voxel = Chunk.GetVoxel(LocalX, LocalY, LocalZ);
 
         if (
             Voxel != nullptr &&
@@ -320,55 +234,38 @@ float FCubusBlockTerrainBiomeGenerator::SampleRiverDistance(
     const UCubusGeologyProfile* GeologyProfile
 )
 {
-    const float RiverFrequency =
-        FMath::Max(
-            0.000001f,
-            GeologyProfile->RiverFrequency
-        );
+    const float RiverFrequency = FMath::Max(
+        0.000001f,
+        GeologyProfile->RiverFrequency
+    );
+    const float WarpFrequency = FMath::Max(
+        0.000001f,
+        GeologyProfile->RiverWarpFrequency
+    );
+    const float WarpAmplitude = FMath::Max(
+        0.0f,
+        GeologyProfile->RiverWarpAmplitude
+    );
 
-    const float WarpFrequency =
-        FMath::Max(
-            0.000001f,
-            GeologyProfile->RiverWarpFrequency
-        );
+    const float WarpX = FMath::PerlinNoise2D(
+        FVector2D(
+            static_cast<double>(WorldX) * WarpFrequency,
+            static_cast<double>(WorldY) * WarpFrequency
+        )
+    ) * WarpAmplitude;
 
-    const float WarpAmplitude =
-        FMath::Max(
-            0.0f,
-            GeologyProfile->RiverWarpAmplitude
-        );
-
-    const float WarpX =
-        FMath::PerlinNoise2D(
-            FVector2D(
-                static_cast<double>(WorldX) * WarpFrequency,
-                static_cast<double>(WorldY) * WarpFrequency
-            )
-        ) *
-        WarpAmplitude;
-
-    const float WarpY =
-        FMath::PerlinNoise2D(
-            FVector2D(
-                static_cast<double>(WorldX + 7919) * WarpFrequency,
-                static_cast<double>(WorldY - 3571) * WarpFrequency
-            )
-        ) *
-        WarpAmplitude;
+    const float WarpY = FMath::PerlinNoise2D(
+        FVector2D(
+            static_cast<double>(WorldX + 7919) * WarpFrequency,
+            static_cast<double>(WorldY - 3571) * WarpFrequency
+        )
+    ) * WarpAmplitude;
 
     return FMath::Abs(
         FMath::PerlinNoise2D(
             FVector2D(
-                (
-                    static_cast<double>(WorldX) +
-                    WarpX
-                ) *
-                RiverFrequency,
-                (
-                    static_cast<double>(WorldY) +
-                    WarpY
-                ) *
-                RiverFrequency
+                (static_cast<double>(WorldX) + WarpX) * RiverFrequency,
+                (static_cast<double>(WorldY) + WarpY) * RiverFrequency
             )
         )
     );
