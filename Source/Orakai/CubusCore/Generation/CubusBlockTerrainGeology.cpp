@@ -4,6 +4,7 @@
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
+#include "CubusCore/Generation/CubusBlockTerrainRiverGenerator.h"
 
 void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
     FCubusBlockChunkData& Chunk,
@@ -76,6 +77,11 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
     {
         return;
     }
+
+    FCubusBlockTerrainRiverGenerator::Apply(
+        Chunk,
+        GeologyProfile
+    );
 
     const FIntVector ChunkCoordinate = Chunk.GetChunkCoordinate();
     const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
