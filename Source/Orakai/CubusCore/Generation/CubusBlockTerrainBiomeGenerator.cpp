@@ -4,6 +4,7 @@
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
+#include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
 
 void FCubusBlockTerrainBiomeGenerator::Apply(
     FCubusBlockChunkData& Chunk,
@@ -12,6 +13,7 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
 {
     if (!IsValid(GeologyProfile) || !GeologyProfile->bGenerateBiomes)
     {
+        Chunk.ClearVegetationInstances();
         return;
     }
 
@@ -45,8 +47,6 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
                 continue;
             }
 
-            // A solid voxel at the upper boundary means this column may continue
-            // into the chunk above. It is not safe to treat this as a world surface.
             if (SurfaceLocalZ == Cubus::ChunkSize - 1)
             {
                 ++BuriedColumnCount;
@@ -175,6 +175,8 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
             SurfaceVoxel->MaterialId = SelectedMaterialId;
         }
     }
+
+    FCubusBlockVegetationGenerator::Generate(Chunk, GeologyProfile);
 
     UE_LOG(
         LogTemp,
