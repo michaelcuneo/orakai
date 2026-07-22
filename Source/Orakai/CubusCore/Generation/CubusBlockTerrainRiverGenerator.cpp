@@ -4,268 +4,271 @@
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
+#include "CubusCore/Generation/CubusBlockTerrainBiomeGenerator.h"
 
 void FCubusBlockTerrainRiverGenerator::Apply(
     FCubusBlockChunkData& Chunk,
     const UCubusGeologyProfile* GeologyProfile
 )
 {
-    if (
-        !IsValid(GeologyProfile) ||
-        !GeologyProfile->bGenerateRivers
-    )
+    if (!IsValid(GeologyProfile))
     {
         return;
     }
 
-    const FIntVector ChunkCoordinate =
-        Chunk.GetChunkCoordinate();
-
-    const int32 BaseX =
-        ChunkCoordinate.X *
-        Cubus::ChunkSize;
-
-    const int32 BaseY =
-        ChunkCoordinate.Y *
-        Cubus::ChunkSize;
-
-    const float ChannelWidth =
-        FMath::Clamp(
-            GeologyProfile->RiverChannelWidth,
-            0.0f,
-            1.0f
-        );
-
-    const float ValleyWidth =
-        FMath::Max(
-            ChannelWidth + 0.0001f,
-            GeologyProfile->RiverValleyWidth
-        );
-
-    const int32 ChannelDepth =
-        FMath::Max(
-            1,
-            GeologyProfile->RiverChannelDepth
-        );
-
-    const int32 WaterDepth =
-        FMath::Max(
-            1,
-            GeologyProfile->RiverWaterDepth
-        );
-
-    const int32 RiverbedMaterialId =
-        FMath::Max(
-            1,
-            GeologyProfile->RiverbedMaterialId
-        );
-
-    const int32 RiverWaterMaterialId =
-        FMath::Max(
-            1,
-            GeologyProfile->RiverWaterMaterialId
-        );
-
-    int32 RiverColumnCount = 0;
-    int32 RiverWaterVoxelCount = 0;
-
-    for (
-        int32 LocalY = 0;
-        LocalY < Cubus::ChunkSize;
-        ++LocalY
-    )
+    if (GeologyProfile->bGenerateRivers)
     {
-        const int32 WorldY =
-            BaseY +
-            LocalY;
+        const FIntVector ChunkCoordinate =
+            Chunk.GetChunkCoordinate();
+
+        const int32 BaseX =
+            ChunkCoordinate.X *
+            Cubus::ChunkSize;
+
+        const int32 BaseY =
+            ChunkCoordinate.Y *
+            Cubus::ChunkSize;
+
+        const float ChannelWidth =
+            FMath::Clamp(
+                GeologyProfile->RiverChannelWidth,
+                0.0f,
+                1.0f
+            );
+
+        const float ValleyWidth =
+            FMath::Max(
+                ChannelWidth + 0.0001f,
+                GeologyProfile->RiverValleyWidth
+            );
+
+        const int32 ChannelDepth =
+            FMath::Max(
+                1,
+                GeologyProfile->RiverChannelDepth
+            );
+
+        const int32 WaterDepth =
+            FMath::Max(
+                1,
+                GeologyProfile->RiverWaterDepth
+            );
+
+        const int32 RiverbedMaterialId =
+            FMath::Max(
+                1,
+                GeologyProfile->RiverbedMaterialId
+            );
+
+        const int32 RiverWaterMaterialId =
+            FMath::Max(
+                1,
+                GeologyProfile->RiverWaterMaterialId
+            );
+
+        int32 RiverColumnCount = 0;
+        int32 RiverWaterVoxelCount = 0;
 
         for (
-            int32 LocalX = 0;
-            LocalX < Cubus::ChunkSize;
-            ++LocalX
+            int32 LocalY = 0;
+            LocalY < Cubus::ChunkSize;
+            ++LocalY
         )
         {
-            const int32 WorldX =
-                BaseX +
-                LocalX;
-
-            const float RiverDistance =
-                SampleRiverDistance(
-                    WorldX,
-                    WorldY,
-                    GeologyProfile
-                );
-
-            if (RiverDistance >= ValleyWidth)
-            {
-                continue;
-            }
-
-            int32 HighestSolidLocalZ = INDEX_NONE;
+            const int32 WorldY =
+                BaseY +
+                LocalY;
 
             for (
-                int32 LocalZ = Cubus::ChunkSize - 1;
-                LocalZ >= 0;
-                --LocalZ
+                int32 LocalX = 0;
+                LocalX < Cubus::ChunkSize;
+                ++LocalX
             )
             {
-                const FCubusBlockVoxel* Voxel =
-                    Chunk.GetVoxel(
-                        LocalX,
-                        LocalY,
-                        LocalZ
+                const int32 WorldX =
+                    BaseX +
+                    LocalX;
+
+                const float RiverDistance =
+                    SampleRiverDistance(
+                        WorldX,
+                        WorldY,
+                        GeologyProfile
                     );
 
-                if (
-                    Voxel != nullptr &&
-                    Voxel->MaterialId > 0 &&
-                    !Voxel->IsWater()
+                if (RiverDistance >= ValleyWidth)
+                {
+                    continue;
+                }
+
+                int32 HighestSolidLocalZ = INDEX_NONE;
+
+                for (
+                    int32 LocalZ = Cubus::ChunkSize - 1;
+                    LocalZ >= 0;
+                    --LocalZ
                 )
                 {
-                    HighestSolidLocalZ = LocalZ;
-                    break;
+                    const FCubusBlockVoxel* Voxel =
+                        Chunk.GetVoxel(
+                            LocalX,
+                            LocalY,
+                            LocalZ
+                        );
+
+                    if (
+                        Voxel != nullptr &&
+                        Voxel->MaterialId > 0 &&
+                        !Voxel->IsWater()
+                    )
+                    {
+                        HighestSolidLocalZ = LocalZ;
+                        break;
+                    }
                 }
-            }
 
-            if (
-                HighestSolidLocalZ == INDEX_NONE ||
-                HighestSolidLocalZ == Cubus::ChunkSize - 1
-            )
-            {
-                continue;
-            }
-
-            const float ValleyInfluence =
-                1.0f -
-                SmoothStep(
-                    ChannelWidth,
-                    ValleyWidth,
-                    RiverDistance
-                );
-
-            const bool bInsideChannel =
-                RiverDistance <=
-                ChannelWidth;
-
-            const int32 ValleyLowering =
-                FMath::RoundToInt(
-                    FMath::Max(
-                        0.0f,
-                        GeologyProfile->RiverValleyDepth
-                    ) *
-                    ValleyInfluence
-                );
-
-            const int32 TotalLowering =
-                ValleyLowering +
-                (
-                    bInsideChannel
-                        ? ChannelDepth
-                        : 0
-                );
-
-            const int32 TargetSurfaceLocalZ =
-                FMath::Clamp(
-                    HighestSolidLocalZ -
-                    TotalLowering,
-                    0,
-                    Cubus::ChunkSize - 1
-                );
-
-            if (TargetSurfaceLocalZ >= HighestSolidLocalZ)
-            {
-                continue;
-            }
-
-            for (
-                int32 LocalZ = TargetSurfaceLocalZ + 1;
-                LocalZ <= HighestSolidLocalZ;
-                ++LocalZ
-            )
-            {
-                FCubusBlockVoxel* Voxel =
-                    Chunk.GetVoxel(
-                        LocalX,
-                        LocalY,
-                        LocalZ
-                    );
-
-                if (Voxel == nullptr)
+                if (HighestSolidLocalZ == INDEX_NONE)
                 {
                     continue;
                 }
 
-                Voxel->MaterialId = 0;
-                Voxel->SetWater(false);
-            }
-
-            FCubusBlockVoxel* RiverbedVoxel =
-                Chunk.GetVoxel(
-                    LocalX,
-                    LocalY,
-                    TargetSurfaceLocalZ
-                );
-
-            if (RiverbedVoxel != nullptr)
-            {
-                RiverbedVoxel->MaterialId =
-                    RiverbedMaterialId;
-
-                RiverbedVoxel->SetWater(false);
-            }
-
-            if (!bInsideChannel)
-            {
-                continue;
-            }
-
-            ++RiverColumnCount;
-
-            const int32 WaterTopLocalZ =
-                FMath::Min(
-                    HighestSolidLocalZ,
-                    TargetSurfaceLocalZ +
-                    WaterDepth
-                );
-
-            for (
-                int32 LocalZ = TargetSurfaceLocalZ + 1;
-                LocalZ <= WaterTopLocalZ;
-                ++LocalZ
-            )
-            {
-                FCubusBlockVoxel* WaterVoxel =
-                    Chunk.GetVoxel(
-                        LocalX,
-                        LocalY,
-                        LocalZ
+                const float ValleyInfluence =
+                    1.0f -
+                    SmoothStep(
+                        ChannelWidth,
+                        ValleyWidth,
+                        RiverDistance
                     );
 
-                if (WaterVoxel == nullptr)
+                const bool bInsideChannel =
+                    RiverDistance <=
+                    ChannelWidth;
+
+                const int32 ValleyLowering =
+                    FMath::RoundToInt(
+                        FMath::Max(
+                            0.0f,
+                            GeologyProfile->RiverValleyDepth
+                        ) *
+                        ValleyInfluence
+                    );
+
+                const int32 TotalLowering =
+                    ValleyLowering +
+                    (
+                        bInsideChannel
+                            ? ChannelDepth
+                            : 0
+                    );
+
+                const int32 TargetSurfaceLocalZ =
+                    FMath::Clamp(
+                        HighestSolidLocalZ -
+                        TotalLowering,
+                        0,
+                        Cubus::ChunkSize - 1
+                    );
+
+                if (TargetSurfaceLocalZ >= HighestSolidLocalZ)
                 {
                     continue;
                 }
 
-                WaterVoxel->MaterialId =
-                    RiverWaterMaterialId;
+                for (
+                    int32 LocalZ = TargetSurfaceLocalZ + 1;
+                    LocalZ <= HighestSolidLocalZ;
+                    ++LocalZ
+                )
+                {
+                    FCubusBlockVoxel* Voxel =
+                        Chunk.GetVoxel(
+                            LocalX,
+                            LocalY,
+                            LocalZ
+                        );
 
-                WaterVoxel->SetWater(true);
-                ++RiverWaterVoxelCount;
+                    if (Voxel == nullptr)
+                    {
+                        continue;
+                    }
+
+                    Voxel->MaterialId = 0;
+                    Voxel->SetWater(false);
+                }
+
+                FCubusBlockVoxel* RiverbedVoxel =
+                    Chunk.GetVoxel(
+                        LocalX,
+                        LocalY,
+                        TargetSurfaceLocalZ
+                    );
+
+                if (RiverbedVoxel != nullptr)
+                {
+                    RiverbedVoxel->MaterialId =
+                        RiverbedMaterialId;
+
+                    RiverbedVoxel->SetWater(false);
+                }
+
+                if (!bInsideChannel)
+                {
+                    continue;
+                }
+
+                ++RiverColumnCount;
+
+                const int32 WaterTopLocalZ =
+                    FMath::Min(
+                        HighestSolidLocalZ,
+                        TargetSurfaceLocalZ +
+                        WaterDepth
+                    );
+
+                for (
+                    int32 LocalZ = TargetSurfaceLocalZ + 1;
+                    LocalZ <= WaterTopLocalZ;
+                    ++LocalZ
+                )
+                {
+                    FCubusBlockVoxel* WaterVoxel =
+                        Chunk.GetVoxel(
+                            LocalX,
+                            LocalY,
+                            LocalZ
+                        );
+
+                    if (WaterVoxel == nullptr)
+                    {
+                        continue;
+                    }
+
+                    WaterVoxel->MaterialId =
+                        RiverWaterMaterialId;
+
+                    WaterVoxel->SetWater(true);
+                    ++RiverWaterVoxelCount;
+                }
             }
         }
+
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT(
+                "Cubus rivers chunk (%d, %d, %d): %d channel columns, %d water voxels"
+            ),
+            ChunkCoordinate.X,
+            ChunkCoordinate.Y,
+            ChunkCoordinate.Z,
+            RiverColumnCount,
+            RiverWaterVoxelCount
+        );
     }
 
-    UE_LOG(
-        LogTemp,
-        Display,
-        TEXT(
-            "Cubus rivers chunk (%d, %d, %d): %d channel columns, %d water voxels"
-        ),
-        ChunkCoordinate.X,
-        ChunkCoordinate.Y,
-        ChunkCoordinate.Z,
-        RiverColumnCount,
-        RiverWaterVoxelCount
+    FCubusBlockTerrainBiomeGenerator::Apply(
+        Chunk,
+        GeologyProfile
     );
 }
 
