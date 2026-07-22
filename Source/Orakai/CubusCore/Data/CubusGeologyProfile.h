@@ -80,6 +80,79 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Strata")
     TArray<FCubusStrataLayer> StrataLayers;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Rivers")
+    bool bGenerateRivers = false;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Rivers",
+        meta = (ClampMin = "0.000001", UIMin = "0.0001", UIMax = "0.02")
+    )
+    float RiverFrequency = 0.0025f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Rivers",
+        meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.5")
+    )
+    float RiverChannelWidth = 0.055f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Rivers",
+        meta = (ClampMin = "0.001", ClampMax = "1.0", UIMin = "0.01", UIMax = "1.0")
+    )
+    float RiverValleyWidth = 0.22f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Rivers",
+        meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "32.0")
+    )
+    float RiverValleyDepth = 7.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Rivers",
+        meta = (ClampMin = "1", UIMin = "1", UIMax = "24")
+    )
+    int32 RiverChannelDepth = 4;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Rivers",
+        meta = (ClampMin = "1", UIMin = "1", UIMax = "8")
+    )
+    int32 RiverWaterDepth = 2;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Rivers",
+        meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "256.0")
+    )
+    float RiverWarpAmplitude = 48.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Rivers",
+        meta = (ClampMin = "0.000001", UIMin = "0.0001", UIMax = "0.05")
+    )
+    float RiverWarpFrequency = 0.006f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Rivers")
+    int32 RiverbedMaterialId = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Rivers")
+    int32 RiverWaterMaterialId = 5;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Caves")
     bool bGenerateCaves = false;
 
