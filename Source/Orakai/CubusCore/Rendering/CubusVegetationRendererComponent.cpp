@@ -70,14 +70,19 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
     }
 
     const float SafeVoxelSize =
-    FMath::Max(
-        1.0f,
-        ChunkActor->GetVoxelSize()
-    );
+        FMath::Max(
+            1.0f,
+            ChunkActor->GetVoxelSize()
+        );
 
     const FIntVector ChunkOriginVoxel =
         ChunkActor->GetChunkCoordinate() *
         Cubus::ChunkSize;
+
+    const double HalfChunkWorldSize =
+        static_cast<double>(Cubus::ChunkSize) *
+        static_cast<double>(SafeVoxelSize) *
+        0.5;
 
     for (
         const FCubusVegetationInstance& Instance :
@@ -100,13 +105,16 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
             (
                 static_cast<double>(LocalVoxel.X) +
                 0.5
-            ) * SafeVoxelSize,
+            ) * SafeVoxelSize -
+                HalfChunkWorldSize,
             (
                 static_cast<double>(LocalVoxel.Y) +
                 0.5
-            ) * SafeVoxelSize,
+            ) * SafeVoxelSize -
+                HalfChunkWorldSize,
             static_cast<double>(LocalVoxel.Z) *
-                SafeVoxelSize
+                SafeVoxelSize -
+                HalfChunkWorldSize
         );
 
         const FTransform LocalTransform(
