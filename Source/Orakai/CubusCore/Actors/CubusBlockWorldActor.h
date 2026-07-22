@@ -8,6 +8,7 @@
 class ACubusVoxelVolumeActor;
 class USceneComponent;
 class UCubusMaterialRegistry;
+class UCubusGeologyProfile;
 class UMaterialInterface;
 
 UCLASS(
@@ -395,6 +396,14 @@ protected:
     )
     TObjectPtr<UCubusMaterialRegistry>
         MaterialRegistry = nullptr;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Geology"
+    )
+    TObjectPtr<UCubusGeologyProfile>
+        GeologyProfile = nullptr;
 
     UPROPERTY(
         EditAnywhere,
