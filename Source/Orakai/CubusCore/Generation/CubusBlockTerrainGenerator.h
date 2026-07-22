@@ -156,6 +156,31 @@ private:
         const UCubusGeologyProfile* GeologyProfile
     );
 
+    static void CarveCaves(
+        FCubusBlockChunkData& Chunk,
+        int32 BaseHeight,
+        float ContinentAmplitude,
+        float ContinentFrequency,
+        float HillAmplitude,
+        float HillFrequency,
+        float DetailAmplitude,
+        float DetailFrequency,
+        float RidgeAmplitude,
+        float RidgeFrequency,
+        float ValleyDepth,
+        float ValleyFrequency,
+        float ValleyWidth,
+        float ValleyFalloff,
+        float ValleyWarpAmplitude,
+        float ValleyWarpFrequency,
+        float RegionFrequency,
+        float PlainsThreshold,
+        float PlainsBlend,
+        float MountainThreshold,
+        float MountainBlend,
+        const UCubusGeologyProfile* GeologyProfile
+    );
+
     static void ApplyOreRules(
         FCubusBlockChunkData& Chunk,
         const UCubusGeologyProfile* GeologyProfile
