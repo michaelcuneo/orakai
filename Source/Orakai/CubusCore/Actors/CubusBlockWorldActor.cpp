@@ -35,6 +35,14 @@ ACubusBlockWorldActor::ACubusBlockWorldActor()
         );
 
     SetRootComponent(WorldRoot);
+
+    /*
+     * Chunk procedural meshes are Static, so their attachment
+     * parent must also be Static.
+     */
+    WorldRoot->SetMobility(
+        EComponentMobility::Static
+    );
 }
 
 void ACubusBlockWorldActor::OnConstruction(
@@ -441,16 +449,24 @@ void ACubusBlockWorldActor::GenerateChunkGrid()
                         Z
                     );
 
-                FActorSpawnParameters SpawnParameters;
+                    FActorSpawnParameters SpawnParameters;
 
-                SpawnParameters.Owner = this;
+                    SpawnParameters.Owner = this;
 
-                SpawnParameters.SpawnCollisionHandlingOverride =
-                    ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+                    /*
+                    * Generated chunks must live in the same level as the world actor.
+                    * Actor attachment cannot persist correctly across different levels.
+                    */
+                    SpawnParameters.OverrideLevel =
+                        GetLevel();
 
-                #if WITH_EDITOR
-                SpawnParameters.ObjectFlags |= RF_Transactional;
-                #endif
+                    SpawnParameters.SpawnCollisionHandlingOverride =
+                        ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+                    #if WITH_EDITOR
+                    SpawnParameters.ObjectFlags |=
+                        RF_Transactional;
+                    #endif
 
                 ACubusVoxelVolumeActor* ChunkActor =
                     World->SpawnActor<
@@ -480,6 +496,10 @@ void ACubusBlockWorldActor::GenerateChunkGrid()
                 ChunkActor->ConfigureRendering(
                     MaterialRegistry,
                     FallbackVoxelMaterial
+                );
+
+                ChunkActor->ConfigureGeology(
+                    GeologyProfile
                 );
 
                 ChunkActor->ConfigureTerrain(
@@ -632,6 +652,20 @@ void ACubusBlockWorldActor::RefreshChunkRegistry()
             continue;
         }
 
+        const bool bOwnedByThisWorld =
+            ChunkActor->GetOwner() == this;
+
+        const bool bAttachedToThisWorld =
+            ChunkActor->GetAttachParentActor() == this;
+
+        if (
+            !bOwnedByThisWorld &&
+            !bAttachedToThisWorld
+        )
+        {
+            continue;
+        }
+
         ChunkActor->SetOwningBlockWorld(
             this
         );
@@ -692,6 +726,10 @@ void ACubusBlockWorldActor::RegenerateTerrain()
         ChunkActor->ConfigureRendering(
             MaterialRegistry,
             FallbackVoxelMaterial
+        );
+
+        ChunkActor->ConfigureGeology(
+            GeologyProfile
         );
 
         ChunkActor->ConfigureTerrain(

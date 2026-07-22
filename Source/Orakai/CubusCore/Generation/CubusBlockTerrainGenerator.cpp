@@ -285,7 +285,7 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
                         WorldZ <= WaterLevel
                     )
                     {
-                        CubusBlockTerrainGenerator::SetTerrainVoxel(
+                        CubusBlockTerrainGenerator::SetWaterVoxel(
                             Chunk,
                             LocalX,
                             LocalY,

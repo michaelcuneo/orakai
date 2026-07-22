@@ -8,6 +8,7 @@
 #include "CubusCore/Meshing/CubusBlockMesher.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
 #include "CubusCore/Generation/CubusBlockTerrainGenerator.h"
+#include "CubusCore/Data/CubusGeologyProfile.h"
 
 #include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
@@ -438,6 +439,14 @@ void ACubusVoxelVolumeActor::ConfigureRendering(
         VoxelMaterial =
             InFallbackVoxelMaterial;
     }
+}
+
+void ACubusVoxelVolumeActor::ConfigureGeology(
+    UCubusGeologyProfile* InGeologyProfile
+)
+{
+    GeologyProfile =
+        InGeologyProfile;
 }
 
 void ACubusVoxelVolumeActor::ConfigureTerrain(

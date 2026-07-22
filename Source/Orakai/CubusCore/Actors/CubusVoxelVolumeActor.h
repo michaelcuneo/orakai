@@ -13,6 +13,7 @@ class UMaterialInterface;
 class UProceduralMeshComponent;
 class UCubusMaterialRegistry;
 class UMaterialInterface;
+class UCubusGeologyProfile;
 
 struct FCubusBlockChunkNeighborhood;
 
@@ -104,6 +105,10 @@ public:
     void ConfigureRendering(
         UCubusMaterialRegistry* InMaterialRegistry,
         UMaterialInterface* InFallbackVoxelMaterial
+    );
+
+    void ConfigureGeology(
+        UCubusGeologyProfile* InGeologyProfile
     );
 
     void ConfigureTerrain(
@@ -243,6 +248,17 @@ protected:
         meta = (AllowPrivateAccess = "true")
     )
     TObjectPtr<UCubusMaterialRegistry> MaterialRegistry = nullptr;
+
+    UPROPERTY(
+        VisibleInstanceOnly,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology",
+        meta = (
+            AllowPrivateAccess = "true"
+        )
+    )
+    TObjectPtr<UCubusGeologyProfile>
+        GeologyProfile = nullptr;
     
     UPROPERTY(
         EditAnywhere,

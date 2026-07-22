@@ -10,6 +10,7 @@ class USceneComponent;
 class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
 class UMaterialInterface;
+class UCubusGeologyProfile;
 
 UCLASS(
     BlueprintType,
@@ -522,9 +523,7 @@ private:
         TWeakObjectPtr<ACubusVoxelVolumeActor>
     > ChunksByCoordinate;
 
-    UPROPERTY(
-        Transient
-    )
+    UPROPERTY()
     TArray<TObjectPtr<ACubusVoxelVolumeActor>>
         GeneratedChunks;
 
