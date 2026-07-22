@@ -3,6 +3,7 @@
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Data/CubusVegetationInstance.h"
+#include "CubusCore/Chunks/CubusChunkConstants.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -68,11 +69,15 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
         return;
     }
 
-    const FTransform OwnerTransform =
-        ChunkActor->GetActorTransform();
-
     const float SafeVoxelSize =
-        FMath::Max(1.0f, VoxelSize);
+    FMath::Max(
+        1.0f,
+        ChunkActor->GetVoxelSize()
+    );
+
+    const FIntVector ChunkOriginVoxel =
+        ChunkActor->GetChunkCoordinate() *
+        Cubus::ChunkSize;
 
     for (
         const FCubusVegetationInstance& Instance :
@@ -87,14 +92,22 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
             continue;
         }
 
-        const FVector WorldLocation(
-            static_cast<double>(Instance.WorldVoxel.X) * SafeVoxelSize,
-            static_cast<double>(Instance.WorldVoxel.Y) * SafeVoxelSize,
-            static_cast<double>(Instance.WorldVoxel.Z) * SafeVoxelSize
-        );
+        const FIntVector LocalVoxel =
+            Instance.WorldVoxel -
+            ChunkOriginVoxel;
 
-        const FVector LocalLocation =
-            OwnerTransform.InverseTransformPosition(WorldLocation);
+        const FVector LocalLocation(
+            (
+                static_cast<double>(LocalVoxel.X) +
+                0.5
+            ) * SafeVoxelSize,
+            (
+                static_cast<double>(LocalVoxel.Y) +
+                0.5
+            ) * SafeVoxelSize,
+            static_cast<double>(LocalVoxel.Z) *
+                SafeVoxelSize
+        );
 
         const FTransform LocalTransform(
             FRotator(0.0f, Instance.RotationYaw, 0.0f),

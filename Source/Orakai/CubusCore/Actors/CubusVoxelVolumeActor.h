@@ -84,6 +84,11 @@ public:
         return ChunkCoordinate;
     }
 
+    float GetVoxelSize() const
+    {
+        return VoxelSize;
+    }
+
     const FCubusBlockChunkData* GetChunkData() const
     {
         return ChunkData.Get();

@@ -4,6 +4,7 @@
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "Materials/MaterialInterface.h"
+#include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 
 #include "EngineUtils.h"
 
@@ -536,6 +537,19 @@ void ACubusBlockWorldActor::GenerateChunkGrid()
                     TerrainWaterMaterialId
                 );
 
+                if (
+                    ACubusPCGVoxelVolumeActor* PCGChunk =
+                        Cast<ACubusPCGVoxelVolumeActor>(
+                            ChunkActor
+                        )
+                )
+                {
+                    PCGChunk->ConfigureVegetationPCG(
+                        VegetationPCGGraph,
+                        bGenerateVegetationPCG
+                    );
+                }
+
                 ChunkActor->SetOwner(this);
 
                 #if WITH_EDITOR
@@ -765,6 +779,19 @@ void ACubusBlockWorldActor::RegenerateTerrain()
             TerrainWaterLevel,
             TerrainWaterMaterialId
         );
+
+        if (
+            ACubusPCGVoxelVolumeActor* PCGChunk =
+                Cast<ACubusPCGVoxelVolumeActor>(
+                    ChunkActor
+                )
+        )
+        {
+            PCGChunk->ConfigureVegetationPCG(
+                VegetationPCGGraph,
+                bGenerateVegetationPCG
+            );
+        }
     }
 
     for (
@@ -785,6 +812,25 @@ void ACubusBlockWorldActor::RegenerateTerrain()
     }
 
     RebuildAllChunks();
+
+    for (
+        const TPair<
+            FIntVector,
+            TWeakObjectPtr<ACubusVoxelVolumeActor>
+        >& Entry :
+        ChunksByCoordinate
+    )
+    {
+        ACubusPCGVoxelVolumeActor* PCGChunk =
+            Cast<ACubusPCGVoxelVolumeActor>(
+                Entry.Value.Get()
+            );
+
+        if (IsValid(PCGChunk))
+        {
+            PCGChunk->RegenerateVegetationPCG();
+        }
+    }
 }
 
 void ACubusBlockWorldActor::RemoveInvalidChunks()

@@ -51,6 +51,11 @@ public:
     )
     void CleanupVegetationPCG();
 
+    void ConfigureVegetationPCG(
+        UPCGGraphInterface* InVegetationGraph,
+        bool bInGenerateVegetationPCG
+    );
+
 protected:
     UPROPERTY(
         VisibleAnywhere,

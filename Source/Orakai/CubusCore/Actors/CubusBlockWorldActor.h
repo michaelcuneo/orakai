@@ -11,6 +11,8 @@ class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
 class UMaterialInterface;
 class UCubusGeologyProfile;
+class ACubusPCGVoxelVolumeActor;
+class UPCGGraphInterface;
 
 UCLASS(
     BlueprintType,
@@ -405,6 +407,21 @@ protected:
     )
     TObjectPtr<UCubusGeologyProfile>
         GeologyProfile = nullptr;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PCG"
+    )
+    TObjectPtr<UPCGGraphInterface>
+        VegetationPCGGraph = nullptr;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PCG"
+    )
+    bool bGenerateVegetationPCG = true;
 
     UPROPERTY(
         EditAnywhere,
