@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 class FCubusBlockChunkData;
+class UCubusGeologyProfile;
 
 /**
  * Generates deterministic block terrain using world voxel coordinates.
@@ -47,7 +48,8 @@ public:
         int32 SnowMinimumHeight,
         bool bGenerateWater,
         int32 WaterLevel,
-        int32 WaterMaterialId
+        int32 WaterMaterialId,
+        const UCubusGeologyProfile* GeologyProfile
     );
 
 private:
@@ -112,6 +114,13 @@ private:
         int32 SnowMaterialId,
         float RockSlopeThreshold,
         int32 SnowMinimumHeight
+    );
+
+    static int32 SelectSubsurfaceMaterial(
+        int32 SurfaceWorldZ,
+        int32 WorldZ,
+        int32 FallbackMaterialId,
+        const UCubusGeologyProfile* GeologyProfile
     );
 
     static FTerrainRegionWeights SampleTerrainRegions(
