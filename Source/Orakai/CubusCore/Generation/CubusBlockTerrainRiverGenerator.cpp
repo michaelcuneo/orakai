@@ -29,10 +29,6 @@ void FCubusBlockTerrainRiverGenerator::Apply(
         ChunkCoordinate.Y *
         Cubus::ChunkSize;
 
-    const int32 BaseZ =
-        ChunkCoordinate.Z *
-        Cubus::ChunkSize;
-
     const float ChannelWidth =
         FMath::Clamp(
             GeologyProfile->RiverChannelWidth,
@@ -131,7 +127,10 @@ void FCubusBlockTerrainRiverGenerator::Apply(
                 }
             }
 
-            if (HighestSolidLocalZ == INDEX_NONE)
+            if (
+                HighestSolidLocalZ == INDEX_NONE ||
+                HighestSolidLocalZ == Cubus::ChunkSize - 1
+            )
             {
                 continue;
             }
