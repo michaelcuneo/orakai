@@ -2,11 +2,13 @@
 
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
-#include "CubusCore/Data/CubusVegetationInstance.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
+#include "CubusCore/Data/CubusVegetationInstance.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
 UCubusVegetationRendererComponent::UCubusVegetationRendererComponent()
 {
@@ -21,6 +23,13 @@ void UCubusVegetationRendererComponent::OnRegister()
 
     EnsurePointComponents();
     RebuildVegetation();
+}
+
+void UCubusVegetationRendererComponent::OnUnregister()
+{
+    DestroySpawnedTreeActors();
+
+    Super::OnUnregister();
 }
 
 void UCubusVegetationRendererComponent::TickComponent(
@@ -69,6 +78,8 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
         return;
     }
 
+    UWorld* World = GetWorld();
+
     const float SafeVoxelSize =
         FMath::Max(
             1.0f,
@@ -89,14 +100,6 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
         ChunkData->GetVegetationInstances()
     )
     {
-        UInstancedStaticMeshComponent* TargetComponent =
-            ResolvePointComponentForType(Instance.TypeId);
-
-        if (!IsValid(TargetComponent))
-        {
-            continue;
-        }
-
         const FIntVector LocalVoxel =
             Instance.WorldVoxel -
             ChunkOriginVoxel;
@@ -123,8 +126,46 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
             FVector(Instance.Scale)
         );
 
-        TargetComponent->AddInstance(LocalTransform, false);
-        ++PublishedPointCount;
+        if (
+            UInstancedStaticMeshComponent* TargetComponent =
+                ResolvePointComponentForType(Instance.TypeId)
+        )
+        {
+            TargetComponent->AddInstance(LocalTransform, false);
+            ++PublishedPointCount;
+        }
+
+        if (
+            Instance.TypeId == 3 &&
+            bSpawnTreeActors &&
+            TreeActorClass != nullptr &&
+            IsValid(World)
+        )
+        {
+            FActorSpawnParameters SpawnParameters;
+            SpawnParameters.Owner = ChunkActor;
+            SpawnParameters.ObjectFlags |= RF_Transient;
+            SpawnParameters.SpawnCollisionHandlingOverride =
+                ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+            const FTransform WorldTransform =
+                LocalTransform *
+                ChunkActor->GetActorTransform();
+
+            AActor* SpawnedTree =
+                World->SpawnActor<AActor>(
+                    TreeActorClass,
+                    WorldTransform,
+                    SpawnParameters
+                );
+
+            if (IsValid(SpawnedTree))
+            {
+                SpawnedTree->SetFlags(RF_Transient);
+                SpawnedTreeActors.Add(SpawnedTree);
+                ++SpawnedTreeActorCount;
+            }
+        }
     }
 
     const UInstancedStaticMeshComponent* PointComponents[] =
@@ -151,16 +192,19 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
         LogTemp,
         Display,
         TEXT(
-            "Cubus Megaplant PCG source %s: published %d points"
+            "Cubus vegetation source %s: published %d points, spawned %d PVE trees"
         ),
         *ChunkActor->GetName(),
-        PublishedPointCount
+        PublishedPointCount,
+        SpawnedTreeActorCount
     );
 }
 
 void UCubusVegetationRendererComponent::ClearVegetation()
 {
     PublishedPointCount = 0;
+
+    DestroySpawnedTreeActors();
 
     UInstancedStaticMeshComponent* PointComponents[] =
     {
@@ -249,6 +293,20 @@ void UCubusVegetationRendererComponent::EnsurePointComponents()
     }
 }
 
+void UCubusVegetationRendererComponent::DestroySpawnedTreeActors()
+{
+    for (AActor* SpawnedTree : SpawnedTreeActors)
+    {
+        if (IsValid(SpawnedTree))
+        {
+            SpawnedTree->Destroy();
+        }
+    }
+
+    SpawnedTreeActors.Reset();
+    SpawnedTreeActorCount = 0;
+}
+
 uint32 UCubusVegetationRendererComponent::CalculatePlacementHash() const
 {
     const ACubusVoxelVolumeActor* ChunkActor =
@@ -284,6 +342,8 @@ uint32 UCubusVegetationRendererComponent::CalculatePlacementHash() const
     Hash = HashCombineFast(Hash, GetTypeHash(MarkerMesh));
     Hash = HashCombineFast(Hash, GetTypeHash(VoxelSize));
     Hash = HashCombineFast(Hash, GetTypeHash(bShowDebugMarkers));
+    Hash = HashCombineFast(Hash, GetTypeHash(bSpawnTreeActors));
+    Hash = HashCombineFast(Hash, GetTypeHash(TreeActorClass.Get()));
 
     return Hash;
 }
