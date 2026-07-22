@@ -179,6 +179,11 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
             }
         }
     }
+
+    ApplyOreRules(
+        Chunk,
+        GeologyProfile
+    );
 }
 
 int32 FCubusBlockTerrainGenerator::SelectSubsurfaceMaterial(
@@ -233,4 +238,171 @@ int32 FCubusBlockTerrainGenerator::SelectSubsurfaceMaterial(
     }
 
     return SafeFallbackMaterialId;
+}
+
+void FCubusBlockTerrainGenerator::ApplyOreRules(
+    FCubusBlockChunkData& Chunk,
+    const UCubusGeologyProfile* GeologyProfile
+)
+{
+    if (
+        !IsValid(GeologyProfile) ||
+        GeologyProfile->OreRules.IsEmpty()
+    )
+    {
+        return;
+    }
+
+    const FIntVector ChunkCoordinate =
+        Chunk.GetChunkCoordinate();
+
+    const int32 ChunkWorldBaseX =
+        ChunkCoordinate.X *
+        Cubus::ChunkSize;
+
+    const int32 ChunkWorldBaseY =
+        ChunkCoordinate.Y *
+        Cubus::ChunkSize;
+
+    const int32 ChunkWorldBaseZ =
+        ChunkCoordinate.Z *
+        Cubus::ChunkSize;
+
+    for (
+        int32 LocalZ = 0;
+        LocalZ < Cubus::ChunkSize;
+        ++LocalZ
+    )
+    {
+        const int32 WorldZ =
+            ChunkWorldBaseZ +
+            LocalZ;
+
+        for (
+            int32 LocalY = 0;
+            LocalY < Cubus::ChunkSize;
+            ++LocalY
+        )
+        {
+            const int32 WorldY =
+                ChunkWorldBaseY +
+                LocalY;
+
+            for (
+                int32 LocalX = 0;
+                LocalX < Cubus::ChunkSize;
+                ++LocalX
+            )
+            {
+                const int32 WorldX =
+                    ChunkWorldBaseX +
+                    LocalX;
+
+                FCubusBlockVoxel* Voxel =
+                    Chunk.GetVoxel(
+                        LocalX,
+                        LocalY,
+                        LocalZ
+                    );
+
+                if (
+                    Voxel == nullptr ||
+                    Voxel->MaterialId <= 0 ||
+                    Voxel->IsWater()
+                )
+                {
+                    continue;
+                }
+
+                for (
+                    const FCubusOreRule& OreRule :
+                    GeologyProfile->OreRules
+                )
+                {
+                    const int32 MinimumWorldZ =
+                        FMath::Min(
+                            OreRule.MinimumWorldZ,
+                            OreRule.MaximumWorldZ
+                        );
+
+                    const int32 MaximumWorldZ =
+                        FMath::Max(
+                            OreRule.MinimumWorldZ,
+                            OreRule.MaximumWorldZ
+                        );
+
+                    if (
+                        WorldZ < MinimumWorldZ ||
+                        WorldZ > MaximumWorldZ
+                    )
+                    {
+                        continue;
+                    }
+
+                    if (
+                        !OreRule.ReplaceableMaterialIds.IsEmpty() &&
+                        !OreRule.ReplaceableMaterialIds.Contains(
+                            Voxel->MaterialId
+                        )
+                    )
+                    {
+                        continue;
+                    }
+
+                    const float Threshold =
+                        FMath::Clamp(
+                            OreRule.Threshold,
+                            -1.0f,
+                            1.0f
+                        );
+
+                    const float NoiseValue =
+                        SampleNoise3D(
+                            WorldX,
+                            WorldY,
+                            WorldZ,
+                            OreRule.Frequency
+                        );
+
+                    if (NoiseValue < Threshold)
+                    {
+                        continue;
+                    }
+
+                    Voxel->MaterialId =
+                        FMath::Max(
+                            1,
+                            OreRule.MaterialId
+                        );
+
+                    break;
+                }
+            }
+        }
+    }
+}
+
+float FCubusBlockTerrainGenerator::SampleNoise3D(
+    const int32 WorldX,
+    const int32 WorldY,
+    const int32 WorldZ,
+    const float Frequency
+)
+{
+    const float SafeFrequency =
+        FMath::Max(
+            0.000001f,
+            Frequency
+        );
+
+    return FMath::PerlinNoise3D(
+        FVector(
+            static_cast<double>(WorldX) *
+                SafeFrequency,
+            static_cast<double>(WorldY) *
+                SafeFrequency,
+            static_cast<double>(WorldZ) *
+                SafeFrequency
+        )
+    );
 }
