@@ -87,6 +87,26 @@ void ACubusPCGVoxelVolumeActor::EndPlay(
     Super::EndPlay(EndPlayReason);
 }
 
+void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
+    UPCGGraphInterface* InVegetationGraph,
+    const bool bInGenerateVegetationPCG
+)
+{
+    const bool bGraphChanged =
+        VegetationGraph != InVegetationGraph;
+
+    VegetationGraph = InVegetationGraph;
+    bGenerateVegetationPCG =
+        bInGenerateVegetationPCG;
+
+    if (bGraphChanged)
+    {
+        LastConfiguredGraph = nullptr;
+    }
+
+    ConfigurePCGComponent();
+}
+
 void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
 {
     ConfigurePCGComponent();
