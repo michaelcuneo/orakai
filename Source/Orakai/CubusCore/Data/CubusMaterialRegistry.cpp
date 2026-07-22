@@ -59,12 +59,26 @@ bool UCubusMaterialRegistry::OccludesBlockFaces(
     const int32 MaterialId
 ) const
 {
+    if (MaterialId <= 0)
+    {
+        return false;
+    }
+
     const FCubusMaterialDefinition* Definition =
         FindMaterialDefinition(MaterialId);
 
-    return
-        Definition != nullptr &&
-        Definition->bOccludesBlockFaces;
+    /*
+     * An occupied voxel must still hide internal terrain faces when its
+     * material has not yet been added to the editor registry. Previously an
+     * unknown biome or geology material returned false here, causing the top
+     * face of the chunk below to be rendered at every vertical chunk boundary.
+     *
+     * Registered materials retain their explicit occlusion behaviour, so
+     * intentionally non-occluding materials such as glass remain supported.
+     */
+    return Definition != nullptr
+        ? Definition->bOccludesBlockFaces
+        : true;
 }
 
 void UCubusMaterialRegistry::ValidateRegistry()
