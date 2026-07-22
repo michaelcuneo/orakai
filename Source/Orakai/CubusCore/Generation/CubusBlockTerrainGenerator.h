@@ -156,6 +156,18 @@ private:
         const UCubusGeologyProfile* GeologyProfile
     );
 
+    static void ApplyOreRules(
+        FCubusBlockChunkData& Chunk,
+        const UCubusGeologyProfile* GeologyProfile
+    );
+
+    static float SampleNoise3D(
+        int32 WorldX,
+        int32 WorldY,
+        int32 WorldZ,
+        float Frequency
+    );
+
     static FTerrainRegionWeights SampleTerrainRegions(
         int32 WorldX,
         int32 WorldY,
