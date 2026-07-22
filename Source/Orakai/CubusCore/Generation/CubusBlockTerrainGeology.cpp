@@ -268,6 +268,10 @@ void FCubusBlockTerrainGenerator::ApplyOreRules(
         ChunkCoordinate.Z *
         Cubus::ChunkSize;
 
+    int32 GeneratedOreVoxelCount = 0;
+
+    TMap<int32, int32> GeneratedOreCountsByMaterial;
+
     for (
         int32 LocalZ = 0;
         LocalZ < Cubus::ChunkSize;
@@ -369,16 +373,56 @@ void FCubusBlockTerrainGenerator::ApplyOreRules(
                         continue;
                     }
 
-                    Voxel->MaterialId =
+                    const int32 OreMaterialId =
                         FMath::Max(
                             1,
                             OreRule.MaterialId
                         );
 
+                    Voxel->MaterialId =
+                        OreMaterialId;
+
+                    ++GeneratedOreVoxelCount;
+
+                    GeneratedOreCountsByMaterial.FindOrAdd(
+                        OreMaterialId
+                    )++;
+
                     break;
                 }
             }
         }
+    }
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT(
+            "Cubus geology chunk (%d, %d, %d): generated %d ore voxels"
+        ),
+        ChunkCoordinate.X,
+        ChunkCoordinate.Y,
+        ChunkCoordinate.Z,
+        GeneratedOreVoxelCount
+    );
+
+    for (
+        const TPair<int32, int32>& Entry :
+        GeneratedOreCountsByMaterial
+    )
+    {
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT(
+                "Cubus geology chunk (%d, %d, %d): material %d = %d ore voxels"
+            ),
+            ChunkCoordinate.X,
+            ChunkCoordinate.Y,
+            ChunkCoordinate.Z,
+            Entry.Key,
+            Entry.Value
+        );
     }
 }
 
