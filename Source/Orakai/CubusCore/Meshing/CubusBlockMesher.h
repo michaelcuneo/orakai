@@ -4,33 +4,53 @@
 
 #include "CubusCore/Data/CubusVoxel.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
+#include "CubusCore/Chunks/CubusBlockChunkData.h"
+#include "CubusCore/Chunks/CubusChunkConstants.h"
+
+class FCubusBlockChunkData;
+class FCubusVoxelVolume;
+class UCubusMaterialRegistry;
+struct FCubusBlockChunkNeighborhood;
+
+/**
+ * Generated mesh data grouped by voxel material ID.
+ */
+using FCubusMaterialMeshMap = TMap<int32, FCubusMeshData>;
 
 /**
  * Generates hard-edged block voxel geometry.
- *
- * This class will later accept chunk voxel data and emit only exposed faces.
- * The first implementation generates one complete voxel.
  */
 class ORAKAI_API FCubusBlockMesher
 {
 public:
-    /**
-     * Builds a single block voxel centred on the local origin.
-     *
-     * @param Voxel       Voxel data to render.
-     * @param VoxelSize   Width, depth and height of the voxel in Unreal units.
-     * @param OutMeshData Generated mesh data.
-     */
     static void BuildSingleVoxel(
         const FCubusVoxel& Voxel,
         float VoxelSize,
         FCubusMeshData& OutMeshData
     );
 
-private:
     /**
-     * Adds one quad consisting of four unique vertices and two triangles.
+     * Generates one mesh-data collection per material ID.
+     *
+     * Faces touching an occluding voxel are not generated.
      */
+    static void BuildVolume(
+        const FCubusVoxelVolume& Volume,
+        const UCubusMaterialRegistry* MaterialRegistry,
+        float VoxelSize,
+        FCubusMaterialMeshMap& OutMaterialMeshes,
+        int32& OutGeneratedFaceCount
+    );
+
+    static void BuildChunk(
+        const FCubusBlockChunkNeighborhood& Neighborhood,
+        const UCubusMaterialRegistry* MaterialRegistry,
+        float VoxelSize,
+        FCubusMaterialMeshMap& OutMaterialMeshes,
+        int32& OutGeneratedFaceCount
+    );
+
+private:
     static void AddFace(
         FCubusMeshData& MeshData,
         const FVector& Vertex0,
@@ -38,5 +58,12 @@ private:
         const FVector& Vertex2,
         const FVector& Vertex3,
         const FVector& Normal
+    );
+
+    static void AddVoxelFace(
+        FCubusMeshData& MeshData,
+        const FVector& VoxelCentre,
+        float HalfVoxelSize,
+        int32 FaceIndex
     );
 };

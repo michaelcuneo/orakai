@@ -1,24 +1,13 @@
 #pragma once
-#pragma once
 
 #include "CoreMinimal.h"
 #include "CubusVoxel.generated.h"
 
 /**
- * The basic representation used by the block-voxel system.
+ * Compact data stored for every voxel.
  *
- * Density voxels will use a separate data structure because they represent
- * scalar samples rather than discrete occupied cubes.
- */
-UENUM(BlueprintType)
-enum class ECubusVoxelType : uint8
-{
-    Air UMETA(DisplayName = "Air"),
-    Solid UMETA(DisplayName = "Solid")
-};
-
-/**
- * Data belonging to one discrete block voxel.
+ * MaterialId 0 is always reserved for empty air.
+ * All detailed properties come from UCubusMaterialRegistry.
  */
 USTRUCT(BlueprintType)
 struct ORAKAI_API FCubusVoxel
@@ -26,33 +15,17 @@ struct ORAKAI_API FCubusVoxel
     GENERATED_BODY()
 
 public:
-    /**
-     * Determines whether the voxel occupies space.
-     */
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Voxel"
-    )
-    ECubusVoxelType Type = ECubusVoxelType::Solid;
-
-    /**
-     * Identifier used later by chunk material palettes.
-     *
-     * This is deliberately an ID rather than a direct material pointer.
-     * Thousands of voxels should not each carry a UObject reference.
-     */
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
         Category = "Cubus|Voxel",
-        meta = (ClampMin = "0")
+        meta = (
+            ClampMin = "0",
+            ClampMax = "65535"
+        )
     )
     int32 MaterialId = 0;
 
-    /**
-     * Optional flags reserved for voxel behaviour.
-     */
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
@@ -61,13 +34,13 @@ public:
     )
     uint8 Flags = 0;
 
-    FORCEINLINE bool IsSolid() const
+    FORCEINLINE bool IsEmpty() const
     {
-        return Type != ECubusVoxelType::Air;
+        return MaterialId == 0;
     }
 
-    FORCEINLINE bool IsAir() const
+    FORCEINLINE bool HasMaterial() const
     {
-        return Type == ECubusVoxelType::Air;
+        return MaterialId != 0;
     }
 };

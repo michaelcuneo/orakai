@@ -21,8 +21,8 @@ ACubusVoxelActor::ACubusVoxelActor()
     ProceduralMesh->SetCastShadow(true);
     ProceduralMesh->SetMobility(EComponentMobility::Movable);
 
-    Voxel.Type = ECubusVoxelType::Solid;
-    Voxel.MaterialId = 0;
+    Voxel.MaterialId = 1;
+    Voxel.Flags = 0;
 }
 
 void ACubusVoxelActor::OnConstruction(

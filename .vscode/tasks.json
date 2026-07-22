@@ -13,7 +13,10 @@
                 "OrakaiEditor",
                 "Win64",
                 "Development",
-                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                {
+                    "value": "-project=${workspaceFolder}\\Orakai.uproject",
+                    "quoting": "strong"
+                },
                 "-waitmutex"
             ],
             "problemMatcher": "$msCompile"
@@ -27,7 +30,10 @@
                 "OrakaiEditor",
                 "Win64",
                 "DebugGame",
-                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                {
+                    "value": "-project=${workspaceFolder}\\Orakai.uproject",
+                    "quoting": "strong"
+                },
                 "-waitmutex"
             ],
             "problemMatcher": "$msCompile"
@@ -41,7 +47,10 @@
                 "Orakai",
                 "Win64",
                 "Development",
-                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                {
+                    "value": "-project=${workspaceFolder}\\Orakai.uproject",
+                    "quoting": "strong"
+                },
                 "-waitmutex"
             ],
             "problemMatcher": "$msCompile"
@@ -55,7 +64,10 @@
                 "OrakaiEditor",
                 "Win64",
                 "Development",
-                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                {
+                    "value": "-project=${workspaceFolder}\\Orakai.uproject",
+                    "quoting": "strong"
+                },
                 "-waitmutex"
             ],
             "problemMatcher": "$msCompile"
@@ -69,7 +81,10 @@
                 "OrakaiEditor",
                 "Win64",
                 "Development",
-                "-project=\"${workspaceFolder}\\Orakai.uproject\"",
+                {
+                    "value": "-project=${workspaceFolder}\\Orakai.uproject",
+                    "quoting": "strong"
+                },
                 "-waitmutex"
             ],
             "problemMatcher": "$msCompile"

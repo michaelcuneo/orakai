@@ -41,6 +41,11 @@ public class Orakai : ModuleRules
 			"Orakai/Variant_SideScrolling/UI"
 		});
 
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.Add("UnrealEd");
+		}
+
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
 
