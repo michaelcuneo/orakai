@@ -122,14 +122,84 @@ public:
     UPROPERTY(
         EditAnywhere,
         BlueprintReadOnly,
-        Category = "Cubus|Geology"
+        Category = "Cubus|Geology|Strata"
     )
     TArray<FCubusStrataLayer> StrataLayers;
 
     UPROPERTY(
         EditAnywhere,
         BlueprintReadOnly,
-        Category = "Cubus|Geology"
+        Category = "Cubus|Geology|Caves"
+    )
+    bool bGenerateCaves = false;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Caves"
+    )
+    int32 CaveMinimumWorldZ = -256;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Caves"
+    )
+    int32 CaveMaximumWorldZ = 24;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Caves",
+        meta = (
+            ClampMin = "1",
+            UIMin = "1",
+            UIMax = "32"
+        )
+    )
+    int32 CaveSurfaceClearance = 5;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Caves",
+        meta = (
+            ClampMin = "0.000001",
+            UIMin = "0.005",
+            UIMax = "0.2"
+        )
+    )
+    float CavePrimaryFrequency = 0.035f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Caves",
+        meta = (
+            ClampMin = "0.000001",
+            UIMin = "0.005",
+            UIMax = "0.2"
+        )
+    )
+    float CaveSecondaryFrequency = 0.07f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Caves",
+        meta = (
+            ClampMin = "0.0",
+            ClampMax = "1.0",
+            UIMin = "0.0",
+            UIMax = "1.0"
+        )
+    )
+    float CaveThreshold = 0.16f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Geology|Ore"
     )
     TArray<FCubusOreRule> OreRules;
 };
