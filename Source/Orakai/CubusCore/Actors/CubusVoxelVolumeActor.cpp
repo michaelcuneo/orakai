@@ -178,7 +178,6 @@ void ACubusVoxelVolumeActor::FillVolume()
     SolidVoxel.Flags = 0;
 
     ChunkData->Fill(SolidVoxel);
-
     RebuildVolume();
 }
 
@@ -207,7 +206,6 @@ void ACubusVoxelVolumeActor::RebuildVolume()
         FPlatformTime::Seconds();
 
     ProceduralMesh->ClearAllMeshSections();
-
     ResetDiagnostics();
 
     FCubusMaterialMeshMap MaterialMeshes;
@@ -783,7 +781,8 @@ void ACubusVoxelVolumeActor::GenerateHeightTerrain()
         TerrainSnowMinimumHeight,
         bGenerateWater,
         TerrainWaterLevel,
-        TerrainWaterMaterialId
+        TerrainWaterMaterialId,
+        GeologyProfile.Get()
     );
 }
 
