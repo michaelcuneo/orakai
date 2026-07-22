@@ -138,20 +138,20 @@ void ACubusPCGVoxelVolumeActor::CleanupVegetationPCG()
 
 uint32 ACubusPCGVoxelVolumeActor::CalculateVegetationPlacementHash() const
 {
-    const FCubusBlockChunkData* ChunkData = GetChunkData();
+    const FCubusBlockChunkData* CurrentChunkData = GetChunkData();
 
-    if (ChunkData == nullptr)
+    if (CurrentChunkData == nullptr)
     {
         return 0;
     }
 
     uint32 Hash = GetTypeHash(
-        ChunkData->GetVegetationInstances().Num()
+        CurrentChunkData->GetVegetationInstances().Num()
     );
 
     for (
         const FCubusVegetationInstance& Instance :
-        ChunkData->GetVegetationInstances()
+        CurrentChunkData->GetVegetationInstances()
     )
     {
         Hash = HashCombineFast(
