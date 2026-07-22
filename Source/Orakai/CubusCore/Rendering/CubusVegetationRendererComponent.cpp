@@ -18,7 +18,7 @@ void UCubusVegetationRendererComponent::OnRegister()
 {
     Super::OnRegister();
 
-    EnsureInstanceComponents();
+    EnsurePointComponents();
     RebuildVegetation();
 }
 
@@ -49,33 +49,40 @@ void UCubusVegetationRendererComponent::TickComponent(
 
 void UCubusVegetationRendererComponent::RebuildVegetation()
 {
-    EnsureInstanceComponents();
+    EnsurePointComponents();
     ClearVegetation();
 
-    ACubusVoxelVolumeActor* ChunkActor = Cast<ACubusVoxelVolumeActor>(GetOwner());
+    ACubusVoxelVolumeActor* ChunkActor =
+        Cast<ACubusVoxelVolumeActor>(GetOwner());
 
     if (!IsValid(ChunkActor))
     {
         return;
     }
 
-    const FCubusBlockChunkData* ChunkData = ChunkActor->GetChunkData();
+    const FCubusBlockChunkData* ChunkData =
+        ChunkActor->GetChunkData();
 
     if (ChunkData == nullptr)
     {
         return;
     }
 
-    const FTransform OwnerTransform = ChunkActor->GetActorTransform();
-    const float SafeVoxelSize = FMath::Max(1.0f, VoxelSize);
+    const FTransform OwnerTransform =
+        ChunkActor->GetActorTransform();
 
-    for (const FCubusVegetationInstance& Instance : ChunkData->GetVegetationInstances())
+    const float SafeVoxelSize =
+        FMath::Max(1.0f, VoxelSize);
+
+    for (
+        const FCubusVegetationInstance& Instance :
+        ChunkData->GetVegetationInstances()
+    )
     {
-        UInstancedStaticMeshComponent* TargetComponent = ResolveComponentForType(
-            Instance.TypeId
-        );
+        UInstancedStaticMeshComponent* TargetComponent =
+            ResolvePointComponentForType(Instance.TypeId);
 
-        if (!IsValid(TargetComponent) || !IsValid(TargetComponent->GetStaticMesh()))
+        if (!IsValid(TargetComponent))
         {
             continue;
         }
@@ -86,9 +93,8 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
             static_cast<double>(Instance.WorldVoxel.Z) * SafeVoxelSize
         );
 
-        const FVector LocalLocation = OwnerTransform.InverseTransformPosition(
-            WorldLocation
-        );
+        const FVector LocalLocation =
+            OwnerTransform.InverseTransformPosition(WorldLocation);
 
         const FTransform LocalTransform(
             FRotator(0.0f, Instance.RotationYaw, 0.0f),
@@ -97,28 +103,25 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
         );
 
         TargetComponent->AddInstance(LocalTransform, false);
-        ++RenderedInstanceCount;
+        ++PublishedPointCount;
     }
 
-    if (IsValid(GrassInstances))
+    const UInstancedStaticMeshComponent* PointComponents[] =
     {
-        GrassInstances->MarkRenderStateDirty();
-    }
-    if (IsValid(ShrubInstances))
+        GrassPoints,
+        ShrubPoints,
+        TreePoints,
+        ReedsPoints,
+        AlpinePoints
+    };
+
+    for (const UInstancedStaticMeshComponent* PointComponent : PointComponents)
     {
-        ShrubInstances->MarkRenderStateDirty();
-    }
-    if (IsValid(TreeInstances))
-    {
-        TreeInstances->MarkRenderStateDirty();
-    }
-    if (IsValid(ReedsInstances))
-    {
-        ReedsInstances->MarkRenderStateDirty();
-    }
-    if (IsValid(AlpineInstances))
-    {
-        AlpineInstances->MarkRenderStateDirty();
+        if (IsValid(PointComponent))
+        {
+            const_cast<UInstancedStaticMeshComponent*>(PointComponent)
+                ->MarkRenderStateDirty();
+        }
     }
 
     LastPlacementHash = CalculatePlacementHash();
@@ -126,142 +129,130 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus vegetation renderer %s: rendered %d ISM instances"),
+        TEXT(
+            "Cubus Megaplant PCG source %s: published %d points"
+        ),
         *ChunkActor->GetName(),
-        RenderedInstanceCount
+        PublishedPointCount
     );
 }
 
 void UCubusVegetationRendererComponent::ClearVegetation()
 {
-    RenderedInstanceCount = 0;
+    PublishedPointCount = 0;
 
-    if (IsValid(GrassInstances))
+    UInstancedStaticMeshComponent* PointComponents[] =
     {
-        GrassInstances->ClearInstances();
-    }
-    if (IsValid(ShrubInstances))
+        GrassPoints,
+        ShrubPoints,
+        TreePoints,
+        ReedsPoints,
+        AlpinePoints
+    };
+
+    for (UInstancedStaticMeshComponent* PointComponent : PointComponents)
     {
-        ShrubInstances->ClearInstances();
-    }
-    if (IsValid(TreeInstances))
-    {
-        TreeInstances->ClearInstances();
-    }
-    if (IsValid(ReedsInstances))
-    {
-        ReedsInstances->ClearInstances();
-    }
-    if (IsValid(AlpineInstances))
-    {
-        AlpineInstances->ClearInstances();
+        if (IsValid(PointComponent))
+        {
+            PointComponent->ClearInstances();
+        }
     }
 }
 
-void UCubusVegetationRendererComponent::EnsureInstanceComponents()
+void UCubusVegetationRendererComponent::EnsurePointComponents()
 {
-    AActor* Owner = GetOwner();
-
-    if (!IsValid(Owner))
+    if (!IsValid(GetOwner()))
     {
         return;
     }
 
-    if (!IsValid(GrassInstances))
+    if (!IsValid(GrassPoints))
     {
-        GrassInstances = CreateInstanceComponent(
-            TEXT("CubusGrassInstances"),
-            GrassMesh,
-            false,
-            bCastSmallVegetationShadows
-        );
-    }
-    else
-    {
-        GrassInstances->SetStaticMesh(GrassMesh);
-    }
-
-    if (!IsValid(ShrubInstances))
-    {
-        ShrubInstances = CreateInstanceComponent(
-            TEXT("CubusShrubInstances"),
-            ShrubMesh,
-            false,
-            bCastSmallVegetationShadows
-        );
-    }
-    else
-    {
-        ShrubInstances->SetStaticMesh(ShrubMesh);
-    }
-
-    if (!IsValid(TreeInstances))
-    {
-        TreeInstances = CreateInstanceComponent(
-            TEXT("CubusTreeInstances"),
-            TreeMesh,
-            bEnableTreeCollision,
-            bCastTreeShadows
-        );
-    }
-    else
-    {
-        TreeInstances->SetStaticMesh(TreeMesh);
-        TreeInstances->SetCollisionEnabled(
-            bEnableTreeCollision
-                ? ECollisionEnabled::QueryAndPhysics
-                : ECollisionEnabled::NoCollision
+        GrassPoints = CreatePointComponent(
+            TEXT("CubusGrassPoints"),
+            TEXT("Cubus.Vegetation.Grass")
         );
     }
 
-    if (!IsValid(ReedsInstances))
+    if (!IsValid(ShrubPoints))
     {
-        ReedsInstances = CreateInstanceComponent(
-            TEXT("CubusReedsInstances"),
-            ReedsMesh,
-            false,
-            bCastSmallVegetationShadows
+        ShrubPoints = CreatePointComponent(
+            TEXT("CubusShrubPoints"),
+            TEXT("Cubus.Vegetation.Shrub")
         );
-    }
-    else
-    {
-        ReedsInstances->SetStaticMesh(ReedsMesh);
     }
 
-    if (!IsValid(AlpineInstances))
+    if (!IsValid(TreePoints))
     {
-        AlpineInstances = CreateInstanceComponent(
-            TEXT("CubusAlpineInstances"),
-            AlpineMesh,
-            false,
-            bCastSmallVegetationShadows
+        TreePoints = CreatePointComponent(
+            TEXT("CubusTreePoints"),
+            TEXT("Cubus.Vegetation.Tree")
         );
     }
-    else
+
+    if (!IsValid(ReedsPoints))
     {
-        AlpineInstances->SetStaticMesh(AlpineMesh);
+        ReedsPoints = CreatePointComponent(
+            TEXT("CubusReedsPoints"),
+            TEXT("Cubus.Vegetation.Reeds")
+        );
+    }
+
+    if (!IsValid(AlpinePoints))
+    {
+        AlpinePoints = CreatePointComponent(
+            TEXT("CubusAlpinePoints"),
+            TEXT("Cubus.Vegetation.Alpine")
+        );
+    }
+
+    UInstancedStaticMeshComponent* PointComponents[] =
+    {
+        GrassPoints,
+        ShrubPoints,
+        TreePoints,
+        ReedsPoints,
+        AlpinePoints
+    };
+
+    for (UInstancedStaticMeshComponent* PointComponent : PointComponents)
+    {
+        if (!IsValid(PointComponent))
+        {
+            continue;
+        }
+
+        PointComponent->SetStaticMesh(MarkerMesh);
+        PointComponent->SetVisibility(bShowDebugMarkers, true);
+        PointComponent->SetHiddenInGame(!bShowDebugMarkers, true);
     }
 }
 
 uint32 UCubusVegetationRendererComponent::CalculatePlacementHash() const
 {
-    const ACubusVoxelVolumeActor* ChunkActor = Cast<ACubusVoxelVolumeActor>(GetOwner());
+    const ACubusVoxelVolumeActor* ChunkActor =
+        Cast<ACubusVoxelVolumeActor>(GetOwner());
 
     if (!IsValid(ChunkActor))
     {
         return 0;
     }
 
-    const FCubusBlockChunkData* ChunkData = ChunkActor->GetChunkData();
+    const FCubusBlockChunkData* ChunkData =
+        ChunkActor->GetChunkData();
 
     if (ChunkData == nullptr)
     {
         return 0;
     }
 
-    uint32 Hash = GetTypeHash(ChunkData->GetVegetationInstances().Num());
+    uint32 Hash =
+        GetTypeHash(ChunkData->GetVegetationInstances().Num());
 
-    for (const FCubusVegetationInstance& Instance : ChunkData->GetVegetationInstances())
+    for (
+        const FCubusVegetationInstance& Instance :
+        ChunkData->GetVegetationInstances()
+    )
     {
         Hash = HashCombineFast(Hash, GetTypeHash(Instance.WorldVoxel));
         Hash = HashCombineFast(Hash, GetTypeHash(Instance.TypeId));
@@ -269,21 +260,17 @@ uint32 UCubusVegetationRendererComponent::CalculatePlacementHash() const
         Hash = HashCombineFast(Hash, GetTypeHash(Instance.Scale));
     }
 
-    Hash = HashCombineFast(Hash, GetTypeHash(GrassMesh));
-    Hash = HashCombineFast(Hash, GetTypeHash(ShrubMesh));
-    Hash = HashCombineFast(Hash, GetTypeHash(TreeMesh));
-    Hash = HashCombineFast(Hash, GetTypeHash(ReedsMesh));
-    Hash = HashCombineFast(Hash, GetTypeHash(AlpineMesh));
+    Hash = HashCombineFast(Hash, GetTypeHash(MarkerMesh));
     Hash = HashCombineFast(Hash, GetTypeHash(VoxelSize));
+    Hash = HashCombineFast(Hash, GetTypeHash(bShowDebugMarkers));
 
     return Hash;
 }
 
-UInstancedStaticMeshComponent* UCubusVegetationRendererComponent::CreateInstanceComponent(
+UInstancedStaticMeshComponent*
+UCubusVegetationRendererComponent::CreatePointComponent(
     const FName ComponentName,
-    UStaticMesh* Mesh,
-    const bool bEnableCollision,
-    const bool bCastShadow
+    const FName ComponentTag
 )
 {
     AActor* Owner = GetOwner();
@@ -293,11 +280,12 @@ UInstancedStaticMeshComponent* UCubusVegetationRendererComponent::CreateInstance
         return nullptr;
     }
 
-    UInstancedStaticMeshComponent* Component = NewObject<UInstancedStaticMeshComponent>(
-        Owner,
-        ComponentName,
-        RF_Transactional
-    );
+    UInstancedStaticMeshComponent* Component =
+        NewObject<UInstancedStaticMeshComponent>(
+            Owner,
+            ComponentName,
+            RF_Transactional
+        );
 
     if (!IsValid(Component))
     {
@@ -306,36 +294,37 @@ UInstancedStaticMeshComponent* UCubusVegetationRendererComponent::CreateInstance
 
     Component->SetupAttachment(Owner->GetRootComponent());
     Component->SetMobility(EComponentMobility::Static);
-    Component->SetStaticMesh(Mesh);
-    Component->SetCastShadow(bCastShadow);
-    Component->SetCollisionEnabled(
-        bEnableCollision
-            ? ECollisionEnabled::QueryAndPhysics
-            : ECollisionEnabled::NoCollision
-    );
+    Component->SetStaticMesh(MarkerMesh);
+    Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Component->SetGenerateOverlapEvents(false);
+    Component->SetCastShadow(false);
+    Component->SetCanEverAffectNavigation(false);
+    Component->ComponentTags.AddUnique(ComponentTag);
+    Component->SetVisibility(bShowDebugMarkers, true);
+    Component->SetHiddenInGame(!bShowDebugMarkers, true);
     Component->RegisterComponent();
     Owner->AddInstanceComponent(Component);
 
     return Component;
 }
 
-UInstancedStaticMeshComponent* UCubusVegetationRendererComponent::ResolveComponentForType(
+UInstancedStaticMeshComponent*
+UCubusVegetationRendererComponent::ResolvePointComponentForType(
     const int32 TypeId
 ) const
 {
     switch (TypeId)
     {
         case 1:
-            return GrassInstances;
+            return GrassPoints;
         case 2:
-            return ShrubInstances;
+            return ShrubPoints;
         case 3:
-            return TreeInstances;
+            return TreePoints;
         case 4:
-            return ReedsInstances;
+            return ReedsPoints;
         case 5:
-            return AlpineInstances;
+            return AlpinePoints;
         default:
             return nullptr;
     }
