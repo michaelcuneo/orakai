@@ -18,83 +18,52 @@ void FCubusBlockTerrainRiverGenerator::Apply(
 
     if (GeologyProfile->bGenerateRivers)
     {
-        const FIntVector ChunkCoordinate =
-            Chunk.GetChunkCoordinate();
+        const FIntVector ChunkCoordinate = Chunk.GetChunkCoordinate();
+        const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
+        const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
 
-        const int32 BaseX =
-            ChunkCoordinate.X *
-            Cubus::ChunkSize;
-
-        const int32 BaseY =
-            ChunkCoordinate.Y *
-            Cubus::ChunkSize;
-
-        const float ChannelWidth =
-            FMath::Clamp(
-                GeologyProfile->RiverChannelWidth,
-                0.0f,
-                1.0f
-            );
-
-        const float ValleyWidth =
-            FMath::Max(
-                ChannelWidth + 0.0001f,
-                GeologyProfile->RiverValleyWidth
-            );
-
-        const int32 ChannelDepth =
-            FMath::Max(
-                1,
-                GeologyProfile->RiverChannelDepth
-            );
-
-        const int32 WaterDepth =
-            FMath::Max(
-                1,
-                GeologyProfile->RiverWaterDepth
-            );
-
-        const int32 RiverbedMaterialId =
-            FMath::Max(
-                1,
-                GeologyProfile->RiverbedMaterialId
-            );
-
-        const int32 RiverWaterMaterialId =
-            FMath::Max(
-                1,
-                GeologyProfile->RiverWaterMaterialId
-            );
+        const float ChannelWidth = FMath::Clamp(
+            GeologyProfile->RiverChannelWidth,
+            0.0f,
+            1.0f
+        );
+        const float ValleyWidth = FMath::Max(
+            ChannelWidth + 0.0001f,
+            GeologyProfile->RiverValleyWidth
+        );
+        const int32 ChannelDepth = FMath::Max(
+            1,
+            GeologyProfile->RiverChannelDepth
+        );
+        const int32 WaterDepth = FMath::Max(
+            1,
+            GeologyProfile->RiverWaterDepth
+        );
+        const int32 RiverbedMaterialId = FMath::Max(
+            1,
+            GeologyProfile->RiverbedMaterialId
+        );
+        const int32 RiverWaterMaterialId = FMath::Max(
+            1,
+            GeologyProfile->RiverWaterMaterialId
+        );
 
         int32 RiverColumnCount = 0;
         int32 RiverWaterVoxelCount = 0;
+        int32 BuriedColumnCount = 0;
 
-        for (
-            int32 LocalY = 0;
-            LocalY < Cubus::ChunkSize;
-            ++LocalY
-        )
+        for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
         {
-            const int32 WorldY =
-                BaseY +
-                LocalY;
+            const int32 WorldY = BaseY + LocalY;
 
-            for (
-                int32 LocalX = 0;
-                LocalX < Cubus::ChunkSize;
-                ++LocalX
-            )
+            for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
             {
-                const int32 WorldX =
-                    BaseX +
-                    LocalX;
-
-                const float RiverDistance =
-                    SampleRiverDistance(
-                        WorldX,
-                        WorldY,
-                        GeologyProfile
-                    );
+                const int32 WorldX = BaseX + LocalX;
+                const float RiverDistance = SampleRiverDistance(
+                    WorldX,
+                    WorldY,
+                    GeologyProfile
+                );
 
                 if (RiverDistance >= ValleyWidth)
                 {
@@ -103,18 +72,13 @@ void FCubusBlockTerrainRiverGenerator::Apply(
 
                 int32 HighestSolidLocalZ = INDEX_NONE;
 
-                for (
-                    int32 LocalZ = Cubus::ChunkSize - 1;
-                    LocalZ >= 0;
-                    --LocalZ
-                )
+                for (int32 LocalZ = Cubus::ChunkSize - 1; LocalZ >= 0; --LocalZ)
                 {
-                    const FCubusBlockVoxel* Voxel =
-                        Chunk.GetVoxel(
-                            LocalX,
-                            LocalY,
-                            LocalZ
-                        );
+                    const FCubusBlockVoxel* Voxel = Chunk.GetVoxel(
+                        LocalX,
+                        LocalY,
+                        LocalZ
+                    );
 
                     if (
                         Voxel != nullptr &&
@@ -132,42 +96,46 @@ void FCubusBlockTerrainRiverGenerator::Apply(
                     continue;
                 }
 
-                const float ValleyInfluence =
-                    1.0f -
-                    SmoothStep(
-                        ChannelWidth,
-                        ValleyWidth,
-                        RiverDistance
-                    );
+                // A solid voxel on the upper chunk boundary may continue into the
+                // chunk above. Do not interpret it as an exposed world surface.
+                if (HighestSolidLocalZ == Cubus::ChunkSize - 1)
+                {
+                    ++BuriedColumnCount;
+                    continue;
+                }
 
-                const bool bInsideChannel =
-                    RiverDistance <=
-                    ChannelWidth;
+                const FCubusBlockVoxel* AboveVoxel = Chunk.GetVoxel(
+                    LocalX,
+                    LocalY,
+                    HighestSolidLocalZ + 1
+                );
 
-                const int32 ValleyLowering =
-                    FMath::RoundToInt(
-                        FMath::Max(
-                            0.0f,
-                            GeologyProfile->RiverValleyDepth
-                        ) *
-                        ValleyInfluence
-                    );
+                if (
+                    AboveVoxel != nullptr &&
+                    (AboveVoxel->MaterialId > 0 || AboveVoxel->IsWater())
+                )
+                {
+                    ++BuriedColumnCount;
+                    continue;
+                }
 
-                const int32 TotalLowering =
-                    ValleyLowering +
-                    (
-                        bInsideChannel
-                            ? ChannelDepth
-                            : 0
-                    );
-
-                const int32 TargetSurfaceLocalZ =
-                    FMath::Clamp(
-                        HighestSolidLocalZ -
-                        TotalLowering,
-                        0,
-                        Cubus::ChunkSize - 1
-                    );
+                const float ValleyInfluence = 1.0f - SmoothStep(
+                    ChannelWidth,
+                    ValleyWidth,
+                    RiverDistance
+                );
+                const bool bInsideChannel = RiverDistance <= ChannelWidth;
+                const int32 ValleyLowering = FMath::RoundToInt(
+                    FMath::Max(0.0f, GeologyProfile->RiverValleyDepth) *
+                    ValleyInfluence
+                );
+                const int32 TotalLowering = ValleyLowering +
+                    (bInsideChannel ? ChannelDepth : 0);
+                const int32 TargetSurfaceLocalZ = FMath::Clamp(
+                    HighestSolidLocalZ - TotalLowering,
+                    0,
+                    Cubus::ChunkSize - 1
+                );
 
                 if (TargetSurfaceLocalZ >= HighestSolidLocalZ)
                 {
@@ -180,12 +148,11 @@ void FCubusBlockTerrainRiverGenerator::Apply(
                     ++LocalZ
                 )
                 {
-                    FCubusBlockVoxel* Voxel =
-                        Chunk.GetVoxel(
-                            LocalX,
-                            LocalY,
-                            LocalZ
-                        );
+                    FCubusBlockVoxel* Voxel = Chunk.GetVoxel(
+                        LocalX,
+                        LocalY,
+                        LocalZ
+                    );
 
                     if (Voxel == nullptr)
                     {
@@ -196,18 +163,15 @@ void FCubusBlockTerrainRiverGenerator::Apply(
                     Voxel->SetWater(false);
                 }
 
-                FCubusBlockVoxel* RiverbedVoxel =
-                    Chunk.GetVoxel(
-                        LocalX,
-                        LocalY,
-                        TargetSurfaceLocalZ
-                    );
+                FCubusBlockVoxel* RiverbedVoxel = Chunk.GetVoxel(
+                    LocalX,
+                    LocalY,
+                    TargetSurfaceLocalZ
+                );
 
                 if (RiverbedVoxel != nullptr)
                 {
-                    RiverbedVoxel->MaterialId =
-                        RiverbedMaterialId;
-
+                    RiverbedVoxel->MaterialId = RiverbedMaterialId;
                     RiverbedVoxel->SetWater(false);
                 }
 
@@ -218,12 +182,10 @@ void FCubusBlockTerrainRiverGenerator::Apply(
 
                 ++RiverColumnCount;
 
-                const int32 WaterTopLocalZ =
-                    FMath::Min(
-                        HighestSolidLocalZ,
-                        TargetSurfaceLocalZ +
-                        WaterDepth
-                    );
+                const int32 WaterTopLocalZ = FMath::Min(
+                    HighestSolidLocalZ,
+                    TargetSurfaceLocalZ + WaterDepth
+                );
 
                 for (
                     int32 LocalZ = TargetSurfaceLocalZ + 1;
@@ -231,21 +193,18 @@ void FCubusBlockTerrainRiverGenerator::Apply(
                     ++LocalZ
                 )
                 {
-                    FCubusBlockVoxel* WaterVoxel =
-                        Chunk.GetVoxel(
-                            LocalX,
-                            LocalY,
-                            LocalZ
-                        );
+                    FCubusBlockVoxel* WaterVoxel = Chunk.GetVoxel(
+                        LocalX,
+                        LocalY,
+                        LocalZ
+                    );
 
                     if (WaterVoxel == nullptr)
                     {
                         continue;
                     }
 
-                    WaterVoxel->MaterialId =
-                        RiverWaterMaterialId;
-
+                    WaterVoxel->MaterialId = RiverWaterMaterialId;
                     WaterVoxel->SetWater(true);
                     ++RiverWaterVoxelCount;
                 }
@@ -255,14 +214,13 @@ void FCubusBlockTerrainRiverGenerator::Apply(
         UE_LOG(
             LogTemp,
             Display,
-            TEXT(
-                "Cubus rivers chunk (%d, %d, %d): %d channel columns, %d water voxels"
-            ),
+            TEXT("Cubus rivers chunk (%d, %d, %d): %d channel columns, %d water voxels, buried skipped %d"),
             ChunkCoordinate.X,
             ChunkCoordinate.Y,
             ChunkCoordinate.Z,
             RiverColumnCount,
-            RiverWaterVoxelCount
+            RiverWaterVoxelCount,
+            BuriedColumnCount
         );
     }
 
@@ -278,59 +236,38 @@ float FCubusBlockTerrainRiverGenerator::SampleRiverDistance(
     const UCubusGeologyProfile* GeologyProfile
 )
 {
-    const float RiverFrequency =
-        FMath::Max(
-            0.000001f,
-            GeologyProfile->RiverFrequency
-        );
+    const float RiverFrequency = FMath::Max(
+        0.000001f,
+        GeologyProfile->RiverFrequency
+    );
+    const float WarpFrequency = FMath::Max(
+        0.000001f,
+        GeologyProfile->RiverWarpFrequency
+    );
+    const float WarpAmplitude = FMath::Max(
+        0.0f,
+        GeologyProfile->RiverWarpAmplitude
+    );
 
-    const float WarpFrequency =
-        FMath::Max(
-            0.000001f,
-            GeologyProfile->RiverWarpFrequency
-        );
+    const float WarpX = FMath::PerlinNoise2D(
+        FVector2D(
+            static_cast<double>(WorldX) * WarpFrequency,
+            static_cast<double>(WorldY) * WarpFrequency
+        )
+    ) * WarpAmplitude;
 
-    const float WarpAmplitude =
-        FMath::Max(
-            0.0f,
-            GeologyProfile->RiverWarpAmplitude
-        );
-
-    const float WarpX =
-        FMath::PerlinNoise2D(
-            FVector2D(
-                static_cast<double>(WorldX) *
-                    WarpFrequency,
-                static_cast<double>(WorldY) *
-                    WarpFrequency
-            )
-        ) *
-        WarpAmplitude;
-
-    const float WarpY =
-        FMath::PerlinNoise2D(
-            FVector2D(
-                static_cast<double>(WorldX + 7919) *
-                    WarpFrequency,
-                static_cast<double>(WorldY - 3571) *
-                    WarpFrequency
-            )
-        ) *
-        WarpAmplitude;
+    const float WarpY = FMath::PerlinNoise2D(
+        FVector2D(
+            static_cast<double>(WorldX + 7919) * WarpFrequency,
+            static_cast<double>(WorldY - 3571) * WarpFrequency
+        )
+    ) * WarpAmplitude;
 
     return FMath::Abs(
         FMath::PerlinNoise2D(
             FVector2D(
-                (
-                    static_cast<double>(WorldX) +
-                    WarpX
-                ) *
-                RiverFrequency,
-                (
-                    static_cast<double>(WorldY) +
-                    WarpY
-                ) *
-                RiverFrequency
+                (static_cast<double>(WorldX) + WarpX) * RiverFrequency,
+                (static_cast<double>(WorldY) + WarpY) * RiverFrequency
             )
         )
     );
@@ -344,30 +281,15 @@ float FCubusBlockTerrainRiverGenerator::SmoothStep(
 {
     if (FMath::IsNearlyEqual(EdgeMinimum, EdgeMaximum))
     {
-        return Value >= EdgeMaximum
-            ? 1.0f
-            : 0.0f;
+        return Value >= EdgeMaximum ? 1.0f : 0.0f;
     }
 
-    const float Alpha =
-        FMath::Clamp(
-            (
-                Value -
-                EdgeMinimum
-            ) /
-            (
-                EdgeMaximum -
-                EdgeMinimum
-            ),
-            0.0f,
-            1.0f
-        );
+    const float Alpha = FMath::Clamp(
+        (Value - EdgeMinimum) /
+        (EdgeMaximum - EdgeMinimum),
+        0.0f,
+        1.0f
+    );
 
-    return Alpha *
-        Alpha *
-        (
-            3.0f -
-            2.0f *
-            Alpha
-        );
+    return Alpha * Alpha * (3.0f - 2.0f * Alpha);
 }
