@@ -3,19 +3,16 @@
 #include "CoreMinimal.h"
 
 #include "CubusCore/Data/CubusBlockVoxel.h"
+#include "CubusCore/Data/CubusVegetationInstance.h"
 
 /**
  * Fixed-size block voxel storage for one Cubus chunk.
- *
- * This class contains no UObject or Actor state and can later
- * be copied or read safely by asynchronous chunk-build tasks.
  */
 class ORAKAI_API FCubusBlockChunkData
 {
 public:
     explicit FCubusBlockChunkData(
-        const FIntVector& InChunkCoordinate =
-            FIntVector::ZeroValue
+        const FIntVector& InChunkCoordinate = FIntVector::ZeroValue
     );
 
     const FIntVector& GetChunkCoordinate() const
@@ -23,9 +20,7 @@ public:
         return ChunkCoordinate;
     }
 
-    void SetChunkCoordinate(
-        const FIntVector& InChunkCoordinate
-    )
+    void SetChunkCoordinate(const FIntVector& InChunkCoordinate)
     {
         ChunkCoordinate = InChunkCoordinate;
     }
@@ -36,102 +31,58 @@ public:
     }
 
     int32 GetOccupiedVoxelCount() const;
-
     bool HasAnyOccupiedVoxel() const;
 
-    bool IsEmpty(
-        int32 X,
-        int32 Y,
-        int32 Z
-    ) const;
+    bool IsEmpty(int32 X, int32 Y, int32 Z) const;
+    bool IsEmpty(const FIntVector& LocalCoordinate) const;
 
-    bool IsEmpty(
-        const FIntVector& LocalCoordinate
-    ) const;
+    FCubusBlockVoxel* GetVoxel(int32 X, int32 Y, int32 Z);
+    const FCubusBlockVoxel* GetVoxel(int32 X, int32 Y, int32 Z) const;
+    FCubusBlockVoxel* GetVoxel(const FIntVector& LocalCoordinate);
+    const FCubusBlockVoxel* GetVoxel(const FIntVector& LocalCoordinate) const;
 
-    FCubusBlockVoxel* GetVoxel(
-        int32 X,
-        int32 Y,
-        int32 Z
-    );
+    FCubusBlockVoxel& GetVoxelChecked(int32 X, int32 Y, int32 Z);
+    const FCubusBlockVoxel& GetVoxelChecked(int32 X, int32 Y, int32 Z) const;
 
-    const FCubusBlockVoxel* GetVoxel(
-        int32 X,
-        int32 Y,
-        int32 Z
-    ) const;
+    bool SetVoxel(int32 X, int32 Y, int32 Z, const FCubusBlockVoxel& Voxel);
+    bool SetVoxel(const FIntVector& LocalCoordinate, const FCubusBlockVoxel& Voxel);
 
-    FCubusBlockVoxel* GetVoxel(
-        const FIntVector& LocalCoordinate
-    );
+    bool SetMaterialId(int32 X, int32 Y, int32 Z, int32 MaterialId);
+    bool SetMaterialId(const FIntVector& LocalCoordinate, int32 MaterialId);
 
-    const FCubusBlockVoxel* GetVoxel(
-        const FIntVector& LocalCoordinate
-    ) const;
+    FIntVector LocalToWorldVoxel(int32 X, int32 Y, int32 Z) const;
+    FIntVector LocalToWorldVoxel(const FIntVector& LocalCoordinate) const;
 
-    FCubusBlockVoxel& GetVoxelChecked(
-        int32 X,
-        int32 Y,
-        int32 Z
-    );
-
-    const FCubusBlockVoxel& GetVoxelChecked(
-        int32 X,
-        int32 Y,
-        int32 Z
-    ) const;
-
-    bool SetVoxel(
-        int32 X,
-        int32 Y,
-        int32 Z,
-        const FCubusBlockVoxel& Voxel
-    );
-
-    bool SetVoxel(
-        const FIntVector& LocalCoordinate,
-        const FCubusBlockVoxel& Voxel
-    );
-
-    bool SetMaterialId(
-        int32 X,
-        int32 Y,
-        int32 Z,
-        int32 MaterialId
-    );
-
-    bool SetMaterialId(
-        const FIntVector& LocalCoordinate,
-        int32 MaterialId
-    );
-
-    FIntVector LocalToWorldVoxel(
-        int32 X,
-        int32 Y,
-        int32 Z
-    ) const;
-
-    FIntVector LocalToWorldVoxel(
-        const FIntVector& LocalCoordinate
-    ) const;
-
-    void Fill(
-        const FCubusBlockVoxel& Voxel
-    );
-
+    void Fill(const FCubusBlockVoxel& Voxel);
     void Clear();
 
-    TConstArrayView<FCubusBlockVoxel>
-    GetVoxelView() const
+    TConstArrayView<FCubusBlockVoxel> GetVoxelView() const
     {
         return MakeArrayView(Voxels);
     }
 
-private:
-    FIntVector ChunkCoordinate =
-        FIntVector::ZeroValue;
+    void SetVegetationInstances(
+        TArray<FCubusVegetationInstance>&& InInstances
+    )
+    {
+        VegetationInstances = MoveTemp(InInstances);
+    }
 
+    void ClearVegetationInstances()
+    {
+        VegetationInstances.Reset();
+    }
+
+    TConstArrayView<FCubusVegetationInstance>
+    GetVegetationInstances() const
+    {
+        return MakeArrayView(VegetationInstances);
+    }
+
+private:
+    FIntVector ChunkCoordinate = FIntVector::ZeroValue;
     TArray<FCubusBlockVoxel> Voxels;
+    TArray<FCubusVegetationInstance> VegetationInstances;
 
     mutable bool bOccupiedStateKnown = false;
     mutable bool bHasAnyOccupiedVoxel = false;
