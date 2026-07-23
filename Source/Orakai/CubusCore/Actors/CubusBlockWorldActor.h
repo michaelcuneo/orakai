@@ -56,6 +56,11 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Terrain")
     void RegenerateTerrain();
 
+    void ReleaseHeldPawnAtLocation(
+        APawn* PlayerPawn,
+        const FVector& ReleaseLocation
+    );
+
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<USceneComponent> WorldRoot;
