@@ -4,6 +4,7 @@
 #include "CubusCore/Data/CubusVegetationInstance.h"
 #include "CubusCore/Rendering/CubusVegetationRendererComponent.h"
 
+#include "Engine/World.h"
 #include "PCGComponent.h"
 #include "PCGGraph.h"
 
@@ -36,9 +37,28 @@ void ACubusPCGVoxelVolumeActor::OnConstruction(
 
     ConfigurePCGComponent();
 
+    const UWorld* World = GetWorld();
+    const bool bRuntimeWorld =
+        IsValid(World) && World->IsGameWorld();
+
     if (IsValid(VegetationPointSource))
     {
-        VegetationPointSource->RebuildVegetation();
+        if (bRuntimeWorld)
+        {
+            VegetationPointSource->ClearVegetation();
+            VegetationPointSource->SetComponentTickEnabled(false);
+        }
+        else
+        {
+            VegetationPointSource->SetComponentTickEnabled(true);
+            VegetationPointSource->RebuildVegetation();
+        }
+    }
+
+    if (bRuntimeWorld)
+    {
+        bGenerateVegetationPCG = false;
+        SetActorTickEnabled(false);
     }
 
     LastVegetationPlacementHash = CalculateVegetationPlacementHash();
@@ -47,6 +67,11 @@ void ACubusPCGVoxelVolumeActor::OnConstruction(
 void ACubusPCGVoxelVolumeActor::Tick(const float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
+
+    if (!bGenerateVegetationPCG)
+    {
+        return;
+    }
 
     TimeUntilVegetationRefresh -= DeltaSeconds;
 
@@ -84,6 +109,12 @@ void ACubusPCGVoxelVolumeActor::EndPlay(
 )
 {
     CleanupVegetationPCG();
+
+    if (IsValid(VegetationPointSource))
+    {
+        VegetationPointSource->ClearVegetation();
+    }
+
     Super::EndPlay(EndPlayReason);
 }
 
@@ -92,24 +123,63 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
     const bool bInGenerateVegetationPCG
 )
 {
+    const UWorld* World = GetWorld();
+    const bool bRuntimeWorld =
+        IsValid(World) && World->IsGameWorld();
+
+    const bool bAllowVegetation =
+        bInGenerateVegetationPCG && !bRuntimeWorld;
+
     const bool bGraphChanged =
         VegetationGraph != InVegetationGraph;
 
     VegetationGraph = InVegetationGraph;
-    bGenerateVegetationPCG =
-        bInGenerateVegetationPCG;
+    bGenerateVegetationPCG = bAllowVegetation;
 
     if (bGraphChanged)
     {
         LastConfiguredGraph = nullptr;
     }
 
+    if (IsValid(VegetationPointSource))
+    {
+        VegetationPointSource->SetComponentTickEnabled(
+            bAllowVegetation
+        );
+
+        if (bAllowVegetation)
+        {
+            VegetationPointSource->RebuildVegetation();
+        }
+        else
+        {
+            VegetationPointSource->ClearVegetation();
+        }
+    }
+
+    SetActorTickEnabled(bAllowVegetation);
     ConfigurePCGComponent();
+
+    if (!bAllowVegetation)
+    {
+        CleanupVegetationPCG();
+    }
 }
 
 void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
 {
     ConfigurePCGComponent();
+
+    if (!bGenerateVegetationPCG)
+    {
+        if (IsValid(VegetationPointSource))
+        {
+            VegetationPointSource->ClearVegetation();
+        }
+
+        CleanupVegetationPCG();
+        return;
+    }
 
     if (IsValid(VegetationPointSource))
     {
@@ -120,7 +190,6 @@ void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
         CalculateVegetationPlacementHash();
 
     if (
-        !bGenerateVegetationPCG ||
         !IsValid(VegetationPCG) ||
         !IsValid(VegetationGraph)
     )
@@ -129,11 +198,6 @@ void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
         return;
     }
 
-    /*
-     * Remove the previous chunk-owned output before rebuilding from the latest
-     * deterministic Cubus point carriers. GenerateLocal keeps the operation
-     * local to this chunk's component and does not create a second world grid.
-     */
     VegetationPCG->CleanupLocal(true);
     VegetationPCG->GenerateLocal(true);
 
