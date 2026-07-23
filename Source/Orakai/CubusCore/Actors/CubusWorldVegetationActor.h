@@ -95,7 +95,7 @@ protected:
     int32 PublishedPointCount = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
-    uint32 PublishedPlacementHash = 0;
+    int64 PublishedPlacementHash = 0;
 
 private:
     UPROPERTY(Transient)
