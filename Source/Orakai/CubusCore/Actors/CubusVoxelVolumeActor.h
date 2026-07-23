@@ -74,6 +74,11 @@ public:
         OwningBlockWorld = InBlockWorld;
     }
 
+    void SetGenerateCollision(const bool bEnabled)
+    {
+        bGenerateCollision = bEnabled;
+    }
+
     void ConfigureGeneratedChunk(
         const FIntVector& InChunkCoordinate,
         float InVoxelSize,
