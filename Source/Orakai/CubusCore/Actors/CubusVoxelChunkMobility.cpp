@@ -60,6 +60,7 @@ namespace CubusVoxelChunkMobility
         }
 
         const FVector PawnLocation = PlayerPawn->GetActorLocation();
+        bool bHasGeneratedChunk = false;
         bool bFoundSurface = false;
         double HighestSurfaceZ = -DBL_MAX;
 
@@ -75,6 +76,8 @@ namespace CubusVoxelChunkMobility
             {
                 continue;
             }
+
+            bHasGeneratedChunk = true;
 
             const FCubusBlockChunkData* ChunkData =
                 ChunkActor->GetChunkData();
@@ -135,21 +138,37 @@ namespace CubusVoxelChunkMobility
             }
         }
 
-        if (!bFoundSurface)
+        if (!bHasGeneratedChunk)
         {
             return false;
         }
 
-        constexpr double SpawnClearance = 150.0;
+        const FVector ReleaseLocation = bFoundSurface
+            ? FVector(
+                PawnLocation.X,
+                PawnLocation.Y,
+                HighestSurfaceZ + 150.0
+            )
+            : FVector(
+                PawnLocation.X,
+                PawnLocation.Y,
+                PawnLocation.Z + 200.0
+            );
 
         BlockWorld->ReleaseHeldPawnAtLocation(
             PlayerPawn,
-            FVector(
-                PawnLocation.X,
-                PawnLocation.Y,
-                HighestSurfaceZ + SpawnClearance
-            )
+            ReleaseLocation
         );
+
+        if (!bFoundSurface)
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("Cubus released player without an exact voxel surface; gravity fallback used at Z=%.2f"),
+                ReleaseLocation.Z
+            );
+        }
 
         return true;
     }
