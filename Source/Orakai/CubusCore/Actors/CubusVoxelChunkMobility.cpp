@@ -16,7 +16,7 @@
 namespace CubusVoxelChunkMobility
 {
     FDelegateHandle WorldInitializationHandle;
-    FDelegateHandle SpawnReleaseTickerHandle;
+    FTSTicker::FDelegateHandle SpawnReleaseTickerHandle;
 
     bool TryReleaseHeldPawn(UWorld* World)
     {
@@ -32,8 +32,6 @@ namespace CubusVoxelChunkMobility
             return false;
         }
 
-        // The Cubus block world holds the pawn by disabling both tick and
-        // collision. Only intervene while the pawn is actually being held.
         if (
             PlayerPawn->IsActorTickEnabled() &&
             PlayerPawn->GetActorEnableCollision()
