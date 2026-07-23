@@ -1,7 +1,9 @@
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 
 #include "Components/SceneComponent.h"
+#include "Engine/CollisionProfile.h"
 #include "Engine/World.h"
+#include "ProceduralMeshComponent.h"
 
 namespace CubusVoxelChunkMobility
 {
@@ -20,10 +22,34 @@ namespace CubusVoxelChunkMobility
         USceneComponent* RootComponent =
             ChunkActor->GetRootComponent();
 
-        if (IsValid(RootComponent))
+        if (!IsValid(RootComponent))
         {
-            RootComponent->SetMobility(EComponentMobility::Movable);
+            return;
         }
+
+        RootComponent->SetMobility(EComponentMobility::Movable);
+
+        UProceduralMeshComponent* ProceduralMesh =
+            Cast<UProceduralMeshComponent>(RootComponent);
+
+        if (!IsValid(ProceduralMesh))
+        {
+            return;
+        }
+
+        // Initial terrain spawning must not race asynchronous Chaos cooking.
+        // Re-enable async cooking later once the streamer tracks collision readiness.
+        ProceduralMesh->bUseAsyncCooking = false;
+
+        // The current pawn-release logic traces on ECC_Visibility. Explicitly
+        // block that channel so generated terrain can be found reliably.
+        ProceduralMesh->SetCollisionProfileName(
+            UCollisionProfile::BlockAllDynamic_ProfileName
+        );
+        ProceduralMesh->SetCollisionResponseToChannel(
+            ECC_Visibility,
+            ECR_Block
+        );
     }
 
     void HandleWorldInitialization(
