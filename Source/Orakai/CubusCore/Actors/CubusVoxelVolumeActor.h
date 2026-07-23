@@ -91,7 +91,28 @@ public:
     );
 
     void ConfigureGeology(UCubusGeologyProfile* InGeologyProfile);
-    bool RestoreClassDefaultGeologyProfile();
+
+    bool RestoreClassDefaultGeologyProfile()
+    {
+        if (IsValid(GeologyProfile.Get()))
+        {
+            return false;
+        }
+
+        const ACubusVoxelVolumeActor* ClassDefault =
+            GetClass()->GetDefaultObject<ACubusVoxelVolumeActor>();
+
+        if (
+            !IsValid(ClassDefault) ||
+            !IsValid(ClassDefault->GeologyProfile.Get())
+        )
+        {
+            return false;
+        }
+
+        GeologyProfile = ClassDefault->GeologyProfile;
+        return true;
+    }
 
     void ConfigureTerrain(
         bool bInUseHeightTerrain,
@@ -178,8 +199,8 @@ protected:
     TObjectPtr<UCubusMaterialRegistry> MaterialRegistry = nullptr;
 
     UPROPERTY(
-        VisibleInstanceOnly,
-        BlueprintReadOnly,
+        EditAnywhere,
+        BlueprintReadWrite,
         Category = "Cubus|Geology",
         meta = (AllowPrivateAccess = "true")
     )
