@@ -1,4 +1,5 @@
 #include "CubusCore/Actors/CubusBlockWorldActor.h"
+#include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 
@@ -16,6 +17,51 @@ namespace CubusVoxelChunkMobility
 {
     FDelegateHandle WorldInitializationHandle;
     FTSTicker::FDelegateHandle SpawnReleaseTickerHandle;
+
+    void RestoreRuntimeChunkGeology(UWorld* World)
+    {
+        if (!IsValid(World) || !World->IsGameWorld())
+        {
+            return;
+        }
+
+        for (
+            TActorIterator<ACubusVoxelVolumeActor> Iterator(World);
+            Iterator;
+            ++Iterator
+        )
+        {
+            ACubusVoxelVolumeActor* ChunkActor = *Iterator;
+
+            if (
+                !IsValid(ChunkActor) ||
+                !ChunkActor->RestoreClassDefaultGeologyProfile()
+            )
+            {
+                continue;
+            }
+
+            ChunkActor->GenerateTestShapeData();
+            ChunkActor->RebuildVolume();
+
+            if (
+                ACubusPCGVoxelVolumeActor* PCGChunk =
+                    Cast<ACubusPCGVoxelVolumeActor>(ChunkActor)
+            )
+            {
+                PCGChunk->RegenerateVegetationPCG();
+            }
+
+            UE_LOG(
+                LogTemp,
+                Display,
+                TEXT("Cubus restored Blueprint geology profile for runtime chunk (%d, %d, %d)"),
+                ChunkActor->GetChunkCoordinate().X,
+                ChunkActor->GetChunkCoordinate().Y,
+                ChunkActor->GetChunkCoordinate().Z
+            );
+        }
+    }
 
     bool TryReleaseHeldPawn(UWorld* World)
     {
@@ -182,7 +228,9 @@ namespace CubusVoxelChunkMobility
 
         for (const FWorldContext& Context : GEngine->GetWorldContexts())
         {
-            TryReleaseHeldPawn(Context.World());
+            UWorld* World = Context.World();
+            RestoreRuntimeChunkGeology(World);
+            TryReleaseHeldPawn(World);
         }
 
         return true;
