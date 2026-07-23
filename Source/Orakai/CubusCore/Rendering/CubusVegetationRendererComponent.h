@@ -5,13 +5,14 @@
 
 #include "CubusVegetationRendererComponent.generated.h"
 
-class AActor;
+class UInstancedSkinnedMeshComponent;
 class UInstancedStaticMeshComponent;
+class USkeletalMesh;
 class UStaticMesh;
 
 /**
- * Publishes deterministic Cubus vegetation placements as tagged ISM point
- * sources and can directly spawn transient PVE tree actors for tree points.
+ * Publishes deterministic Cubus vegetation placements as tagged debug point
+ * sources and batches PVE tree placements through an instanced skinned mesh.
  */
 UCLASS(
     BlueprintType,
@@ -41,26 +42,22 @@ public:
     UFUNCTION(
         BlueprintCallable,
         CallInEditor,
-        Category = "Cubus|Vegetation|PCG"
+        Category = "Cubus|Vegetation"
     )
     void RebuildVegetation();
 
     UFUNCTION(
         BlueprintCallable,
         CallInEditor,
-        Category = "Cubus|Vegetation|PCG"
+        Category = "Cubus|Vegetation"
     )
     void ClearVegetation();
 
 protected:
-    /**
-     * Small static mesh used only to give the ISM point carriers valid bounds.
-     * A basic cube or editor-only marker mesh is sufficient.
-     */
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PCG"
+        Category = "Cubus|Vegetation|Debug"
     )
     TObjectPtr<UStaticMesh> MarkerMesh = nullptr;
 
@@ -75,35 +72,56 @@ protected:
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PCG"
+        Category = "Cubus|Vegetation|Debug"
     )
     bool bShowDebugMarkers = false;
 
-    /**
-     * Emergency-disabled actor spawning path.
-     * Transient prevents a previously saved Blueprint value from enabling it
-     * again while the project is loading.
-     */
+    /** Enables one batched instanced-skinned component per chunk. */
     UPROPERTY(
-        Transient,
-        VisibleAnywhere,
-        BlueprintReadOnly,
+        EditAnywhere,
+        BlueprintReadWrite,
         Category = "Cubus|Vegetation|PVE"
     )
-    bool bSpawnTreeActors = false;
+    bool bRenderInstancedTrees = true;
+
+    /** Assign the PVE Skeletal Mesh with Nanite Foliage asset here. */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PVE",
+        meta = (EditCondition = "bRenderInstancedTrees")
+    )
+    TObjectPtr<USkeletalMesh> TreeSkeletalMesh = nullptr;
+
+    /** Hard safety limit per chunk. Zero disables the limit. */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PVE",
+        meta = (ClampMin = "0", EditCondition = "bRenderInstancedTrees")
+    )
+    int32 MaxTreeInstancesPerChunk = 64;
 
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
         Category = "Cubus|Vegetation|PVE",
-        meta = (EditCondition = "bSpawnTreeActors")
+        meta = (ClampMin = "0", Units = "cm", EditCondition = "bRenderInstancedTrees")
     )
-    TSubclassOf<AActor> TreeActorClass;
+    int32 TreeStartCullDistance = 20000;
 
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PCG",
+        Category = "Cubus|Vegetation|PVE",
+        meta = (ClampMin = "0", Units = "cm", EditCondition = "bRenderInstancedTrees")
+    )
+    int32 TreeEndCullDistance = 50000;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation",
         meta = (ClampMin = "0.1", Units = "s")
     )
     float ChangeCheckInterval = 0.5f;
@@ -122,7 +140,7 @@ protected:
         Transient,
         Category = "Cubus|Vegetation|Diagnostics"
     )
-    int32 SpawnedTreeActorCount = 0;
+    int32 BatchedTreeInstanceCount = 0;
 
 private:
     UPROPERTY(Transient)
@@ -141,13 +159,13 @@ private:
     TObjectPtr<UInstancedStaticMeshComponent> AlpinePoints = nullptr;
 
     UPROPERTY(Transient)
-    TArray<TObjectPtr<AActor>> SpawnedTreeActors;
+    TObjectPtr<UInstancedSkinnedMeshComponent> TreeInstances = nullptr;
 
     uint32 LastPlacementHash = 0;
     float TimeUntilNextCheck = 0.0f;
 
     void EnsurePointComponents();
-    void DestroySpawnedTreeActors();
+    void EnsureTreeInstanceComponent();
     uint32 CalculatePlacementHash() const;
 
     UInstancedStaticMeshComponent* CreatePointComponent(
