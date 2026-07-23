@@ -91,6 +91,7 @@ public:
     );
 
     void ConfigureGeology(UCubusGeologyProfile* InGeologyProfile);
+    bool RestoreClassDefaultGeologyProfile();
 
     void ConfigureTerrain(
         bool bInUseHeightTerrain,
