@@ -38,6 +38,12 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+    void ConfigureForWorld(
+        ACubusBlockWorldActor* InBlockWorld,
+        UPCGGraphInterface* InVegetationGraph,
+        bool bInEnableRuntimeVegetation
+    );
+
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation")
     void RebuildWorldVegetation();
 
