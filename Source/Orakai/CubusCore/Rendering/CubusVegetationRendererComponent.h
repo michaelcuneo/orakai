@@ -12,7 +12,7 @@ class UStaticMesh;
 
 /**
  * Publishes deterministic Cubus vegetation placements as tagged debug point
- * sources and batches PVE tree placements through an instanced skinned mesh.
+ * sources and batches PVE trees into four instanced skinned growth stages.
  */
 UCLASS(
     BlueprintType,
@@ -39,26 +39,14 @@ public:
         FActorComponentTickFunction* ThisTickFunction
     ) override;
 
-    UFUNCTION(
-        BlueprintCallable,
-        CallInEditor,
-        Category = "Cubus|Vegetation"
-    )
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation")
     void RebuildVegetation();
 
-    UFUNCTION(
-        BlueprintCallable,
-        CallInEditor,
-        Category = "Cubus|Vegetation"
-    )
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation")
     void ClearVegetation();
 
 protected:
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|Debug"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Debug")
     TObjectPtr<UStaticMesh> MarkerMesh = nullptr;
 
     UPROPERTY(
@@ -69,29 +57,64 @@ protected:
     )
     float VoxelSize = 100.0f;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|Debug"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Debug")
     bool bShowDebugMarkers = false;
 
-    /** Enables one batched instanced-skinned component per chunk. */
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE")
     bool bRenderInstancedTrees = true;
 
-    /** Assign the PVE Skeletal Mesh with Nanite Foliage asset here. */
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE",
+        Category = "Cubus|Vegetation|PVE|Growth",
         meta = (EditCondition = "bRenderInstancedTrees")
     )
-    TObjectPtr<USkeletalMesh> TreeSkeletalMesh = nullptr;
+    TObjectPtr<USkeletalMesh> SeedlingTreeMesh = nullptr;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PVE|Growth",
+        meta = (EditCondition = "bRenderInstancedTrees")
+    )
+    TObjectPtr<USkeletalMesh> SaplingTreeMesh = nullptr;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PVE|Growth",
+        meta = (EditCondition = "bRenderInstancedTrees")
+    )
+    TObjectPtr<USkeletalMesh> YoungTreeMesh = nullptr;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PVE|Growth",
+        meta = (EditCondition = "bRenderInstancedTrees")
+    )
+    TObjectPtr<USkeletalMesh> MatureTreeMesh = nullptr;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PVE|Growth",
+        meta = (EditCondition = "bRenderInstancedTrees")
+    )
+    bool bSimulateTreeGrowth = true;
+
+    /** Real-time seconds required to advance by one growth stage. */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PVE|Growth",
+        meta = (
+            ClampMin = "1.0",
+            Units = "s",
+            EditCondition = "bRenderInstancedTrees && bSimulateTreeGrowth"
+        )
+    )
+    float GrowthStageDurationSeconds = 300.0f;
 
     /** Hard safety limit per chunk. Zero disables the limit. */
     UPROPERTY(
@@ -126,20 +149,10 @@ protected:
     )
     float ChangeCheckInterval = 0.5f;
 
-    UPROPERTY(
-        VisibleAnywhere,
-        BlueprintReadOnly,
-        Transient,
-        Category = "Cubus|Vegetation|Diagnostics"
-    )
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int32 PublishedPointCount = 0;
 
-    UPROPERTY(
-        VisibleAnywhere,
-        BlueprintReadOnly,
-        Transient,
-        Category = "Cubus|Vegetation|Diagnostics"
-    )
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int32 BatchedTreeInstanceCount = 0;
 
 private:
@@ -159,21 +172,33 @@ private:
     TObjectPtr<UInstancedStaticMeshComponent> AlpinePoints = nullptr;
 
     UPROPERTY(Transient)
-    TObjectPtr<UInstancedSkinnedMeshComponent> TreeInstances = nullptr;
+    TObjectPtr<UInstancedSkinnedMeshComponent> SeedlingTreeInstances = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UInstancedSkinnedMeshComponent> SaplingTreeInstances = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UInstancedSkinnedMeshComponent> YoungTreeInstances = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UInstancedSkinnedMeshComponent> MatureTreeInstances = nullptr;
 
     uint32 LastPlacementHash = 0;
     float TimeUntilNextCheck = 0.0f;
+    double GrowthStartTimeSeconds = -1.0;
+    int32 LastGrowthStep = INDEX_NONE;
 
     void EnsurePointComponents();
-    void EnsureTreeInstanceComponent();
+    void EnsureTreeInstanceComponents();
+    int32 GetCurrentGrowthStep() const;
     uint32 CalculatePlacementHash() const;
+
+    UInstancedSkinnedMeshComponent* CreateTreeStageComponent(FName ComponentName);
 
     UInstancedStaticMeshComponent* CreatePointComponent(
         FName ComponentName,
         FName ComponentTag
     );
 
-    UInstancedStaticMeshComponent* ResolvePointComponentForType(
-        int32 TypeId
-    ) const;
+    UInstancedStaticMeshComponent* ResolvePointComponentForType(int32 TypeId) const;
 };
