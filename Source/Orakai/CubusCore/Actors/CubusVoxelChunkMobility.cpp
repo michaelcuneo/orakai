@@ -1,3 +1,4 @@
+#include "CubusCore/Actors/CubusBlockWorldActor.h"
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 
@@ -7,8 +8,6 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "ProceduralMeshComponent.h"
@@ -36,6 +35,26 @@ namespace CubusVoxelChunkMobility
             PlayerPawn->IsActorTickEnabled() &&
             PlayerPawn->GetActorEnableCollision()
         )
+        {
+            return false;
+        }
+
+        ACubusBlockWorldActor* BlockWorld = nullptr;
+
+        for (
+            TActorIterator<ACubusBlockWorldActor> Iterator(World);
+            Iterator;
+            ++Iterator
+        )
+        {
+            if (IsValid(*Iterator))
+            {
+                BlockWorld = *Iterator;
+                break;
+            }
+        }
+
+        if (!IsValid(BlockWorld))
         {
             return false;
         }
@@ -123,36 +142,13 @@ namespace CubusVoxelChunkMobility
 
         constexpr double SpawnClearance = 150.0;
 
-        PlayerPawn->SetActorLocation(
+        BlockWorld->ReleaseHeldPawnAtLocation(
+            PlayerPawn,
             FVector(
                 PawnLocation.X,
                 PawnLocation.Y,
                 HighestSurfaceZ + SpawnClearance
-            ),
-            false,
-            nullptr,
-            ETeleportType::TeleportPhysics
-        );
-
-        PlayerPawn->SetActorEnableCollision(true);
-        PlayerPawn->SetActorTickEnabled(true);
-
-        if (ACharacter* Character = Cast<ACharacter>(PlayerPawn))
-        {
-            if (UCharacterMovementComponent* Movement =
-                Character->GetCharacterMovement())
-            {
-                Movement->SetComponentTickEnabled(true);
-                Movement->Activate(true);
-                Movement->SetMovementMode(MOVE_Falling);
-            }
-        }
-
-        UE_LOG(
-            LogTemp,
-            Display,
-            TEXT("Cubus released held player from voxel data at terrain Z=%.2f"),
-            HighestSurfaceZ
+            )
         );
 
         return true;
