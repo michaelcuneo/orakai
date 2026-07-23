@@ -19,6 +19,8 @@ namespace CubusVoxelChunkMobility
             return;
         }
 
+        ChunkActor->SetGenerateCollision(true);
+
         USceneComponent* RootComponent =
             ChunkActor->GetRootComponent();
 
