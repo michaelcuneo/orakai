@@ -79,12 +79,18 @@ protected:
     )
     bool bShowDebugMarkers = false;
 
+    /**
+     * Emergency-disabled actor spawning path.
+     * Transient prevents a previously saved Blueprint value from enabling it
+     * again while the project is loading.
+     */
     UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
+        Transient,
+        VisibleAnywhere,
+        BlueprintReadOnly,
         Category = "Cubus|Vegetation|PVE"
     )
-    bool bSpawnTreeActors = true;
+    bool bSpawnTreeActors = false;
 
     UPROPERTY(
         EditAnywhere,
