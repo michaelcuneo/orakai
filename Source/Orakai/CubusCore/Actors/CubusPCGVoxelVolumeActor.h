@@ -17,6 +17,7 @@ class UPCGGraphInterface;
  * resources.
  */
 UCLASS(
+    Transient,
     BlueprintType,
     Blueprintable,
     ClassGroup = "Cubus",
