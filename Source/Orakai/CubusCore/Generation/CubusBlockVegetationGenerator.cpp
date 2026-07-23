@@ -13,11 +13,9 @@ void FCubusBlockVegetationGenerator::Generate(
 {
     TArray<FCubusVegetationInstance> Instances;
 
-    if (!IsValid(GeologyProfile) || !GeologyProfile->bGenerateBiomes)
-    {
-        Chunk.SetVegetationInstances(MoveTemp(Instances));
-        return;
-    }
+    const bool bUseConfiguredBiomes =
+        IsValid(GeologyProfile) &&
+        GeologyProfile->bGenerateBiomes;
 
     const FIntVector ChunkCoordinate = Chunk.GetChunkCoordinate();
     const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
@@ -34,7 +32,8 @@ void FCubusBlockVegetationGenerator::Generate(
 
             for (int32 LocalZ = Cubus::ChunkSize - 1; LocalZ >= 0; --LocalZ)
             {
-                const FCubusBlockVoxel* Voxel = Chunk.GetVoxel(LocalX, LocalY, LocalZ);
+                const FCubusBlockVoxel* Voxel =
+                    Chunk.GetVoxel(LocalX, LocalY, LocalZ);
 
                 if (
                     Voxel != nullptr &&
@@ -88,25 +87,36 @@ void FCubusBlockVegetationGenerator::Generate(
             int32 TypeId = 0;
             float Density = 0.0f;
 
-            if (SurfaceVoxel->MaterialId == GeologyProfile->ForestSurfaceMaterialId)
+            if (bUseConfiguredBiomes)
             {
-                TypeId = PlacementRoll < 0.55f ? 3 : 2;
-                Density = 0.42f;
+                if (SurfaceVoxel->MaterialId == GeologyProfile->ForestSurfaceMaterialId)
+                {
+                    TypeId = PlacementRoll < 0.55f ? 3 : 2;
+                    Density = 0.42f;
+                }
+                else if (SurfaceVoxel->MaterialId == GeologyProfile->WetlandSurfaceMaterialId)
+                {
+                    TypeId = 4;
+                    Density = 0.36f;
+                }
+                else if (SurfaceVoxel->MaterialId == GeologyProfile->RockySurfaceMaterialId)
+                {
+                    TypeId = 5;
+                    Density = 0.08f;
+                }
+                else if (SurfaceVoxel->MaterialId == GeologyProfile->PlainsSurfaceMaterialId)
+                {
+                    TypeId = PlacementRoll < 0.82f ? 1 : 2;
+                    Density = 0.22f;
+                }
             }
-            else if (SurfaceVoxel->MaterialId == GeologyProfile->WetlandSurfaceMaterialId)
+            else
             {
-                TypeId = 4;
-                Density = 0.36f;
-            }
-            else if (SurfaceVoxel->MaterialId == GeologyProfile->RockySurfaceMaterialId)
-            {
-                TypeId = 5;
-                Density = 0.08f;
-            }
-            else if (SurfaceVoxel->MaterialId == GeologyProfile->PlainsSurfaceMaterialId)
-            {
-                TypeId = PlacementRoll < 0.82f ? 1 : 2;
-                Density = 0.22f;
+                // Runtime worlds must not silently lose all vegetation when a
+                // geology profile is absent or biome generation is disabled.
+                // Keep this deliberately sparse until a configured biome is used.
+                TypeId = 3;
+                Density = 0.025f;
             }
 
             if (TypeId <= 0 || PlacementRoll > Density)
@@ -136,7 +146,7 @@ void FCubusBlockVegetationGenerator::Generate(
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus vegetation chunk (%d, %d, %d): grass %d, shrubs %d, trees %d, reeds %d, alpine %d"),
+        TEXT("Cubus vegetation chunk (%d, %d, %d): grass %d, shrubs %d, trees %d, reeds %d, alpine %d%s"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
         ChunkCoordinate.Z,
@@ -144,7 +154,8 @@ void FCubusBlockVegetationGenerator::Generate(
         CountsByType[2],
         CountsByType[3],
         CountsByType[4],
-        CountsByType[5]
+        CountsByType[5],
+        bUseConfiguredBiomes ? TEXT("") : TEXT(" (fallback)")
     );
 }
 
