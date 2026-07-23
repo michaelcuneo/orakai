@@ -9,6 +9,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 
 UCubusVegetationRendererComponent::UCubusVegetationRendererComponent()
 {
@@ -21,15 +22,22 @@ void UCubusVegetationRendererComponent::OnRegister()
 {
     Super::OnRegister();
 
+    if (GrowthStartTimeSeconds < 0.0)
+    {
+        GrowthStartTimeSeconds =
+            IsValid(GetWorld())
+                ? GetWorld()->GetTimeSeconds()
+                : 0.0;
+    }
+
     EnsurePointComponents();
-    EnsureTreeInstanceComponent();
+    EnsureTreeInstanceComponents();
     RebuildVegetation();
 }
 
 void UCubusVegetationRendererComponent::OnUnregister()
 {
     ClearVegetation();
-
     Super::OnUnregister();
 }
 
@@ -50,9 +58,13 @@ void UCubusVegetationRendererComponent::TickComponent(
 
     TimeUntilNextCheck = FMath::Max(0.1f, ChangeCheckInterval);
 
+    const int32 GrowthStep = GetCurrentGrowthStep();
     const uint32 PlacementHash = CalculatePlacementHash();
 
-    if (PlacementHash != LastPlacementHash)
+    if (
+        PlacementHash != LastPlacementHash ||
+        GrowthStep != LastGrowthStep
+    )
     {
         RebuildVegetation();
     }
@@ -61,7 +73,7 @@ void UCubusVegetationRendererComponent::TickComponent(
 void UCubusVegetationRendererComponent::RebuildVegetation()
 {
     EnsurePointComponents();
-    EnsureTreeInstanceComponent();
+    EnsureTreeInstanceComponents();
     ClearVegetation();
 
     ACubusVoxelVolumeActor* ChunkActor =
@@ -81,34 +93,26 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
     }
 
     const float SafeVoxelSize =
-        FMath::Max(
-            1.0f,
-            ChunkActor->GetVoxelSize()
-        );
+        FMath::Max(1.0f, ChunkActor->GetVoxelSize());
 
     const FIntVector ChunkOriginVoxel =
-        ChunkActor->GetChunkCoordinate() *
-        Cubus::ChunkSize;
+        ChunkActor->GetChunkCoordinate() * Cubus::ChunkSize;
 
     const double HalfChunkWorldSize =
         static_cast<double>(Cubus::ChunkSize) *
         static_cast<double>(SafeVoxelSize) *
         0.5;
 
-    TArray<FTransform> TreeTransforms;
-    TArray<int32> TreeAnimationIndices;
+    TArray<FTransform> StageTransforms[4];
+    TArray<int32> StageAnimationIndices[4];
 
     const int32 TreeLimit =
         MaxTreeInstancesPerChunk > 0
             ? MaxTreeInstancesPerChunk
             : MAX_int32;
 
-    TreeTransforms.Reserve(
-        FMath::Min(
-            ChunkData->GetVegetationInstances().Num(),
-            TreeLimit
-        )
-    );
+    const int32 CurrentGrowthStep = GetCurrentGrowthStep();
+    int32 AcceptedTreeCount = 0;
 
     for (
         const FCubusVegetationInstance& Instance :
@@ -116,22 +120,14 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
     )
     {
         const FIntVector LocalVoxel =
-            Instance.WorldVoxel -
-            ChunkOriginVoxel;
+            Instance.WorldVoxel - ChunkOriginVoxel;
 
         const FVector LocalLocation(
-            (
-                static_cast<double>(LocalVoxel.X) +
-                0.5
-            ) * SafeVoxelSize -
+            (static_cast<double>(LocalVoxel.X) + 0.5) * SafeVoxelSize -
                 HalfChunkWorldSize,
-            (
-                static_cast<double>(LocalVoxel.Y) +
-                0.5
-            ) * SafeVoxelSize -
+            (static_cast<double>(LocalVoxel.Y) + 0.5) * SafeVoxelSize -
                 HalfChunkWorldSize,
-            static_cast<double>(LocalVoxel.Z) *
-                SafeVoxelSize -
+            static_cast<double>(LocalVoxel.Z) * SafeVoxelSize -
                 HalfChunkWorldSize
         );
 
@@ -151,46 +147,81 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
         }
 
         if (
-            Instance.TypeId == 3 &&
-            bRenderInstancedTrees &&
-            IsValid(TreeSkeletalMesh) &&
-            TreeTransforms.Num() < TreeLimit
+            Instance.TypeId != 3 ||
+            !bRenderInstancedTrees ||
+            AcceptedTreeCount >= TreeLimit
         )
         {
-            TreeTransforms.Add(LocalTransform);
-            TreeAnimationIndices.Add(0);
+            continue;
         }
+
+        uint32 TreeHash = GetTypeHash(Instance.WorldVoxel);
+        TreeHash = HashCombineFast(
+            TreeHash,
+            GetTypeHash(Instance.RotationYaw)
+        );
+
+        const int32 StartingStage =
+            bSimulateTreeGrowth
+                ? static_cast<int32>(TreeHash % 4u)
+                : 3;
+
+        const int32 StageIndex =
+            bSimulateTreeGrowth
+                ? FMath::Min(3, StartingStage + CurrentGrowthStep)
+                : 3;
+
+        StageTransforms[StageIndex].Add(LocalTransform);
+        StageAnimationIndices[StageIndex].Add(0);
+        ++AcceptedTreeCount;
     }
 
-    if (
-        IsValid(TreeInstances) &&
-        bRenderInstancedTrees &&
-        IsValid(TreeSkeletalMesh) &&
-        !TreeTransforms.IsEmpty()
-    )
+    UInstancedSkinnedMeshComponent* StageComponents[4] =
     {
-        TreeInstances->SetSkeletalMesh(
-            TreeSkeletalMesh,
-            true
-        );
+        SeedlingTreeInstances,
+        SaplingTreeInstances,
+        YoungTreeInstances,
+        MatureTreeInstances
+    };
 
-        TreeInstances->SetCullDistances(
+    USkeletalMesh* StageMeshes[4] =
+    {
+        SeedlingTreeMesh,
+        SaplingTreeMesh,
+        YoungTreeMesh,
+        MatureTreeMesh
+    };
+
+    for (int32 StageIndex = 0; StageIndex < 4; ++StageIndex)
+    {
+        UInstancedSkinnedMeshComponent* StageComponent =
+            StageComponents[StageIndex];
+        USkeletalMesh* StageMesh = StageMeshes[StageIndex];
+
+        if (
+            !IsValid(StageComponent) ||
+            !IsValid(StageMesh) ||
+            StageTransforms[StageIndex].IsEmpty()
+        )
+        {
+            continue;
+        }
+
+        StageComponent->SetSkinnedAssetAndUpdate(StageMesh);
+        StageComponent->SetCullDistances(
             FMath::Max(0, TreeStartCullDistance),
-            FMath::Max(
-                TreeStartCullDistance,
-                TreeEndCullDistance
-            )
+            FMath::Max(TreeStartCullDistance, TreeEndCullDistance)
         );
-
-        TreeInstances->AddInstances(
-            TreeTransforms,
-            TreeAnimationIndices,
+        StageComponent->AddInstances(
+            StageTransforms[StageIndex],
+            StageAnimationIndices[StageIndex],
             false,
             false
         );
+        StageComponent->OptimizeInstanceData(false);
 
-        TreeInstances->OptimizeInstanceData(false);
-        BatchedTreeInstanceCount = TreeTransforms.Num();
+        BatchedTreeInstanceCount +=
+            StageTransforms[StageIndex].Num();
     }
 
     const UInstancedStaticMeshComponent* PointComponents[] =
@@ -211,17 +242,19 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
         }
     }
 
+    LastGrowthStep = CurrentGrowthStep;
     LastPlacementHash = CalculatePlacementHash();
 
     UE_LOG(
         LogTemp,
         Display,
         TEXT(
-            "Cubus vegetation source %s: published %d points, batched %d PVE trees"
+            "Cubus vegetation source %s: published %d points, batched %d PVE trees, growth step %d"
         ),
         *ChunkActor->GetName(),
         PublishedPointCount,
-        BatchedTreeInstanceCount
+        BatchedTreeInstanceCount,
+        CurrentGrowthStep
     );
 }
 
@@ -230,9 +263,20 @@ void UCubusVegetationRendererComponent::ClearVegetation()
     PublishedPointCount = 0;
     BatchedTreeInstanceCount = 0;
 
-    if (IsValid(TreeInstances))
+    UInstancedSkinnedMeshComponent* TreeComponents[] =
     {
-        TreeInstances->ClearInstances();
+        SeedlingTreeInstances,
+        SaplingTreeInstances,
+        YoungTreeInstances,
+        MatureTreeInstances
+    };
+
+    for (UInstancedSkinnedMeshComponent* TreeComponent : TreeComponents)
+    {
+        if (IsValid(TreeComponent))
+        {
+            TreeComponent->ClearInstances();
+        }
     }
 
     UInstancedStaticMeshComponent* PointComponents[] =
@@ -322,42 +366,101 @@ void UCubusVegetationRendererComponent::EnsurePointComponents()
     }
 }
 
-void UCubusVegetationRendererComponent::EnsureTreeInstanceComponent()
+void UCubusVegetationRendererComponent::EnsureTreeInstanceComponents()
+{
+    if (!IsValid(SeedlingTreeInstances))
+    {
+        SeedlingTreeInstances =
+            CreateTreeStageComponent(TEXT("CubusPVESeedlingTrees"));
+    }
+
+    if (!IsValid(SaplingTreeInstances))
+    {
+        SaplingTreeInstances =
+            CreateTreeStageComponent(TEXT("CubusPVESaplingTrees"));
+    }
+
+    if (!IsValid(YoungTreeInstances))
+    {
+        YoungTreeInstances =
+            CreateTreeStageComponent(TEXT("CubusPVEYoungTrees"));
+    }
+
+    if (!IsValid(MatureTreeInstances))
+    {
+        MatureTreeInstances =
+            CreateTreeStageComponent(TEXT("CubusPVEMatureTrees"));
+    }
+}
+
+int32 UCubusVegetationRendererComponent::GetCurrentGrowthStep() const
+{
+    if (!bSimulateTreeGrowth || GrowthStartTimeSeconds < 0.0)
+    {
+        return 0;
+    }
+
+    const UWorld* World = GetWorld();
+
+    if (!IsValid(World))
+    {
+        return 0;
+    }
+
+    const double ElapsedSeconds =
+        FMath::Max(
+            0.0,
+            World->GetTimeSeconds() - GrowthStartTimeSeconds
+        );
+
+    return FMath::Clamp(
+        FMath::FloorToInt(
+            ElapsedSeconds /
+            FMath::Max(1.0f, GrowthStageDurationSeconds)
+        ),
+        0,
+        3
+    );
+}
+
+UInstancedSkinnedMeshComponent*
+UCubusVegetationRendererComponent::CreateTreeStageComponent(
+    const FName ComponentName
+)
 {
     AActor* Owner = GetOwner();
 
-    if (!IsValid(Owner) || IsValid(TreeInstances))
+    if (!IsValid(Owner))
     {
-        return;
+        return nullptr;
     }
 
-    TreeInstances =
+    UInstancedSkinnedMeshComponent* Component =
         NewObject<UInstancedSkinnedMeshComponent>(
             Owner,
-            TEXT("CubusPVEInstancedTrees"),
+            ComponentName,
             RF_Transient
         );
 
-    if (!IsValid(TreeInstances))
+    if (!IsValid(Component))
     {
-        return;
+        return nullptr;
     }
 
-    TreeInstances->SetupAttachment(Owner->GetRootComponent());
-    TreeInstances->SetMobility(EComponentMobility::Static);
-    TreeInstances->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    TreeInstances->SetGenerateOverlapEvents(false);
-    TreeInstances->SetCanEverAffectNavigation(false);
-    TreeInstances->SetCastShadow(true);
-    TreeInstances->SetCullDistances(
+    Component->SetupAttachment(Owner->GetRootComponent());
+    Component->SetMobility(EComponentMobility::Static);
+    Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Component->SetGenerateOverlapEvents(false);
+    Component->SetCanEverAffectNavigation(false);
+    Component->SetCastShadow(true);
+    Component->SetCullDistances(
         FMath::Max(0, TreeStartCullDistance),
-        FMath::Max(
-            TreeStartCullDistance,
-            TreeEndCullDistance
-        )
+        FMath::Max(TreeStartCullDistance, TreeEndCullDistance)
     );
-    TreeInstances->RegisterComponent();
-    Owner->AddInstanceComponent(TreeInstances);
+    Component->RegisterComponent();
+    Owner->AddInstanceComponent(Component);
+
+    return Component;
 }
 
 uint32 UCubusVegetationRendererComponent::CalculatePlacementHash() const
@@ -396,7 +499,12 @@ uint32 UCubusVegetationRendererComponent::CalculatePlacementHash() const
     Hash = HashCombineFast(Hash, GetTypeHash(VoxelSize));
     Hash = HashCombineFast(Hash, GetTypeHash(bShowDebugMarkers));
     Hash = HashCombineFast(Hash, GetTypeHash(bRenderInstancedTrees));
-    Hash = HashCombineFast(Hash, GetTypeHash(TreeSkeletalMesh));
+    Hash = HashCombineFast(Hash, GetTypeHash(SeedlingTreeMesh));
+    Hash = HashCombineFast(Hash, GetTypeHash(SaplingTreeMesh));
+    Hash = HashCombineFast(Hash, GetTypeHash(YoungTreeMesh));
+    Hash = HashCombineFast(Hash, GetTypeHash(MatureTreeMesh));
+    Hash = HashCombineFast(Hash, GetTypeHash(bSimulateTreeGrowth));
+    Hash = HashCombineFast(Hash, GetTypeHash(GrowthStageDurationSeconds));
     Hash = HashCombineFast(Hash, GetTypeHash(MaxTreeInstancesPerChunk));
     Hash = HashCombineFast(Hash, GetTypeHash(TreeStartCullDistance));
     Hash = HashCombineFast(Hash, GetTypeHash(TreeEndCullDistance));
