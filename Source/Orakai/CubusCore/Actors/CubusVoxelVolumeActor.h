@@ -92,28 +92,6 @@ public:
 
     void ConfigureGeology(UCubusGeologyProfile* InGeologyProfile);
 
-    bool RestoreClassDefaultGeologyProfile()
-    {
-        if (IsValid(GeologyProfile.Get()))
-        {
-            return false;
-        }
-
-        const ACubusVoxelVolumeActor* ClassDefault =
-            GetClass()->GetDefaultObject<ACubusVoxelVolumeActor>();
-
-        if (
-            !IsValid(ClassDefault) ||
-            !IsValid(ClassDefault->GeologyProfile.Get())
-        )
-        {
-            return false;
-        }
-
-        GeologyProfile = ClassDefault->GeologyProfile;
-        return true;
-    }
-
     void ConfigureTerrain(
         bool bInUseHeightTerrain,
         int32 InTerrainSurfaceWorldZ,
