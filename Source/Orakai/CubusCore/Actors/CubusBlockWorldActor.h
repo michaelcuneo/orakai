@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "CubusCore/Generation/CubusGenerationSeeds.h"
 
 #include "CubusBlockWorldActor.generated.h"
 
@@ -41,6 +42,17 @@ public:
         const FIntVector& ChunkCoordinate
     );
 
+    const FCubusGenerationSeeds GetGenerationSeeds() const
+    {
+        return FCubusGenerationSeeds::FromWorldSeed(WorldSeed);
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Seed")
+    int64 GetWorldSeed() const
+    {
+        return WorldSeed;
+    }
+
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
     void GenerateChunkGrid();
 
@@ -64,6 +76,9 @@ public:
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<USceneComponent> WorldRoot;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Seed")
+    int64 WorldSeed = 1;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
     FIntVector GridDimensions = FIntVector(2, 2, 1);
