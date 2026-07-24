@@ -210,19 +210,6 @@ namespace CubusVoxelChunkMobility
 
         RootComponent->SetMobility(EComponentMobility::Movable);
 
-        TInlineComponentArray<USceneComponent*> SceneComponents(ChunkActor);
-
-        for (USceneComponent* SceneComponent : SceneComponents)
-        {
-            if (
-                IsValid(SceneComponent) &&
-                SceneComponent != RootComponent
-            )
-            {
-                SceneComponent->SetMobility(EComponentMobility::Movable);
-            }
-        }
-
         UProceduralMeshComponent* ProceduralMesh =
             Cast<UProceduralMeshComponent>(RootComponent);
 
