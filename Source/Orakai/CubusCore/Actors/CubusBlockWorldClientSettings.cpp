@@ -1,5 +1,102 @@
 #include "CubusCore/Actors/CubusBlockWorldActor.h"
 
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
+
+namespace CubusClientStreamingSettings
+{
+    ACubusBlockWorldActor* FindBlockWorld(UWorld* World)
+    {
+        if (!IsValid(World))
+        {
+            return nullptr;
+        }
+
+        for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
+        {
+            if (IsValid(*Iterator))
+            {
+                return *Iterator;
+            }
+        }
+
+        return nullptr;
+    }
+
+    void SetViewDistance(
+        const TArray<FString>& Arguments,
+        UWorld* World
+    )
+    {
+        ACubusBlockWorldActor* BlockWorld = FindBlockWorld(World);
+
+        if (!IsValid(BlockWorld))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Cubus.ViewDistance could not find a Cubus block world"));
+            return;
+        }
+
+        if (Arguments.IsEmpty())
+        {
+            UE_LOG(
+                LogTemp,
+                Display,
+                TEXT("Usage: Cubus.ViewDistance <horizontal 0-16> [vertical 0-4]")
+            );
+            return;
+        }
+
+        const int32 Horizontal = FCString::Atoi(*Arguments[0]);
+        const int32 Vertical = Arguments.Num() > 1
+            ? FCString::Atoi(*Arguments[1])
+            : BlockWorld->GetClientVerticalViewDistance();
+
+        BlockWorld->SetClientViewDistance(Horizontal, Vertical, true);
+    }
+
+    void SetChunkLoadRate(
+        const TArray<FString>& Arguments,
+        UWorld* World
+    )
+    {
+        ACubusBlockWorldActor* BlockWorld = FindBlockWorld(World);
+
+        if (!IsValid(BlockWorld))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Cubus.ChunkLoadRate could not find a Cubus block world"));
+            return;
+        }
+
+        if (Arguments.IsEmpty())
+        {
+            UE_LOG(
+                LogTemp,
+                Display,
+                TEXT("Usage: Cubus.ChunkLoadRate <chunks per tick 1-16>")
+            );
+            return;
+        }
+
+        BlockWorld->SetClientChunkLoadRate(
+            FCString::Atoi(*Arguments[0]),
+            true
+        );
+    }
+
+    FAutoConsoleCommandWithWorldAndArgs ViewDistanceCommand(
+        TEXT("Cubus.ViewDistance"),
+        TEXT("Sets persistent Cubus client view distance. Usage: Cubus.ViewDistance <horizontal> [vertical]"),
+        FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetViewDistance)
+    );
+
+    FAutoConsoleCommandWithWorldAndArgs ChunkLoadRateCommand(
+        TEXT("Cubus.ChunkLoadRate"),
+        TEXT("Sets persistent Cubus chunks loaded per tick. Usage: Cubus.ChunkLoadRate <1-16>"),
+        FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetChunkLoadRate)
+    );
+}
+
 void ACubusBlockWorldActor::SetClientViewDistance(
     const int32 InHorizontalViewRadius,
     const int32 InVerticalViewRadius,
