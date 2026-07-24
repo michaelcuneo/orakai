@@ -2,6 +2,11 @@
 
 void ACubusPCGVoxelVolumeActor::GenerateTestShapeData()
 {
+    // The procedural mesh is about to be replaced. Remove it from the ray
+    // tracing scene first; the near-field manager will restore it after the
+    // world actor has rebuilt the completed mesh.
+    SetTerrainRayTracingEnabled(false);
+
     const FIntVector Coordinate = GetChunkCoordinate();
 
     if (TryLoadCachedChunk())
