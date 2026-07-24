@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
+#include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusVoxelVolumeActor.generated.h"
 
 class ACubusBlockWorldActor;
@@ -77,6 +78,12 @@ public:
     void SetGenerateCollision(const bool bEnabled)
     {
         bGenerateCollision = bEnabled;
+    }
+
+    void ConfigureGenerationSeeds(const FCubusGenerationSeeds& InGenerationSeeds)
+    {
+        EnsureChunkData();
+        ChunkData->SetGenerationSeeds(InGenerationSeeds);
     }
 
     void ConfigureGeneratedChunk(
