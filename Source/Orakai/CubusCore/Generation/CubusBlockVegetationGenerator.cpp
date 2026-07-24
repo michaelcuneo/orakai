@@ -21,6 +21,7 @@ void FCubusBlockVegetationGenerator::Generate(
     const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
     const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
     const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
+    const int32 VegetationSeed = Chunk.GetGenerationSeeds().Vegetation;
 
     int32 CountsByType[6] = {0, 0, 0, 0, 0, 0};
 
@@ -81,7 +82,7 @@ void FCubusBlockVegetationGenerator::Generate(
             const int32 WorldZ = BaseZ + SurfaceLocalZ + 1;
 
             const float PlacementRoll = HashToUnitFloat(
-                HashWorldColumn(WorldX, WorldY, 101)
+                HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 101)
             );
 
             int32 TypeId = 0;
@@ -112,9 +113,6 @@ void FCubusBlockVegetationGenerator::Generate(
             }
             else
             {
-                // Runtime worlds must not silently lose all vegetation when a
-                // geology profile is absent or biome generation is disabled.
-                // Keep this deliberately sparse until a configured biome is used.
                 TypeId = 3;
                 Density = 0.025f;
             }
@@ -127,12 +125,14 @@ void FCubusBlockVegetationGenerator::Generate(
             FCubusVegetationInstance Instance;
             Instance.WorldVoxel = FIntVector(WorldX, WorldY, WorldZ);
             Instance.RotationYaw = HashToUnitFloat(
-                HashWorldColumn(WorldX, WorldY, 211)
+                HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 211)
             ) * 360.0f;
             Instance.Scale = FMath::Lerp(
                 0.85f,
                 1.15f,
-                HashToUnitFloat(HashWorldColumn(WorldX, WorldY, 307))
+                HashToUnitFloat(
+                    HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 307)
+                )
             );
             Instance.TypeId = TypeId;
 
@@ -146,10 +146,11 @@ void FCubusBlockVegetationGenerator::Generate(
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus vegetation chunk (%d, %d, %d): grass %d, shrubs %d, trees %d, reeds %d, alpine %d%s"),
+        TEXT("Cubus vegetation chunk (%d, %d, %d), seed %d: grass %d, shrubs %d, trees %d, reeds %d, alpine %d%s"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
         ChunkCoordinate.Z,
+        VegetationSeed,
         CountsByType[1],
         CountsByType[2],
         CountsByType[3],
