@@ -34,6 +34,27 @@ struct ORAKAI_API FCubusGenerationSeeds
         return Seeds;
     }
 
+    static int32 DomainOffsetX(const int32 Seed)
+    {
+        const uint32 Bits = static_cast<uint32>(Seed);
+        return static_cast<int32>(Bits & 0x000fffffu) - 524288;
+    }
+
+    static int32 DomainOffsetY(const int32 Seed)
+    {
+        const uint32 Bits = static_cast<uint32>(Seed);
+        return static_cast<int32>((Bits >> 10) & 0x000fffffu) - 524288;
+    }
+
+    static int32 DomainOffsetZ(const int32 Seed)
+    {
+        uint32 Bits = static_cast<uint32>(Seed);
+        Bits ^= Bits << 13;
+        Bits ^= Bits >> 17;
+        Bits ^= Bits << 5;
+        return static_cast<int32>(Bits & 0x000fffffu) - 524288;
+    }
+
 private:
     static int32 Derive(const int64 WorldSeed, const uint32 InternalSalt)
     {
