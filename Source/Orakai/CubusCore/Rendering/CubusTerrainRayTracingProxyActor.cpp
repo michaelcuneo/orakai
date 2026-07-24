@@ -59,7 +59,8 @@ bool ACubusTerrainRayTracingProxyActor::BuildFromSource(
         return false;
     }
 
-    SetActorTransform(InSourceChunk->GetActorTransform());
+    // The runtime manager spawns this actor at the source chunk transform.
+    // Do not move the static proxy again after registration.
 
     int32 CopiedSectionCount = 0;
 
