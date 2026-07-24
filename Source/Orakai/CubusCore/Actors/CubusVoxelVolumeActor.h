@@ -40,6 +40,7 @@ public:
     ACubusVoxelVolumeActor();
 
     virtual void OnConstruction(const FTransform& Transform) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Chunk")
     void GenerateTestShape();
@@ -69,6 +70,15 @@ public:
     {
         return ChunkData.Get();
     }
+
+    FCubusBlockChunkData* GetMutableChunkData()
+    {
+        return ChunkData.Get();
+    }
+
+    bool TryLoadCachedChunk();
+    bool SaveCachedChunk() const;
+    void RegenerateVegetationData();
 
     void SetOwningBlockWorld(ACubusBlockWorldActor* InBlockWorld)
     {
