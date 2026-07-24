@@ -218,6 +218,10 @@ namespace CubusVoxelChunkMobility
             return;
         }
 
+        // Streamed procedural chunk geometry is rebuilt and destroyed often.
+        // Excluding it from ray tracing avoids the renderer attempting to use
+        // an evicted dynamic ray-tracing geometry instance.
+        ProceduralMesh->SetVisibleInRayTracing(false);
         ProceduralMesh->bUseAsyncCooking = false;
         ProceduralMesh->SetCollisionProfileName(
             UCollisionProfile::BlockAllDynamic_ProfileName
