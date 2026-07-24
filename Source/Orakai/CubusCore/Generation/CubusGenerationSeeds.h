@@ -11,6 +11,8 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
+    static constexpr uint32 CurrentGenerationVersion = 1;
+
     int64 World = 1;
     int32 Terrain = 0;
     int32 Rivers = 0;
@@ -30,27 +32,6 @@ struct ORAKAI_API FCubusGenerationSeeds
         Seeds.Ores = Derive(InWorldSeed, 0xC2B2AE35u);
         Seeds.Vegetation = Derive(InWorldSeed, 0x27D4EB2Fu);
         return Seeds;
-    }
-
-    static int32 DomainOffsetX(const int32 Seed)
-    {
-        const uint32 Bits = static_cast<uint32>(Seed);
-        return static_cast<int32>(Bits & 0x000fffffu) - 524288;
-    }
-
-    static int32 DomainOffsetY(const int32 Seed)
-    {
-        const uint32 Bits = static_cast<uint32>(Seed);
-        return static_cast<int32>((Bits >> 10) & 0x000fffffu) - 524288;
-    }
-
-    static int32 DomainOffsetZ(const int32 Seed)
-    {
-        uint32 Bits = static_cast<uint32>(Seed);
-        Bits ^= Bits << 13;
-        Bits ^= Bits >> 17;
-        Bits ^= Bits << 5;
-        return static_cast<int32>(Bits & 0x000fffffu) - 524288;
     }
 
 private:
