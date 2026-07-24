@@ -45,7 +45,7 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Chunk")
     void GenerateTestShape();
 
-    void GenerateTestShapeData();
+    virtual void GenerateTestShapeData();
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Chunk")
     void FillVolume();
