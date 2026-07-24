@@ -63,6 +63,18 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE")
     bool bRenderInstancedTrees = true;
 
+    /**
+     * Compatibility field for existing Blueprint assets created before staged
+     * growth split the tree mesh into four separate properties.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|PVE",
+        meta = (EditCondition = "bRenderInstancedTrees")
+    )
+    TObjectPtr<USkeletalMesh> TreeSkeletalMesh = nullptr;
+
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
@@ -101,7 +113,7 @@ protected:
         Category = "Cubus|Vegetation|PVE|Growth",
         meta = (EditCondition = "bRenderInstancedTrees")
     )
-    bool bSimulateTreeGrowth = true;
+    bool bSimulateTreeGrowth = false;
 
     /** Real-time seconds required to advance by one growth stage. */
     UPROPERTY(
