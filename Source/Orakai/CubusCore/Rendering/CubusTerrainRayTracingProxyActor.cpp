@@ -19,7 +19,12 @@ ACubusTerrainRayTracingProxyActor::ACubusTerrainRayTracingProxyActor()
     ProxyMesh->bUseAsyncCooking = false;
     ProxyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     ProxyMesh->SetGenerateOverlapEvents(false);
-    ProxyMesh->SetCastShadow(true);
+
+    // The source chunk already supplies raster/VSM shadows. This proxy exists
+    // only for ray tracing; allowing it to cast raster shadows duplicates the
+    // terrain in Virtual Shadow Maps and can overflow the non-Nanite marking
+    // queue when several large chunk proxies are active.
+    ProxyMesh->SetCastShadow(false);
     ProxyMesh->SetRenderInMainPass(false);
     ProxyMesh->SetRenderInDepthPass(false);
     ProxyMesh->SetVisibleInRayTracing(false);
