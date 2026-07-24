@@ -33,8 +33,6 @@ public:
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void GenerateTestShapeData() override;
 
-    virtual void Tick(float DeltaSeconds) override;
-
     virtual void EndPlay(
         const EEndPlayReason::Type EndPlayReason
     ) override;
@@ -92,24 +90,13 @@ protected:
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PCG",
-        meta = (ClampMin = "0.05", Units = "s")
-    )
-    float VegetationRefreshInterval = 0.25f;
-
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
         Category = "Cubus|Vegetation|PCG"
     )
     bool bGenerateVegetationPCG = true;
 
 private:
-    uint32 LastVegetationPlacementHash = 0;
     TObjectPtr<UPCGGraphInterface> LastConfiguredGraph = nullptr;
-    float TimeUntilVegetationRefresh = 0.0f;
     bool bTerrainRayTracingRequested = false;
 
-    uint32 CalculateVegetationPlacementHash() const;
     void ConfigurePCGComponent();
 };
