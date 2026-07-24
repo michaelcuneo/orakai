@@ -14,6 +14,7 @@ void ACubusPCGVoxelVolumeActor::GenerateTestShapeData()
         // Vegetation is deterministic derived data and is deliberately not
         // serialized in the voxel cache.
         RegenerateVegetationData();
+        RegenerateVegetationPCG();
 
         UE_LOG(
             LogTemp,
@@ -27,6 +28,7 @@ void ACubusPCGVoxelVolumeActor::GenerateTestShapeData()
     }
 
     Super::GenerateTestShapeData();
+    RegenerateVegetationPCG();
 
     if (SaveCachedChunk())
     {
