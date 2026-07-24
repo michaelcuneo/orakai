@@ -50,7 +50,7 @@ bool FCubusChunkStore::SaveChunk(
 )
 {
     const TConstArrayView<FCubusBlockVoxel> Voxels = Chunk.GetVoxelView();
-    const int32 VoxelCount = Voxels.Num();
+    int32 VoxelCount = Voxels.Num();
 
     if (!CubusChunkStore::ValidateVoxelCount(VoxelCount))
     {
