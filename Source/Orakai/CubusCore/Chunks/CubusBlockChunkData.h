@@ -4,6 +4,7 @@
 
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Data/CubusVegetationInstance.h"
+#include "CubusCore/Generation/CubusGenerationSeeds.h"
 
 /**
  * Fixed-size block voxel storage for one Cubus chunk.
@@ -23,6 +24,16 @@ public:
     void SetChunkCoordinate(const FIntVector& InChunkCoordinate)
     {
         ChunkCoordinate = InChunkCoordinate;
+    }
+
+    const FCubusGenerationSeeds& GetGenerationSeeds() const
+    {
+        return GenerationSeeds;
+    }
+
+    void SetGenerationSeeds(const FCubusGenerationSeeds& InGenerationSeeds)
+    {
+        GenerationSeeds = InGenerationSeeds;
     }
 
     int32 GetVoxelCount() const
@@ -81,6 +92,7 @@ public:
 
 private:
     FIntVector ChunkCoordinate = FIntVector::ZeroValue;
+    FCubusGenerationSeeds GenerationSeeds;
     TArray<FCubusBlockVoxel> Voxels;
     TArray<FCubusVegetationInstance> VegetationInstances;
 
