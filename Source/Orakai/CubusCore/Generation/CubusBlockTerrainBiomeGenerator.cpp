@@ -5,6 +5,7 @@
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
+#include "CubusCore/Generation/CubusGenerationSeeds.h"
 
 void FCubusBlockTerrainBiomeGenerator::Apply(
     FCubusBlockChunkData& Chunk,
@@ -22,6 +23,13 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
     const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
     const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
     const float Frequency = FMath::Max(0.000001f, GeologyProfile->BiomeFrequency);
+
+    const int32 BiomeSeed = Chunk.GetGenerationSeeds().Biomes;
+    const int32 BiomeOffsetX = FCubusGenerationSeeds::DomainOffsetX(BiomeSeed);
+    const int32 BiomeOffsetY = FCubusGenerationSeeds::DomainOffsetY(BiomeSeed);
+    const int32 RiverSeed = Chunk.GetGenerationSeeds().Rivers;
+    const int32 RiverOffsetX = FCubusGenerationSeeds::DomainOffsetX(RiverSeed);
+    const int32 RiverOffsetY = FCubusGenerationSeeds::DomainOffsetY(RiverSeed);
 
     const int32 PlainsMaterialId = FMath::Max(1, GeologyProfile->PlainsSurfaceMaterialId);
     const int32 ForestMaterialId = FMath::Max(1, GeologyProfile->ForestSurfaceMaterialId);
@@ -122,13 +130,13 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
             const int32 WorldX = BaseX + LocalX;
             const int32 SurfaceWorldZ = BaseZ + SurfaceLocalZ;
             const float RiverDistance = SampleRiverDistance(
-                WorldX,
-                WorldY,
+                WorldX + RiverOffsetX,
+                WorldY + RiverOffsetY,
                 GeologyProfile
             );
             const float BiomeNoise = SampleBiomeNoise(
-                WorldX,
-                WorldY,
+                WorldX + BiomeOffsetX,
+                WorldY + BiomeOffsetY,
                 Frequency
             );
 
@@ -181,10 +189,11 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus biomes chunk (%d, %d, %d): plains %d, forest %d, rocky %d, wetland %d, buried skipped %d"),
+        TEXT("Cubus biomes chunk (%d, %d, %d), seed %d: plains %d, forest %d, rocky %d, wetland %d, buried skipped %d"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
         ChunkCoordinate.Z,
+        BiomeSeed,
         PlainsCount,
         ForestCount,
         RockyCount,
