@@ -141,8 +141,9 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
     const bool bRuntimeWorld =
         CubusPCGVoxelVolumeActor::IsRuntimeWorld(this);
 
-    bGenerateVegetationPCG =
-        bRuntimeWorld || bInGenerateVegetationPCG;
+    // Runtime mode controls which rendering path is used. It must not override
+    // the world streamer's decision to delay or disable vegetation generation.
+    bGenerateVegetationPCG = bInGenerateVegetationPCG;
 
     if (IsValid(VegetationPointSource))
     {
