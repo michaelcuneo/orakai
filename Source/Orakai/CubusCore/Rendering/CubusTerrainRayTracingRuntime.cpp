@@ -1,14 +1,10 @@
 #include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
-#include "CubusCore/Actors/CubusVoxelVolumeActor.h"
-#include "CubusCore/Chunks/CubusChunkConstants.h"
 
 #include "Containers/Ticker.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
-#include "Kismet/GameplayStatics.h"
 #include "ProceduralMeshComponent.h"
 
 namespace CubusTerrainRayTracingRuntime
@@ -17,82 +13,38 @@ namespace CubusTerrainRayTracingRuntime
 
     TAutoConsoleVariable<int32> CVarEnabled(
         TEXT("Cubus.RayTracing.Enabled"),
-        1,
-        TEXT("Enable near-field hardware ray tracing for completed Cubus terrain chunks."),
-        ECVF_Scalability | ECVF_RenderThreadSafe
-    );
-
-    TAutoConsoleVariable<int32> CVarHorizontalRadius(
-        TEXT("Cubus.RayTracing.Radius"),
-        1,
-        TEXT("Horizontal chunk radius included in near-field Cubus terrain ray tracing."),
-        ECVF_Scalability | ECVF_RenderThreadSafe
-    );
-
-    TAutoConsoleVariable<int32> CVarVerticalRadius(
-        TEXT("Cubus.RayTracing.VerticalRadius"),
         0,
-        TEXT("Vertical chunk radius included in near-field Cubus terrain ray tracing."),
+        TEXT("Terrain ray tracing is disabled on live procedural chunks. A stable proxy path is required."),
         ECVF_Scalability | ECVF_RenderThreadSafe
     );
 
     FTSTicker::FDelegateHandle TickerHandle;
+    bool bReportedUnsupportedRequest = false;
 
-    bool IsInsideRadius(
-        const FIntVector& Coordinate,
-        const FIntVector& Centre,
-        const int32 HorizontalRadius,
-        const int32 VerticalRadius
-    )
-    {
-        return
-            FMath::Abs(Coordinate.X - Centre.X) <= HorizontalRadius &&
-            FMath::Abs(Coordinate.Y - Centre.Y) <= HorizontalRadius &&
-            FMath::Abs(Coordinate.Z - Centre.Z) <= VerticalRadius;
-    }
-
-    FIntVector ResolvePlayerChunk(
-        const APawn& Pawn,
-        const float VoxelSize
-    )
-    {
-        const double ChunkWorldSize =
-            static_cast<double>(Cubus::ChunkSize) *
-            static_cast<double>(FMath::Max(1.0f, VoxelSize));
-
-        const FVector Location = Pawn.GetActorLocation();
-
-        return FIntVector(
-            FMath::FloorToInt(Location.X / ChunkWorldSize),
-            FMath::FloorToInt(Location.Y / ChunkWorldSize),
-            FMath::FloorToInt(Location.Z / ChunkWorldSize)
-        );
-    }
-
-    void UpdateWorld(UWorld* World)
+    void DisableProceduralChunkRayTracing(UWorld* World)
     {
         if (!IsValid(World) || !World->IsGameWorld())
         {
             return;
         }
 
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-        if (!IsValid(PlayerPawn))
-        {
-            return;
-        }
+        const bool bRequested =
+            CVarEnabled.GetValueOnGameThread() != 0;
 
-        const bool bEnabled = CVarEnabled.GetValueOnGameThread() != 0;
-        const int32 HorizontalRadius = FMath::Clamp(
-            CVarHorizontalRadius.GetValueOnGameThread(),
-            0,
-            4
-        );
-        const int32 VerticalRadius = FMath::Clamp(
-            CVarVerticalRadius.GetValueOnGameThread(),
-            0,
-            2
-        );
+        if (bRequested && !bReportedUnsupportedRequest)
+        {
+            bReportedUnsupportedRequest = true;
+
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("Cubus terrain ray tracing request ignored: live UProceduralMeshComponent chunks cannot safely share streamed/rebuilt geometry with the ray-tracing scene. Use the dedicated proxy path instead.")
+            );
+        }
+        else if (!bRequested)
+        {
+            bReportedUnsupportedRequest = false;
+        }
 
         for (
             TActorIterator<ACubusPCGVoxelVolumeActor> Iterator(World);
@@ -101,33 +53,22 @@ namespace CubusTerrainRayTracingRuntime
         )
         {
             ACubusPCGVoxelVolumeActor* Chunk = *Iterator;
+
             if (!IsValid(Chunk))
             {
                 continue;
             }
 
-            const FCubusBlockChunkData* ChunkData = Chunk->GetChunkData();
-            const bool bHasCompletedGeometry =
-                ChunkData != nullptr &&
-                ChunkData->GetVoxelCount() > 0 &&
-                ChunkData->HasAnyOccupiedVoxel();
+            Chunk->SetTerrainRayTracingEnabled(false);
 
-            const FIntVector PlayerChunk = ResolvePlayerChunk(
-                *PlayerPawn,
-                Chunk->GetVoxelSize()
-            );
+            UProceduralMeshComponent* Mesh =
+                Cast<UProceduralMeshComponent>(Chunk->GetRootComponent());
 
-            const bool bShouldTrace =
-                bEnabled &&
-                bHasCompletedGeometry &&
-                IsInsideRadius(
-                    Chunk->GetChunkCoordinate(),
-                    PlayerChunk,
-                    HorizontalRadius,
-                    VerticalRadius
-                );
-
-            Chunk->SetTerrainRayTracingEnabled(bShouldTrace);
+            if (IsValid(Mesh) && Mesh->bVisibleInRayTracing)
+            {
+                Mesh->SetVisibleInRayTracing(false);
+                Mesh->MarkRenderStateDirty();
+            }
         }
     }
 
@@ -140,7 +81,7 @@ namespace CubusTerrainRayTracingRuntime
 
         for (const FWorldContext& Context : GEngine->GetWorldContexts())
         {
-            UpdateWorld(Context.World());
+            DisableProceduralChunkRayTracing(Context.World());
         }
 
         return true;
@@ -172,12 +113,10 @@ void ACubusPCGVoxelVolumeActor::SetTerrainRayTracingEnabled(
     const bool bEnabled
 )
 {
-    if (bTerrainRayTracingRequested == bEnabled)
-    {
-        return;
-    }
-
-    bTerrainRayTracingRequested = bEnabled;
+    // Live Cubus chunks are rebuilt and destroyed as part of normal streaming.
+    // They must never enter the dynamic ray-tracing geometry path because the
+    // renderer may evict their geometry independently of the actor lifetime.
+    bTerrainRayTracingRequested = false;
 
     UProceduralMeshComponent* Mesh = Cast<UProceduralMeshComponent>(
         GetRootComponent()
@@ -188,6 +127,9 @@ void ACubusPCGVoxelVolumeActor::SetTerrainRayTracingEnabled(
         return;
     }
 
-    Mesh->SetVisibleInRayTracing(bEnabled);
-    Mesh->MarkRenderStateDirty();
+    if (Mesh->bVisibleInRayTracing)
+    {
+        Mesh->SetVisibleInRayTracing(false);
+        Mesh->MarkRenderStateDirty();
+    }
 }
