@@ -5,6 +5,7 @@
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Generation/CubusBlockTerrainBiomeGenerator.h"
+#include "CubusCore/Generation/CubusGenerationSeeds.h"
 
 void FCubusBlockTerrainRiverGenerator::Apply(
     FCubusBlockChunkData& Chunk,
@@ -21,6 +22,9 @@ void FCubusBlockTerrainRiverGenerator::Apply(
         const FIntVector ChunkCoordinate = Chunk.GetChunkCoordinate();
         const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
         const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
+        const int32 RiverSeed = Chunk.GetGenerationSeeds().Rivers;
+        const int32 RiverOffsetX = FCubusGenerationSeeds::DomainOffsetX(RiverSeed);
+        const int32 RiverOffsetY = FCubusGenerationSeeds::DomainOffsetY(RiverSeed);
 
         const float ChannelWidth = FMath::Clamp(
             GeologyProfile->RiverChannelWidth,
@@ -60,8 +64,8 @@ void FCubusBlockTerrainRiverGenerator::Apply(
             {
                 const int32 WorldX = BaseX + LocalX;
                 const float RiverDistance = SampleRiverDistance(
-                    WorldX,
-                    WorldY,
+                    WorldX + RiverOffsetX,
+                    WorldY + RiverOffsetY,
                     GeologyProfile
                 );
 
@@ -96,8 +100,6 @@ void FCubusBlockTerrainRiverGenerator::Apply(
                     continue;
                 }
 
-                // A solid voxel on the upper chunk boundary may continue into the
-                // chunk above. Do not interpret it as an exposed world surface.
                 if (HighestSolidLocalZ == Cubus::ChunkSize - 1)
                 {
                     ++BuriedColumnCount;
@@ -214,10 +216,11 @@ void FCubusBlockTerrainRiverGenerator::Apply(
         UE_LOG(
             LogTemp,
             Display,
-            TEXT("Cubus rivers chunk (%d, %d, %d): %d channel columns, %d water voxels, buried skipped %d"),
+            TEXT("Cubus rivers chunk (%d, %d, %d), seed %d: %d channel columns, %d water voxels, buried skipped %d"),
             ChunkCoordinate.X,
             ChunkCoordinate.Y,
             ChunkCoordinate.Z,
+            RiverSeed,
             RiverColumnCount,
             RiverWaterVoxelCount,
             BuriedColumnCount
