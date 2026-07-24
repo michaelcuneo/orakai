@@ -4,6 +4,8 @@
 #include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
 #include "CubusCore/Storage/CubusChunkStore.h"
 
+#include "ProceduralMeshComponent.h"
+
 namespace CubusVoxelVolumeActorStorage
 {
     FCubusChunkStoreContext MakeContext(
@@ -108,6 +110,15 @@ void ACubusVoxelVolumeActor::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
 {
+    if (
+        UProceduralMeshComponent* Mesh =
+            Cast<UProceduralMeshComponent>(GetRootComponent())
+    )
+    {
+        Mesh->SetVisibleInRayTracing(false);
+        Mesh->MarkRenderStateDirty();
+    }
+
     SaveCachedChunk();
     Super::EndPlay(EndPlayReason);
 }
