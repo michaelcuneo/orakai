@@ -73,13 +73,17 @@ bool ACubusTerrainRayTracingProxyActor::BuildFromSource(
         }
 
         TArray<FVector> Vertices;
+        TArray<int32> Triangles;
         TArray<FVector> Normals;
         TArray<FVector2D> UV0;
         TArray<FLinearColor> VertexColors;
         TArray<FProcMeshTangent> Tangents;
 
         const int32 VertexCount = SourceSection->ProcVertexBuffer.Num();
+        const int32 IndexCount = SourceSection->ProcIndexBuffer.Num();
+
         Vertices.Reserve(VertexCount);
+        Triangles.Reserve(IndexCount);
         Normals.Reserve(VertexCount);
         UV0.Reserve(VertexCount);
         VertexColors.Reserve(VertexCount);
@@ -94,14 +98,39 @@ bool ACubusTerrainRayTracingProxyActor::BuildFromSource(
             Tangents.Add(SourceVertex.Tangent);
         }
 
+        for (const uint32 SourceIndex : SourceSection->ProcIndexBuffer)
+        {
+            if (SourceIndex >= static_cast<uint32>(VertexCount))
+            {
+                UE_LOG(
+                    LogTemp,
+                    Warning,
+                    TEXT("Cubus ray tracing proxy skipped invalid index %u in section %d"),
+                    SourceIndex,
+                    SectionIndex
+                );
+
+                Triangles.Reset();
+                break;
+            }
+
+            Triangles.Add(static_cast<int32>(SourceIndex));
+        }
+
+        if (Triangles.Num() != IndexCount)
+        {
+            continue;
+        }
+
         ProxyMesh->CreateMeshSection_LinearColor(
             SectionIndex,
             Vertices,
-            SourceSection->ProcIndexBuffer,
+            Triangles,
             Normals,
             UV0,
             VertexColors,
             Tangents,
+            false,
             false
         );
 
