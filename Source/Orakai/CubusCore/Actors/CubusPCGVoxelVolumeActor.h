@@ -39,6 +39,13 @@ public:
         const EEndPlayReason::Type EndPlayReason
     ) override;
 
+    void SetTerrainRayTracingEnabled(bool bEnabled);
+
+    bool IsTerrainRayTracingRequested() const
+    {
+        return bTerrainRayTracingRequested;
+    }
+
     UFUNCTION(
         BlueprintCallable,
         CallInEditor,
@@ -101,6 +108,7 @@ private:
     uint32 LastVegetationPlacementHash = 0;
     TObjectPtr<UPCGGraphInterface> LastConfiguredGraph = nullptr;
     float TimeUntilVegetationRefresh = 0.0f;
+    bool bTerrainRayTracingRequested = false;
 
     uint32 CalculateVegetationPlacementHash() const;
     void ConfigurePCGComponent();
