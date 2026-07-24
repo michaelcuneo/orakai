@@ -59,11 +59,7 @@ void ACubusPCGVoxelVolumeActor::OnConstruction(
             bGenerateVegetationPCG
         );
 
-        if (bGenerateVegetationPCG)
-        {
-            VegetationPointSource->RebuildVegetation();
-        }
-        else
+        if (!bGenerateVegetationPCG)
         {
             VegetationPointSource->ClearVegetation();
         }
@@ -113,11 +109,7 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
             bGenerateVegetationPCG
         );
 
-        if (bGenerateVegetationPCG)
-        {
-            VegetationPointSource->RebuildVegetation();
-        }
-        else
+        if (!bGenerateVegetationPCG)
         {
             VegetationPointSource->ClearVegetation();
         }
