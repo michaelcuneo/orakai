@@ -30,6 +30,11 @@ bool ACubusVoxelVolumeActor::TryLoadCachedChunk()
     const FCubusChunkStoreContext Context =
         CubusVoxelVolumeActorStorage::MakeContext(*ChunkData);
 
+    if (!FCubusChunkStore::HasChunk(ChunkCoordinate, Context))
+    {
+        return false;
+    }
+
     const bool bLoaded = FCubusChunkStore::LoadChunk(
         *ChunkData,
         Context
