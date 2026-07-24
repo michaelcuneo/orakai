@@ -5,6 +5,15 @@
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Generation/CubusBlockTerrainRiverGenerator.h"
+#include "CubusCore/Generation/CubusGenerationSeeds.h"
+
+namespace CubusBlockTerrainGeology
+{
+    int32 WholeChunkOffset(const int32 VoxelOffset)
+    {
+        return (VoxelOffset / Cubus::ChunkSize) * Cubus::ChunkSize;
+    }
+}
 
 void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
     FCubusBlockChunkData& Chunk,
@@ -40,6 +49,24 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
     const UCubusGeologyProfile* GeologyProfile
 )
 {
+    const FCubusGenerationSeeds& Seeds = Chunk.GetGenerationSeeds();
+    const FIntVector OriginalCoordinate = Chunk.GetChunkCoordinate();
+
+    const int32 TerrainOffsetX = CubusBlockTerrainGeology::WholeChunkOffset(
+        FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain)
+    );
+    const int32 TerrainOffsetY = CubusBlockTerrainGeology::WholeChunkOffset(
+        FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain)
+    );
+
+    const FIntVector TerrainSamplingCoordinate(
+        OriginalCoordinate.X + TerrainOffsetX / Cubus::ChunkSize,
+        OriginalCoordinate.Y + TerrainOffsetY / Cubus::ChunkSize,
+        OriginalCoordinate.Z
+    );
+
+    Chunk.SetChunkCoordinate(TerrainSamplingCoordinate);
+
     GenerateHeightTerrain(
         Chunk,
         BaseHeight,
@@ -73,20 +100,18 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
         WaterMaterialId
     );
 
+    Chunk.SetChunkCoordinate(OriginalCoordinate);
+
     if (!IsValid(GeologyProfile))
     {
         return;
     }
 
-    FCubusBlockTerrainRiverGenerator::Apply(
-        Chunk,
-        GeologyProfile
-    );
+    FCubusBlockTerrainRiverGenerator::Apply(Chunk, GeologyProfile);
 
-    const FIntVector ChunkCoordinate = Chunk.GetChunkCoordinate();
-    const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
-    const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
-    const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
+    const int32 BaseX = OriginalCoordinate.X * Cubus::ChunkSize;
+    const int32 BaseY = OriginalCoordinate.Y * Cubus::ChunkSize;
+    const int32 BaseZ = OriginalCoordinate.Z * Cubus::ChunkSize;
 
     for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
     {
@@ -96,8 +121,8 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
         {
             const int32 WorldX = BaseX + LocalX;
             const int32 SurfaceWorldZ = SampleTerrainHeight(
-                WorldX,
-                WorldY,
+                WorldX + TerrainOffsetX,
+                WorldY + TerrainOffsetY,
                 BaseHeight,
                 ContinentAmplitude,
                 ContinentFrequency,
@@ -176,6 +201,19 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
     );
 
     ApplyOreRules(Chunk, GeologyProfile);
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("Cubus generation seeds world %lld terrain %d rivers %d biomes %d caves %d ores %d vegetation %d"),
+        Seeds.World,
+        Seeds.Terrain,
+        Seeds.Rivers,
+        Seeds.Biomes,
+        Seeds.Caves,
+        Seeds.Ores,
+        Seeds.Vegetation
+    );
 }
 
 int32 FCubusBlockTerrainGenerator::SelectSubsurfaceMaterial(
@@ -238,10 +276,22 @@ void FCubusBlockTerrainGenerator::CarveCaves(
         return;
     }
 
+    const FCubusGenerationSeeds& Seeds = Chunk.GetGenerationSeeds();
     const FIntVector ChunkCoordinate = Chunk.GetChunkCoordinate();
     const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
     const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
     const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
+
+    const int32 TerrainOffsetX = CubusBlockTerrainGeology::WholeChunkOffset(
+        FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain)
+    );
+    const int32 TerrainOffsetY = CubusBlockTerrainGeology::WholeChunkOffset(
+        FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain)
+    );
+    const int32 CaveOffsetX = FCubusGenerationSeeds::DomainOffsetX(Seeds.Caves);
+    const int32 CaveOffsetY = FCubusGenerationSeeds::DomainOffsetY(Seeds.Caves);
+    const int32 CaveOffsetZ = FCubusGenerationSeeds::DomainOffsetZ(Seeds.Caves);
+
     const int32 MinimumWorldZ = FMath::Min(
         GeologyProfile->CaveMinimumWorldZ,
         GeologyProfile->CaveMaximumWorldZ
@@ -250,8 +300,15 @@ void FCubusBlockTerrainGenerator::CarveCaves(
         GeologyProfile->CaveMinimumWorldZ,
         GeologyProfile->CaveMaximumWorldZ
     );
-    const int32 SurfaceClearance = FMath::Max(1, GeologyProfile->CaveSurfaceClearance);
-    const float Threshold = FMath::Clamp(GeologyProfile->CaveThreshold, 0.0f, 1.0f);
+    const int32 SurfaceClearance = FMath::Max(
+        1,
+        GeologyProfile->CaveSurfaceClearance
+    );
+    const float Threshold = FMath::Clamp(
+        GeologyProfile->CaveThreshold,
+        0.0f,
+        1.0f
+    );
 
     int32 CarvedVoxelCount = 0;
 
@@ -263,8 +320,8 @@ void FCubusBlockTerrainGenerator::CarveCaves(
         {
             const int32 WorldX = BaseX + LocalX;
             const int32 SurfaceWorldZ = SampleTerrainHeight(
-                WorldX,
-                WorldY,
+                WorldX + TerrainOffsetX,
+                WorldY + TerrainOffsetY,
                 BaseHeight,
                 ContinentAmplitude,
                 ContinentFrequency,
@@ -313,18 +370,18 @@ void FCubusBlockTerrainGenerator::CarveCaves(
 
                 const float PrimaryNoise = FMath::Abs(
                     SampleNoise3D(
-                        WorldX,
-                        WorldY,
-                        WorldZ,
+                        WorldX + CaveOffsetX,
+                        WorldY + CaveOffsetY,
+                        WorldZ + CaveOffsetZ,
                         GeologyProfile->CavePrimaryFrequency
                     )
                 );
 
                 const float SecondaryNoise = FMath::Abs(
                     SampleNoise3D(
-                        WorldX + 1871,
-                        WorldY - 953,
-                        WorldZ + 421,
+                        WorldX + CaveOffsetX + 1871,
+                        WorldY + CaveOffsetY - 953,
+                        WorldZ + CaveOffsetZ + 421,
                         GeologyProfile->CaveSecondaryFrequency
                     )
                 );
@@ -344,10 +401,11 @@ void FCubusBlockTerrainGenerator::CarveCaves(
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus geology chunk (%d, %d, %d): carved %d cave voxels"),
+        TEXT("Cubus geology chunk (%d, %d, %d), cave seed %d: carved %d cave voxels"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
         ChunkCoordinate.Z,
+        Seeds.Caves,
         CarvedVoxelCount
     );
 }
@@ -362,6 +420,7 @@ void FCubusBlockTerrainGenerator::ApplyOreRules(
         return;
     }
 
+    const int32 OreSeed = Chunk.GetGenerationSeeds().Ores;
     const FIntVector ChunkCoordinate = Chunk.GetChunkCoordinate();
     const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
     const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
@@ -421,11 +480,10 @@ void FCubusBlockTerrainGenerator::ApplyOreRules(
                         -1.0f,
                         1.0f
                     );
-
-                    const int32 Seed = OreRule.NoiseSeed;
-                    const int32 OffsetX = Seed * 7919 + 104729;
-                    const int32 OffsetY = Seed * 1543 - 130363;
-                    const int32 OffsetZ = Seed * 3571 + 169087;
+                    const int32 CombinedSeed = OreSeed ^ OreRule.NoiseSeed;
+                    const int32 OffsetX = FCubusGenerationSeeds::DomainOffsetX(CombinedSeed);
+                    const int32 OffsetY = FCubusGenerationSeeds::DomainOffsetY(CombinedSeed);
+                    const int32 OffsetZ = FCubusGenerationSeeds::DomainOffsetZ(CombinedSeed);
 
                     const float NoiseValue = SampleNoise3D(
                         WorldX + OffsetX,
@@ -452,10 +510,11 @@ void FCubusBlockTerrainGenerator::ApplyOreRules(
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus geology chunk (%d, %d, %d): generated %d ore voxels"),
+        TEXT("Cubus geology chunk (%d, %d, %d), ore seed %d: generated %d ore voxels"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
         ChunkCoordinate.Z,
+        OreSeed,
         GeneratedOreVoxelCount
     );
 
