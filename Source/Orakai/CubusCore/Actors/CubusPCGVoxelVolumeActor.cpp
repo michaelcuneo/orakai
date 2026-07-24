@@ -1,5 +1,7 @@
 #include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 
+#include "CubusCore/Chunks/CubusBlockChunkData.h"
+#include "CubusCore/Data/CubusVegetationInstance.h"
 #include "CubusCore/Rendering/CubusVegetationRendererComponent.h"
 
 #include "Engine/World.h"
@@ -21,7 +23,8 @@ namespace CubusPCGVoxelVolumeActor
 
 ACubusPCGVoxelVolumeActor::ACubusPCGVoxelVolumeActor()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = true;
 
     VegetationPointSource = CreateDefaultSubobject<
         UCubusVegetationRendererComponent
@@ -55,14 +58,8 @@ void ACubusPCGVoxelVolumeActor::OnConstruction(
 
     if (IsValid(VegetationPointSource))
     {
-        VegetationPointSource->SetComponentTickEnabled(
-            bGenerateVegetationPCG
-        );
-
-        if (!bGenerateVegetationPCG)
-        {
-            VegetationPointSource->ClearVegetation();
-        }
+        VegetationPointSource->SetComponentTickEnabled(true);
+        VegetationPointSource->RebuildVegetation();
     }
 
     if (bRuntimeWorld && IsValid(VegetationPCG))
@@ -70,6 +67,51 @@ void ACubusPCGVoxelVolumeActor::OnConstruction(
         VegetationPCG->Deactivate();
         VegetationPCG->SetComponentTickEnabled(false);
     }
+
+    LastVegetationPlacementHash =
+        CalculateVegetationPlacementHash();
+}
+
+void ACubusPCGVoxelVolumeActor::Tick(const float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    if (!bGenerateVegetationPCG)
+    {
+        return;
+    }
+
+    TimeUntilVegetationRefresh -= DeltaSeconds;
+
+    if (TimeUntilVegetationRefresh > 0.0f)
+    {
+        return;
+    }
+
+    TimeUntilVegetationRefresh = FMath::Max(
+        0.05f,
+        VegetationRefreshInterval
+    );
+
+    const uint32 CurrentPlacementHash =
+        CalculateVegetationPlacementHash();
+
+    const bool bRuntimeWorld =
+        CubusPCGVoxelVolumeActor::IsRuntimeWorld(this);
+
+    const bool bGraphChanged =
+        !bRuntimeWorld &&
+        LastConfiguredGraph != VegetationGraph;
+
+    if (
+        CurrentPlacementHash == LastVegetationPlacementHash &&
+        !bGraphChanged
+    )
+    {
+        return;
+    }
+
+    RegenerateVegetationPCG();
 }
 
 void ACubusPCGVoxelVolumeActor::EndPlay(
@@ -99,9 +141,8 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
     const bool bRuntimeWorld =
         CubusPCGVoxelVolumeActor::IsRuntimeWorld(this);
 
-    // Runtime mode controls which rendering path is used. It must not override
-    // the world streamer's decision to delay or disable vegetation generation.
-    bGenerateVegetationPCG = bInGenerateVegetationPCG;
+    bGenerateVegetationPCG =
+        bRuntimeWorld || bInGenerateVegetationPCG;
 
     if (IsValid(VegetationPointSource))
     {
@@ -109,11 +150,17 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
             bGenerateVegetationPCG
         );
 
-        if (!bGenerateVegetationPCG)
+        if (bGenerateVegetationPCG)
+        {
+            VegetationPointSource->RebuildVegetation();
+        }
+        else
         {
             VegetationPointSource->ClearVegetation();
         }
     }
+
+    SetActorTickEnabled(bGenerateVegetationPCG);
 
     if (bRuntimeWorld)
     {
@@ -125,6 +172,7 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
             VegetationPCG->SetComponentTickEnabled(false);
         }
 
+        LastVegetationPlacementHash = 0;
         return;
     }
 
@@ -157,6 +205,9 @@ void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
     {
         VegetationPointSource->RebuildVegetation();
     }
+
+    LastVegetationPlacementHash =
+        CalculateVegetationPlacementHash();
 
     if (CubusPCGVoxelVolumeActor::IsRuntimeWorld(this))
     {
@@ -203,6 +254,45 @@ void ACubusPCGVoxelVolumeActor::CleanupVegetationPCG()
     {
         VegetationPCG->CleanupLocal(true);
     }
+}
+
+uint32 ACubusPCGVoxelVolumeActor::CalculateVegetationPlacementHash() const
+{
+    const FCubusBlockChunkData* CurrentChunkData = GetChunkData();
+
+    if (CurrentChunkData == nullptr)
+    {
+        return 0;
+    }
+
+    uint32 Hash = GetTypeHash(
+        CurrentChunkData->GetVegetationInstances().Num()
+    );
+
+    for (
+        const FCubusVegetationInstance& Instance :
+        CurrentChunkData->GetVegetationInstances()
+    )
+    {
+        Hash = HashCombineFast(
+            Hash,
+            GetTypeHash(Instance.WorldVoxel)
+        );
+        Hash = HashCombineFast(
+            Hash,
+            GetTypeHash(Instance.TypeId)
+        );
+        Hash = HashCombineFast(
+            Hash,
+            GetTypeHash(Instance.RotationYaw)
+        );
+        Hash = HashCombineFast(
+            Hash,
+            GetTypeHash(Instance.Scale)
+        );
+    }
+
+    return Hash;
 }
 
 void ACubusPCGVoxelVolumeActor::ConfigurePCGComponent()
