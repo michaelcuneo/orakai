@@ -17,6 +17,7 @@ class UPCGGraphInterface;
 UCLASS(
     BlueprintType,
     Blueprintable,
+    Config = GameUserSettings,
     ClassGroup = "Cubus",
     meta = (DisplayName = "Cubus Block World")
 )
@@ -51,6 +52,37 @@ public:
     int64 GetWorldSeed() const
     {
         return WorldSeed;
+    }
+
+    UFUNCTION(BlueprintCallable, Category = "Cubus|Client Settings")
+    void SetClientViewDistance(
+        int32 InHorizontalViewRadius,
+        int32 InVerticalViewRadius,
+        bool bSaveSetting = true
+    );
+
+    UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
+    int32 GetClientHorizontalViewDistance() const
+    {
+        return HorizontalViewRadius;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
+    int32 GetClientVerticalViewDistance() const
+    {
+        return VerticalViewRadius;
+    }
+
+    UFUNCTION(BlueprintCallable, Category = "Cubus|Client Settings")
+    void SetClientChunkLoadRate(
+        int32 InMaxChunksGeneratedPerTick,
+        bool bSaveSetting = true
+    );
+
+    UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
+    int32 GetClientChunkLoadRate() const
+    {
+        return MaxChunksGeneratedPerTick;
     }
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
@@ -113,6 +145,7 @@ protected:
     int32 InitialLoadRadius = 1;
 
     UPROPERTY(
+        Config,
         EditAnywhere,
         BlueprintReadWrite,
         Category = "Cubus|Runtime Streaming",
@@ -121,6 +154,7 @@ protected:
     int32 HorizontalViewRadius = 3;
 
     UPROPERTY(
+        Config,
         EditAnywhere,
         BlueprintReadWrite,
         Category = "Cubus|Runtime Streaming",
@@ -129,6 +163,7 @@ protected:
     int32 VerticalViewRadius = 0;
 
     UPROPERTY(
+        Config,
         EditAnywhere,
         BlueprintReadWrite,
         Category = "Cubus|Runtime Streaming",
