@@ -5,6 +5,7 @@
 
 #include "CubusTerrainRayTracingProxyActor.generated.h"
 
+class ACubusPCGVoxelVolumeActor;
 class UProceduralMeshComponent;
 
 /**
@@ -24,15 +25,25 @@ public:
     ACubusTerrainRayTracingProxyActor();
 
     bool BuildFromSource(
-        const UProceduralMeshComponent* SourceMesh,
+        ACubusPCGVoxelVolumeActor* InSourceChunk,
         int32 InSourceRevision
     );
 
     void BeginRetire(float DelaySeconds = 0.5f);
 
+    ACubusPCGVoxelVolumeActor* GetSourceChunk() const
+    {
+        return SourceChunk.Get();
+    }
+
     int32 GetSourceRevision() const
     {
         return SourceRevision;
+    }
+
+    bool IsRetiring() const
+    {
+        return bRetiring;
     }
 
 protected:
@@ -44,6 +55,7 @@ private:
     UPROPERTY(VisibleAnywhere)
     TObjectPtr<UProceduralMeshComponent> ProxyMesh;
 
+    TWeakObjectPtr<ACubusPCGVoxelVolumeActor> SourceChunk;
     int32 SourceRevision = INDEX_NONE;
     bool bRetiring = false;
 };
