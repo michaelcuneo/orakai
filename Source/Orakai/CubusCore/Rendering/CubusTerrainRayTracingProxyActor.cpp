@@ -39,7 +39,7 @@ bool ACubusTerrainRayTracingProxyActor::BuildFromSource(
         return false;
     }
 
-    const UProceduralMeshComponent* SourceMesh =
+    UProceduralMeshComponent* SourceMesh =
         Cast<UProceduralMeshComponent>(InSourceChunk->GetRootComponent());
 
     if (!IsValid(SourceMesh))
