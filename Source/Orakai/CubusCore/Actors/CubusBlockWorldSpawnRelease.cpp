@@ -40,6 +40,12 @@ void ACubusBlockWorldActor::ReleaseHeldPawnAtLocation(
         }
     }
 
+    // The streamed terrain mesh is centred on its chunk actor. Releasing the
+    // pawn onto a high surface can move the calculated tracking coordinate into
+    // the neighbouring Z layer. Keep one layer above and below loaded so the
+    // surface chunk and its vegetation are not immediately queued for removal.
+    VerticalViewRadius = FMath::Max(1, VerticalViewRadius);
+
     UE_LOG(
         LogTemp,
         Display,
