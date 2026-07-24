@@ -610,13 +610,21 @@ FIntVector ACubusBlockWorldActor::WorldLocationToChunkCoordinate(
         static_cast<double>(Cubus::ChunkSize) *
         static_cast<double>(FMath::Max(1.0f, GeneratedVoxelSize));
 
+    const double HalfChunkWorldSize = ChunkWorldSize * 0.5;
+
     const FVector RelativeLocation =
         WorldLocation - GetActorLocation();
 
     return FIntVector(
-        FMath::FloorToInt(RelativeLocation.X / ChunkWorldSize),
-        FMath::FloorToInt(RelativeLocation.Y / ChunkWorldSize),
-        FMath::FloorToInt(RelativeLocation.Z / ChunkWorldSize)
+        FMath::FloorToInt(
+            (RelativeLocation.X + HalfChunkWorldSize) / ChunkWorldSize
+        ),
+        FMath::FloorToInt(
+            (RelativeLocation.Y + HalfChunkWorldSize) / ChunkWorldSize
+        ),
+        FMath::FloorToInt(
+            (RelativeLocation.Z + HalfChunkWorldSize) / ChunkWorldSize
+        )
     );
 }
 
