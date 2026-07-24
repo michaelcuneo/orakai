@@ -61,27 +61,19 @@ namespace CubusTerrainRayTracingRuntime
 
     struct FWorldProxyState
     {
-        TMap<TWeakObjectPtr<ACubusPCGVoxelVolumeActor>, FChunkProxyState>
-            Chunks;
+        TMap<TWeakObjectPtr<ACubusPCGVoxelVolumeActor>, FChunkProxyState> Chunks;
     };
 
     FTSTicker::FDelegateHandle TickerHandle;
     TMap<TWeakObjectPtr<UWorld>, FWorldProxyState> WorldStates;
 
-    int32 CalculateMeshRevision(
-        const UProceduralMeshComponent& Mesh
-    )
+    int32 CalculateMeshRevision(UProceduralMeshComponent& Mesh)
     {
         uint32 Hash = GetTypeHash(Mesh.GetNumSections());
 
-        for (
-            int32 SectionIndex = 0;
-            SectionIndex < Mesh.GetNumSections();
-            ++SectionIndex
-        )
+        for (int32 SectionIndex = 0; SectionIndex < Mesh.GetNumSections(); ++SectionIndex)
         {
-            const FProcMeshSection* Section =
-                Mesh.GetProcMeshSection(SectionIndex);
+            const FProcMeshSection* Section = Mesh.GetProcMeshSection(SectionIndex);
 
             if (Section == nullptr)
             {
@@ -89,31 +81,16 @@ namespace CubusTerrainRayTracingRuntime
                 continue;
             }
 
-            Hash = HashCombineFast(
-                Hash,
-                GetTypeHash(Section->ProcVertexBuffer.Num())
-            );
-            Hash = HashCombineFast(
-                Hash,
-                GetTypeHash(Section->ProcIndexBuffer.Num())
-            );
-            Hash = HashCombineFast(
-                Hash,
-                GetTypeHash(Section->SectionLocalBox.Min)
-            );
-            Hash = HashCombineFast(
-                Hash,
-                GetTypeHash(Section->SectionLocalBox.Max)
-            );
+            Hash = HashCombineFast(Hash, GetTypeHash(Section->ProcVertexBuffer.Num()));
+            Hash = HashCombineFast(Hash, GetTypeHash(Section->ProcIndexBuffer.Num()));
+            Hash = HashCombineFast(Hash, GetTypeHash(Section->SectionLocalBox.Min));
+            Hash = HashCombineFast(Hash, GetTypeHash(Section->SectionLocalBox.Max));
         }
 
         return static_cast<int32>(Hash);
     }
 
-    FIntVector ResolvePlayerChunk(
-        const APawn& Pawn,
-        const float VoxelSize
-    )
+    FIntVector ResolvePlayerChunk(const APawn& Pawn, const float VoxelSize)
     {
         const double ChunkWorldSize =
             static_cast<double>(Cubus::ChunkSize) *
@@ -143,8 +120,7 @@ namespace CubusTerrainRayTracingRuntime
 
     void RetireProxy(FChunkProxyState& State)
     {
-        ACubusTerrainRayTracingProxyActor* Proxy =
-            State.ActiveProxy.Get();
+        ACubusTerrainRayTracingProxyActor* Proxy = State.ActiveProxy.Get();
 
         if (IsValid(Proxy))
         {
@@ -205,7 +181,8 @@ namespace CubusTerrainRayTracingRuntime
             return;
         }
 
-        FWorldProxyState& WorldState = WorldStates.FindOrAdd(World);
+        const TWeakObjectPtr<UWorld> WorldKey(World);
+        FWorldProxyState& WorldState = WorldStates.FindOrAdd(WorldKey);
 
         APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
         const bool bEnabled =
@@ -239,11 +216,7 @@ namespace CubusTerrainRayTracingRuntime
         int32 BuildsThisUpdate = 0;
         TSet<TWeakObjectPtr<ACubusPCGVoxelVolumeActor>> DesiredChunks;
 
-        for (
-            TActorIterator<ACubusPCGVoxelVolumeActor> Iterator(World);
-            Iterator;
-            ++Iterator
-        )
+        for (TActorIterator<ACubusPCGVoxelVolumeActor> Iterator(World); Iterator; ++Iterator)
         {
             ACubusPCGVoxelVolumeActor* Chunk = *Iterator;
 
@@ -252,7 +225,6 @@ namespace CubusTerrainRayTracingRuntime
                 continue;
             }
 
-            // The streamed source mesh must never enter ray tracing itself.
             Chunk->SetTerrainRayTracingEnabled(false);
 
             if (!bEnabled)
@@ -263,8 +235,7 @@ namespace CubusTerrainRayTracingRuntime
             UProceduralMeshComponent* SourceMesh =
                 Cast<UProceduralMeshComponent>(Chunk->GetRootComponent());
 
-            const FCubusBlockChunkData* ChunkData =
-                Chunk->GetChunkData();
+            const FCubusBlockChunkData* ChunkData = Chunk->GetChunkData();
 
             if (
                 !IsValid(SourceMesh) ||
@@ -291,13 +262,11 @@ namespace CubusTerrainRayTracingRuntime
                 continue;
             }
 
-            DesiredChunks.Add(Chunk);
+            const TWeakObjectPtr<ACubusPCGVoxelVolumeActor> ChunkKey(Chunk);
+            DesiredChunks.Add(ChunkKey);
 
-            FChunkProxyState& State =
-                WorldState.Chunks.FindOrAdd(Chunk);
-
-            const int32 CurrentRevision =
-                CalculateMeshRevision(*SourceMesh);
+            FChunkProxyState& State = WorldState.Chunks.FindOrAdd(ChunkKey);
+            const int32 CurrentRevision = CalculateMeshRevision(*SourceMesh);
 
             if (State.ObservedRevision != CurrentRevision)
             {
@@ -338,12 +307,11 @@ namespace CubusTerrainRayTracingRuntime
 
         for (auto Iterator = WorldState.Chunks.CreateIterator(); Iterator; ++Iterator)
         {
-            ACubusPCGVoxelVolumeActor* SourceChunk =
-                Iterator.Key().Get();
+            ACubusPCGVoxelVolumeActor* SourceChunk = Iterator.Key().Get();
 
             if (
                 !IsValid(SourceChunk) ||
-                !DesiredChunks.Contains(SourceChunk)
+                !DesiredChunks.Contains(Iterator.Key())
             )
             {
                 RetireProxy(Iterator.Value());
@@ -367,7 +335,8 @@ namespace CubusTerrainRayTracingRuntime
 
             if (IsValid(World) && World->IsGameWorld())
             {
-                ActiveWorlds.Add(World);
+                const TWeakObjectPtr<UWorld> WorldKey(World);
+                ActiveWorlds.Add(WorldKey);
                 UpdateWorld(World);
             }
         }
@@ -416,13 +385,8 @@ namespace CubusTerrainRayTracingRuntime
     FRegistration Registration;
 }
 
-void ACubusPCGVoxelVolumeActor::SetTerrainRayTracingEnabled(
-    const bool bEnabled
-)
+void ACubusPCGVoxelVolumeActor::SetTerrainRayTracingEnabled(const bool bEnabled)
 {
-    // Live Cubus chunks are rebuilt and destroyed during normal streaming.
-    // They always remain outside ray tracing; dedicated immutable proxies are
-    // managed separately by CubusTerrainRayTracingRuntime.
     bTerrainRayTracingRequested = false;
 
     UProceduralMeshComponent* Mesh = Cast<UProceduralMeshComponent>(
