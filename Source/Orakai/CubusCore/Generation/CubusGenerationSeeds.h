@@ -11,7 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    static constexpr uint32 CurrentGenerationVersion = 1;
+    // Bumped to 2: biome surface painting now runs during generation, so caches
+    // written before the biome fix (v1) lack biome-painted surfaces and must be
+    // invalidated so vegetation regenerates against the correct surface materials.
+    static constexpr uint32 CurrentGenerationVersion = 2;
 
     int64 World = 1;
     int32 Terrain = 0;
