@@ -7,6 +7,7 @@
 #include "InputMappingContext.h"
 #include "Blueprint/UserWidget.h"
 #include "Orakai.h"
+#include "UI/OrakaiMainMenuWidget.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
 void AOrakaiPlayerController::BeginPlay()
@@ -30,6 +31,35 @@ void AOrakaiPlayerController::BeginPlay()
 
 		}
 
+	}
+
+	if (IsLocalPlayerController())
+	{
+		UOrakaiMainMenuWidget* MainMenu =
+			CreateWidget<UOrakaiMainMenuWidget>(
+				this,
+				UOrakaiMainMenuWidget::StaticClass()
+			);
+
+		if (IsValid(MainMenu))
+		{
+			MainMenu->AddToPlayerScreen(100);
+
+			SetIgnoreMoveInput(true);
+			SetIgnoreLookInput(true);
+			SetShowMouseCursor(true);
+
+			FInputModeUIOnly InputMode;
+			InputMode.SetWidgetToFocus(MainMenu->TakeWidget());
+			InputMode.SetLockMouseToViewportBehavior(
+				EMouseLockMode::DoNotLock
+			);
+			SetInputMode(InputMode);
+		}
+		else
+		{
+			UE_LOG(LogOrakai, Error, TEXT("Could not create the Orakai main menu."));
+		}
 	}
 }
 
