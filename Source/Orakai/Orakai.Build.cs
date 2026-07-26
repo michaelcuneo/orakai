@@ -19,6 +19,7 @@ public class Orakai : ModuleRules
 			"GameplayStateTreeModule",
 			"UMG",
 			"Slate",
+			"SlateCore",
 			"ProceduralMeshComponent",
 			"PCG"
 		});
