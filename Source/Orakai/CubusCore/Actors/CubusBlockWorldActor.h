@@ -100,6 +100,33 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Terrain")
     void RegenerateTerrain();
 
+    // --- Authoritative runtime edits (applied locally and persisted) ---
+
+    /**
+     * Apply a voxel edit at a world voxel coordinate: mutate the owning chunk,
+     * rebuild it, and record the delta with the persistence subsystem. Returns
+     * false when the owning chunk is not currently loaded.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+    bool EditVoxelAtWorldVoxel(FIntVector WorldVoxel, int32 MaterialId, bool bIsWater);
+
+    /** Record removal of a voxel edit, restoring the generated voxel on reload. */
+    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+    bool ClearVoxelEditAtWorldVoxel(FIntVector WorldVoxel);
+
+    /** Record a foliage placement/modification at a world voxel coordinate. */
+    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+    void RecordFoliageEditAtWorldVoxel(
+        FIntVector WorldVoxel,
+        int32 TypeId,
+        float RotationYaw,
+        float Scale
+    );
+
+    /** Record removal of generated foliage at a world voxel coordinate. */
+    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+    void RemoveFoliageAtWorldVoxel(FIntVector WorldVoxel);
+
     void ReleaseHeldPawnAtLocation(
         APawn* PlayerPawn,
         const FVector& ReleaseLocation
@@ -111,6 +138,20 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Seed")
     int64 WorldSeed = 1;
+
+    // --- SpacetimeDB persistence ---
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
+    bool bConnectToSpacetimeDB = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
+    FString SpacetimeServerUri = TEXT("127.0.0.1:3000");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
+    FString SpacetimeDatabaseName = TEXT("orakai");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
+    FString SpacetimeTokenFilePath = TEXT(".spacetime_orakai");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
     FIntVector GridDimensions = FIntVector(2, 2, 1);
@@ -341,6 +382,10 @@ private:
 
     void RemoveInvalidChunks();
     void RebuildChunkAtCoordinate(const FIntVector& ChunkCoordinate);
+
+    // Persistence hooks.
+    void PublishWorldConfig();
+    void RecordTrackedPawnCoordinate();
 
     ACubusVoxelVolumeActor* SpawnChunkAtCoordinate(
         const FIntVector& Coordinate,

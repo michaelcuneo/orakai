@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "asL1/jxO2o8=",
+  "success": true,
+  "projectFilePath": "F:\\Unreal Projects\\Orakai\\spacetimedb\\spacetimedb\\StdbModule.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Michael\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.29\\microsoft.net.illink.tasks.8.0.29.nupkg.sha512",
+    "C:\\Users\\Michael\\.nuget\\packages\\spacetimedb.bsatn.runtime\\2.6.1\\spacetimedb.bsatn.runtime.2.6.1.nupkg.sha512",
+    "C:\\Users\\Michael\\.nuget\\packages\\spacetimedb.runtime\\2.6.1\\spacetimedb.runtime.2.6.1.nupkg.sha512"
+  ],
+  "logs": []
+}
