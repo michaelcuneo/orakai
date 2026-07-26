@@ -2,8 +2,11 @@
 
 #include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
+#include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
+#include "CubusCore/Persistence/OrakaiPersistenceSubsystem.h"
+#include "CubusCore/Persistence/OrakaiPersistenceTypes.h"
 
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
@@ -96,6 +99,21 @@ void ACubusBlockWorldActor::BeginPlay()
 {
     Super::BeginPlay();
 
+    if (bConnectToSpacetimeDB)
+    {
+        if (UOrakaiPersistenceSubsystem* Persistence =
+                UOrakaiPersistenceSubsystem::Get(this))
+        {
+            Persistence->ConnectToSpacetimeDB(
+                SpacetimeServerUri,
+                SpacetimeDatabaseName,
+                SpacetimeTokenFilePath
+            );
+        }
+    }
+
+    PublishWorldConfig();
+
     if (!bEnableRuntimeStreaming)
     {
         return;
@@ -170,6 +188,8 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
 
     ProcessRuntimeQueues();
     TryReleasePawnToTerrain();
+
+    RecordTrackedPawnCoordinate();
 }
 
 void ACubusBlockWorldActor::RegisterChunk(
@@ -253,6 +273,148 @@ void ACubusBlockWorldActor::RebuildChunkAndNeighbours(
     for (const FIntVector& Offset : CubusBlockWorldActor::NeighbourOffsets)
     {
         RebuildChunkAtCoordinate(ChunkCoordinate + Offset);
+    }
+}
+
+void ACubusBlockWorldActor::PublishWorldConfig()
+{
+    if (UOrakaiPersistenceSubsystem* Persistence =
+            UOrakaiPersistenceSubsystem::Get(this))
+    {
+        Persistence->SetWorldConfig(
+            WorldSeed,
+            FCubusGenerationSeeds::CurrentGenerationVersion
+        );
+    }
+}
+
+void ACubusBlockWorldActor::RecordTrackedPawnCoordinate()
+{
+    APawn* PlayerPawn = TrackedPawn.Get();
+
+    if (!IsValid(PlayerPawn))
+    {
+        return;
+    }
+
+    UOrakaiPersistenceSubsystem* Persistence =
+        UOrakaiPersistenceSubsystem::Get(this);
+
+    if (Persistence == nullptr)
+    {
+        return;
+    }
+
+    const FVector Location = PlayerPawn->GetActorLocation();
+    const FRotator ViewRotation = PlayerPawn->GetViewRotation();
+
+    Persistence->RecordPlayerCoordinate(
+        Location,
+        static_cast<float>(ViewRotation.Yaw),
+        static_cast<float>(ViewRotation.Pitch)
+    );
+}
+
+bool ACubusBlockWorldActor::EditVoxelAtWorldVoxel(
+    const FIntVector WorldVoxel,
+    const int32 MaterialId,
+    const bool bIsWater
+)
+{
+    const FIntVector ChunkCoordinate =
+        OrakaiPersistence::WorldVoxelToChunk(WorldVoxel);
+    const FIntVector LocalCoordinate =
+        WorldVoxel - ChunkCoordinate * Cubus::ChunkSize;
+
+    ACubusVoxelVolumeActor* Chunk = FindChunk(ChunkCoordinate);
+
+    if (!IsValid(Chunk))
+    {
+        return false;
+    }
+
+    FCubusBlockChunkData* Data = Chunk->GetMutableChunkData();
+
+    if (Data == nullptr)
+    {
+        return false;
+    }
+
+    FCubusBlockVoxel Voxel;
+    Voxel.MaterialId = MaterialId;
+    Voxel.SetWater(bIsWater);
+
+    if (!Data->SetVoxel(LocalCoordinate, Voxel))
+    {
+        return false;
+    }
+
+    Chunk->SaveCachedChunk();
+    RebuildChunkAndNeighbours(ChunkCoordinate);
+
+    if (UOrakaiPersistenceSubsystem* Persistence =
+            UOrakaiPersistenceSubsystem::Get(this))
+    {
+        Persistence->RecordVoxelEdit(
+            ChunkCoordinate,
+            LocalCoordinate,
+            MaterialId,
+            bIsWater
+        );
+    }
+
+    return true;
+}
+
+bool ACubusBlockWorldActor::ClearVoxelEditAtWorldVoxel(const FIntVector WorldVoxel)
+{
+    const FIntVector ChunkCoordinate =
+        OrakaiPersistence::WorldVoxelToChunk(WorldVoxel);
+    const FIntVector LocalCoordinate =
+        WorldVoxel - ChunkCoordinate * Cubus::ChunkSize;
+
+    if (UOrakaiPersistenceSubsystem* Persistence =
+            UOrakaiPersistenceSubsystem::Get(this))
+    {
+        Persistence->ClearVoxelEdit(ChunkCoordinate, LocalCoordinate);
+        return true;
+    }
+
+    return false;
+}
+
+void ACubusBlockWorldActor::RecordFoliageEditAtWorldVoxel(
+    const FIntVector WorldVoxel,
+    const int32 TypeId,
+    const float RotationYaw,
+    const float Scale
+)
+{
+    if (UOrakaiPersistenceSubsystem* Persistence =
+            UOrakaiPersistenceSubsystem::Get(this))
+    {
+        Persistence->RecordFoliageEdit(
+            WorldVoxel,
+            /*bRemoved*/ false,
+            TypeId,
+            RotationYaw,
+            Scale
+        );
+    }
+}
+
+void ACubusBlockWorldActor::RemoveFoliageAtWorldVoxel(const FIntVector WorldVoxel)
+{
+    if (UOrakaiPersistenceSubsystem* Persistence =
+            UOrakaiPersistenceSubsystem::Get(this))
+    {
+        Persistence->RecordFoliageEdit(
+            WorldVoxel,
+            /*bRemoved*/ true,
+            0,
+            0.0f,
+            1.0f
+        );
     }
 }
 

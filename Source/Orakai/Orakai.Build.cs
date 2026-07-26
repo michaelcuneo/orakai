@@ -21,7 +21,8 @@ public class Orakai : ModuleRules
 			"Slate",
 			"SlateCore",
 			"ProceduralMeshComponent",
-			"PCG"
+			"PCG",
+			"SpacetimeDbSdk"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
