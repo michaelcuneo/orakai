@@ -108,6 +108,9 @@ private:
     TObjectPtr<UInstancedStaticMeshComponent> TreePoints = nullptr;
 
     UPROPERTY(Transient)
+    TObjectPtr<UInstancedStaticMeshComponent> ConiferTreePoints = nullptr;
+
+    UPROPERTY(Transient)
     TObjectPtr<UInstancedStaticMeshComponent> ReedsPoints = nullptr;
 
     UPROPERTY(Transient)
