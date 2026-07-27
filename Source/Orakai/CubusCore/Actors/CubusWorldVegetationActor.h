@@ -6,19 +6,19 @@
 #include "CubusWorldVegetationActor.generated.h"
 
 class ACubusBlockWorldActor;
+class UInstancedSkinnedMeshComponent;
 class UInstancedStaticMeshComponent;
 class UPCGComponent;
 class UPCGGraphInterface;
 class USceneComponent;
+class USkeletalMesh;
 class UStaticMesh;
 
 /**
  * One world-level vegetation owner for all currently streamed Cubus chunks.
- *
- * Chunks only generate deterministic vegetation placement records. This actor
- * merges those records into shared tagged point carriers and executes one PCG
- * graph for the loaded region. No PCG or skinned vegetation component is owned
- * by an individual runtime chunk.
+ * Chunks only generate deterministic placement records. This actor publishes
+ * shared PCG point carriers and owns the small, fixed set of expensive plant
+ * render batches for the whole loaded world.
  */
 UCLASS(
     BlueprintType,
@@ -66,20 +66,32 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PCG")
     bool bEnableRuntimeVegetation = true;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|Streaming",
-        meta = (ClampMin = "0.1", Units = "s")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite")
+    bool bRenderWorldPlantBatches = true;
+
+    /** Existing plant already configured in the project. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite|Species")
+    TSoftObjectPtr<USkeletalMesh> ExistingTreeMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite|Species")
+    TSoftObjectPtr<USkeletalMesh> ElderMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite|Species")
+    TSoftObjectPtr<USkeletalMesh> NorwaySpruceMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite|Species")
+    TSoftObjectPtr<USkeletalMesh> GreasewoodMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite", meta = (ClampMin = "0", Units = "cm"))
+    int32 PlantStartCullDistance = 10000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite", meta = (ClampMin = "0", Units = "cm"))
+    int32 PlantEndCullDistance = 30000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0.1", Units = "s"))
     float RefreshInterval = 1.0f;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|Streaming",
-        meta = (ClampMin = "0")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0"))
     int32 MaximumPublishedPoints = 20000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Debug")
@@ -93,6 +105,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int32 PublishedPointCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
+    int32 RenderedPlantCount = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int64 PublishedPlacementHash = 0;
@@ -116,18 +131,28 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UInstancedStaticMeshComponent> AlpinePoints = nullptr;
 
+    UPROPERTY(Transient)
+    TObjectPtr<UInstancedSkinnedMeshComponent> ExistingTreeInstances = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UInstancedSkinnedMeshComponent> ElderInstances = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UInstancedSkinnedMeshComponent> NorwaySpruceInstances = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UInstancedSkinnedMeshComponent> GreasewoodInstances = nullptr;
+
     float TimeUntilRefresh = 0.0f;
     TObjectPtr<UPCGGraphInterface> LastConfiguredGraph = nullptr;
 
     void ResolveBlockWorld();
     void EnsurePointCarriers();
+    void EnsurePlantBatches();
     void ConfigurePCG();
     uint32 CalculateLoadedPlacementHash(int32& OutLoadedChunkCount) const;
 
-    UInstancedStaticMeshComponent* CreatePointCarrier(
-        FName ComponentName,
-        FName ComponentTag
-    );
-
+    UInstancedStaticMeshComponent* CreatePointCarrier(FName ComponentName, FName ComponentTag);
+    UInstancedSkinnedMeshComponent* CreatePlantBatch(FName ComponentName);
     UInstancedStaticMeshComponent* ResolveCarrierForType(int32 TypeId) const;
 };
