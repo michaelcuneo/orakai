@@ -98,46 +98,138 @@ void FCubusBlockVegetationGenerator::Generate(
             const float SpeciesRoll = HashToUnitFloat(
                 HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 149)
             );
+            const float TreePlacementRoll = HashToUnitFloat(
+                HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 197)
+            );
 
             int32 TypeId = 0;
+            int32 BiomeMask = CubusVegetationBiome::All;
             float Density = 0.0f;
+            float ActivePlacementRoll = PlacementRoll;
 
             if (bUseConfiguredBiomes)
             {
                 if (SurfaceVoxel->MaterialId == GeologyProfile->ForestSurfaceMaterialId)
                 {
-                    TypeId = SpeciesRoll < 0.65f
-                        ? CubusVegetationType::BroadleafTree
-                        : CubusVegetationType::ConiferTree;
-                    Density = 0.42f;
+                    BiomeMask = CubusVegetationBiome::Forest;
+
+                    const int32 GroveCellSize = FMath::Max(
+                        4,
+                        GeologyProfile->ForestGroveCellSizeVoxels
+                    );
+                    const int32 GroveCellX = FMath::FloorToInt(
+                        static_cast<double>(WorldX) /
+                        static_cast<double>(GroveCellSize)
+                    );
+                    const int32 GroveCellY = FMath::FloorToInt(
+                        static_cast<double>(WorldY) /
+                        static_cast<double>(GroveCellSize)
+                    );
+                    const float GroveCoverage = FMath::Clamp(
+                        GeologyProfile->ForestGroveCoverage,
+                        0.05f,
+                        1.0f
+                    );
+                    const float GroveRoll = HashToUnitFloat(
+                        HashWorldColumn(
+                            GroveCellX,
+                            GroveCellY,
+                            VegetationSeed ^ 463
+                        )
+                    );
+
+                    if (GroveRoll <= GroveCoverage)
+                    {
+                        TypeId = SpeciesRoll < FMath::Clamp(
+                            GeologyProfile->ForestBroadleafFraction,
+                            0.0f,
+                            1.0f
+                        )
+                            ? CubusVegetationType::BroadleafTree
+                            : CubusVegetationType::ConiferTree;
+                        Density = FMath::Clamp(
+                            GeologyProfile->ForestTreeDensity / GroveCoverage,
+                            0.0f,
+                            1.0f
+                        );
+                    }
                 }
                 else if (SurfaceVoxel->MaterialId == GeologyProfile->WetlandSurfaceMaterialId)
                 {
-                    TypeId = CubusVegetationType::Reeds;
-                    Density = 0.36f;
+                    BiomeMask = CubusVegetationBiome::Wetland;
+
+                    if (TreePlacementRoll <= GeologyProfile->WetlandTreeDensity)
+                    {
+                        TypeId = SpeciesRoll < 0.85f
+                            ? CubusVegetationType::BroadleafTree
+                            : CubusVegetationType::ConiferTree;
+                        Density = 1.0f;
+                        ActivePlacementRoll = 0.0f;
+                    }
+                    else
+                    {
+                        TypeId = CubusVegetationType::Reeds;
+                        Density = GeologyProfile->WetlandReedDensity;
+                    }
                 }
                 else if (SurfaceVoxel->MaterialId == GeologyProfile->RockySurfaceMaterialId)
                 {
-                    TypeId = CubusVegetationType::Alpine;
-                    Density = 0.08f;
+                    BiomeMask = CubusVegetationBiome::Rocky;
+
+                    if (TreePlacementRoll <= GeologyProfile->RockyTreeDensity)
+                    {
+                        TypeId = SpeciesRoll < 0.10f
+                            ? CubusVegetationType::BroadleafTree
+                            : CubusVegetationType::ConiferTree;
+                        Density = 1.0f;
+                        ActivePlacementRoll = 0.0f;
+                    }
+                    else
+                    {
+                        TypeId = CubusVegetationType::Alpine;
+                        Density = GeologyProfile->RockyAlpineDensity;
+                    }
                 }
                 else if (SurfaceVoxel->MaterialId == GeologyProfile->PlainsSurfaceMaterialId)
                 {
-                    TypeId = SpeciesRoll < 0.82f
-                        ? CubusVegetationType::Grass
-                        : CubusVegetationType::Shrub;
-                    Density = 0.22f;
+                    BiomeMask = CubusVegetationBiome::Plains;
+
+                    if (TreePlacementRoll <= GeologyProfile->PlainsTreeDensity)
+                    {
+                        TypeId = SpeciesRoll < 0.90f
+                            ? CubusVegetationType::BroadleafTree
+                            : CubusVegetationType::ConiferTree;
+                        Density = 1.0f;
+                        ActivePlacementRoll = 0.0f;
+                    }
+                    else
+                    {
+                        TypeId = SpeciesRoll < FMath::Clamp(
+                            GeologyProfile->PlainsShrubFraction,
+                            0.0f,
+                            1.0f
+                        )
+                            ? CubusVegetationType::Shrub
+                            : CubusVegetationType::Grass;
+                        Density = GeologyProfile->PlainsGroundCoverDensity;
+                    }
                 }
             }
             else
             {
+                BiomeMask = CubusVegetationBiome::Forest;
                 TypeId = SpeciesRoll < 0.72f
                     ? CubusVegetationType::BroadleafTree
                     : CubusVegetationType::ConiferTree;
-                Density = 0.025f;
+                Density = IsValid(GeologyProfile)
+                    ? GeologyProfile->FallbackTreeDensity
+                    : 0.012f;
             }
 
-            if (TypeId <= 0 || PlacementRoll > Density)
+            if (
+                TypeId <= 0 ||
+                ActivePlacementRoll > FMath::Clamp(Density, 0.0f, 1.0f)
+            )
             {
                 continue;
             }
@@ -155,6 +247,7 @@ void FCubusBlockVegetationGenerator::Generate(
                 )
             );
             Instance.TypeId = TypeId;
+            Instance.BiomeMask = BiomeMask;
 
             Instances.Add(Instance);
             ++CountsByType[TypeId];
@@ -165,7 +258,7 @@ void FCubusBlockVegetationGenerator::Generate(
 
     UE_LOG(
         LogTemp,
-        Display,
+        Verbose,
         TEXT("Cubus vegetation chunk (%d, %d, %d), seed %d: grass %d, shrubs %d, broadleaf %d, conifers %d, reeds %d, alpine %d%s"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,

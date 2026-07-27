@@ -12,9 +12,15 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
     const UCubusGeologyProfile* GeologyProfile
 )
 {
-    if (!IsValid(GeologyProfile) || !GeologyProfile->bGenerateBiomes)
+    if (!IsValid(GeologyProfile))
     {
         Chunk.ClearVegetationInstances();
+        return;
+    }
+
+    if (!GeologyProfile->bGenerateBiomes)
+    {
+        FCubusBlockVegetationGenerator::Generate(Chunk, GeologyProfile);
         return;
     }
 
@@ -188,7 +194,7 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
 
     UE_LOG(
         LogTemp,
-        Display,
+        Verbose,
         TEXT("Cubus biomes chunk (%d, %d, %d), seed %d: plains %d, forest %d, rocky %d, wetland %d, buried skipped %d"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,

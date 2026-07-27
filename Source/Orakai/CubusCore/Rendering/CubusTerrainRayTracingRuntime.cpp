@@ -7,7 +7,9 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Camera/PlayerCameraManager.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "ProceduralMeshComponent.h"
@@ -90,18 +92,16 @@ namespace CubusTerrainRayTracingRuntime
         return static_cast<int32>(Hash);
     }
 
-    FIntVector ResolvePlayerChunk(const APawn& Pawn, const float VoxelSize)
+    FIntVector ResolveViewChunk(const FVector& ViewLocation, const float VoxelSize)
     {
         const double ChunkWorldSize =
             static_cast<double>(Cubus::ChunkSize) *
             static_cast<double>(FMath::Max(1.0f, VoxelSize));
 
-        const FVector Location = Pawn.GetActorLocation();
-
         return FIntVector(
-            FMath::FloorToInt(Location.X / ChunkWorldSize),
-            FMath::FloorToInt(Location.Y / ChunkWorldSize),
-            FMath::FloorToInt(Location.Z / ChunkWorldSize)
+            FMath::FloorToInt(ViewLocation.X / ChunkWorldSize),
+            FMath::FloorToInt(ViewLocation.Y / ChunkWorldSize),
+            FMath::FloorToInt(ViewLocation.Z / ChunkWorldSize)
         );
     }
 
@@ -185,9 +185,22 @@ namespace CubusTerrainRayTracingRuntime
         FWorldProxyState& WorldState = WorldStates.FindOrAdd(WorldKey);
 
         APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+        APlayerController* PlayerController =
+            UGameplayStatics::GetPlayerController(World, 0);
+
+        const bool bHasView =
+            IsValid(PlayerController) &&
+            IsValid(PlayerController->PlayerCameraManager);
+
+        const FVector ViewLocation = bHasView
+            ? PlayerController->PlayerCameraManager->GetCameraLocation()
+            : (IsValid(PlayerPawn)
+                ? PlayerPawn->GetActorLocation()
+                : FVector::ZeroVector);
+
         const bool bEnabled =
             CVarEnabled.GetValueOnGameThread() != 0 &&
-            IsValid(PlayerPawn);
+            (bHasView || IsValid(PlayerPawn));
 
         const int32 HorizontalRadius = FMath::Clamp(
             CVarHorizontalRadius.GetValueOnGameThread(),
@@ -247,8 +260,8 @@ namespace CubusTerrainRayTracingRuntime
                 continue;
             }
 
-            const FIntVector PlayerChunk = ResolvePlayerChunk(
-                *PlayerPawn,
+            const FIntVector PlayerChunk = ResolveViewChunk(
+                ViewLocation,
                 Chunk->GetVoxelSize()
             );
 

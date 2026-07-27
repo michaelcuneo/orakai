@@ -59,6 +59,11 @@ namespace CubusVoxelChunkMobility
             return false;
         }
 
+        if (!BlockWorld->IsInitialSpawnAreaReady())
+        {
+            return false;
+        }
+
         const FVector PawnLocation = PlayerPawn->GetActorLocation();
         bool bHasGeneratedChunk = false;
         bool bFoundSurface = false;
@@ -222,7 +227,7 @@ namespace CubusVoxelChunkMobility
         // Excluding it from ray tracing avoids the renderer attempting to use
         // an evicted dynamic ray-tracing geometry instance.
         ProceduralMesh->SetVisibleInRayTracing(false);
-        ProceduralMesh->bUseAsyncCooking = false;
+        ProceduralMesh->bUseAsyncCooking = true;
         ProceduralMesh->SetCollisionProfileName(
             UCollisionProfile::BlockAllDynamic_ProfileName
         );

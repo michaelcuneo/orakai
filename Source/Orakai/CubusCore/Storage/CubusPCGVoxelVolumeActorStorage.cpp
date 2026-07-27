@@ -18,7 +18,7 @@ void ACubusPCGVoxelVolumeActor::GenerateTestShapeData()
 
         UE_LOG(
             LogTemp,
-            Display,
+            Verbose,
             TEXT("Cubus chunk cache used before generation (%d, %d, %d)"),
             Coordinate.X,
             Coordinate.Y,
@@ -34,7 +34,7 @@ void ACubusPCGVoxelVolumeActor::GenerateTestShapeData()
     {
         UE_LOG(
             LogTemp,
-            Display,
+            Verbose,
             TEXT("Cubus chunk cache miss (%d, %d, %d): generated data saved"),
             Coordinate.X,
             Coordinate.Y,

@@ -7,6 +7,7 @@
 #include "CubusBlockWorldActor.generated.h"
 
 class ACubusVoxelVolumeActor;
+class ACubusWorldVegetationActor;
 class APawn;
 class USceneComponent;
 class UCubusMaterialRegistry;
@@ -85,6 +86,12 @@ public:
         return MaxChunksGeneratedPerTick;
     }
 
+    UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Spawn")
+    bool IsInitialSpawnAreaReady() const
+    {
+        return bInitialSpawnAreaReady;
+    }
+
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
     void GenerateChunkGrid();
 
@@ -156,14 +163,20 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming")
     bool bEnableRuntimeStreaming = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "8"))
-    int32 InitialLoadRadius = 1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation")
+    bool bEnableWorldVegetation = true;
 
-    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "16"))
-    int32 HorizontalViewRadius = 3;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation")
+    TSubclassOf<ACubusWorldVegetationActor> WorldVegetationActorClass;
 
-    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "4"))
-    int32 VerticalViewRadius = 1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "16"))
+    int32 InitialLoadRadius = 2;
+
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "32"))
+    int32 HorizontalViewRadius = 8;
+
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
+    int32 VerticalViewRadius = 3;
 
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
     int32 MaxChunksGeneratedPerTick = 1;
@@ -179,6 +192,9 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn", meta = (ClampMin = "0.0", Units = "cm"))
     float SpawnHeightOffset = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn", meta = (ClampMin = "0.0", Units = "s"))
+    float SpawnHoldTimeoutSeconds = 3.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
     bool bUseHeightTerrain = true;
@@ -309,9 +325,11 @@ private:
     TSet<FIntVector> InitialRequiredCoordinates;
 
     TWeakObjectPtr<APawn> TrackedPawn;
+    TWeakObjectPtr<ACubusWorldVegetationActor> WorldVegetationActor;
     FIntVector LastTrackedChunk = FIntVector(MAX_int32, MAX_int32, MAX_int32);
     FVector HeldPawnLocation = FVector::ZeroVector;
     bool bPawnHeldForStreaming = false;
+    float HeldPawnElapsedSeconds = 0.0f;
     float TimeUntilStreamingUpdate = 0.0f;
 
     void RemoveInvalidChunks();
@@ -339,4 +357,5 @@ private:
 
     void HoldPawnForInitialStreaming();
     void TryReleasePawnToTerrain();
+    void EnsureWorldVegetationActor();
 };

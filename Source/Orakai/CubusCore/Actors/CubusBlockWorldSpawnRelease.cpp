@@ -17,7 +17,6 @@ void ACubusBlockWorldActor::ReleaseHeldPawnAtLocation(
     TrackedPawn = PlayerPawn;
     HeldPawnLocation = ReleaseLocation;
     bPawnHeldForStreaming = false;
-    bInitialSpawnAreaReady = true;
 
     PlayerPawn->SetActorLocation(
         ReleaseLocation,

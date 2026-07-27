@@ -44,9 +44,11 @@ bool ACubusVoxelVolumeActor::TryLoadCachedChunk()
 
     if (bLoaded)
     {
+        bChunkCacheDirty = false;
+
         UE_LOG(
             LogTemp,
-            Display,
+            Verbose,
             TEXT("Cubus chunk cache hit (%d, %d, %d), seed %lld, generation %u"),
             ChunkCoordinate.X,
             ChunkCoordinate.Y,
@@ -66,6 +68,11 @@ bool ACubusVoxelVolumeActor::SaveCachedChunk() const
         return false;
     }
 
+    if (!bChunkCacheDirty)
+    {
+        return true;
+    }
+
     const FCubusChunkStoreContext Context =
         CubusVoxelVolumeActorStorage::MakeContext(*ChunkData);
 
@@ -76,6 +83,8 @@ bool ACubusVoxelVolumeActor::SaveCachedChunk() const
 
     if (bSaved)
     {
+        const_cast<ACubusVoxelVolumeActor*>(this)->bChunkCacheDirty = false;
+
         UE_LOG(
             LogTemp,
             Verbose,
@@ -119,6 +128,10 @@ void ACubusVoxelVolumeActor::EndPlay(
         Mesh->MarkRenderStateDirty();
     }
 
-    SaveCachedChunk();
+    if (bChunkCacheDirty)
+    {
+        SaveCachedChunk();
+    }
+
     Super::EndPlay(EndPlayReason);
 }
