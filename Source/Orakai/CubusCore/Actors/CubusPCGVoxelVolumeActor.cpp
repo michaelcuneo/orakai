@@ -1,9 +1,20 @@
 #include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 
+#include "CubusCore/Rendering/CubusVegetationRendererComponent.h"
+
 ACubusPCGVoxelVolumeActor::ACubusPCGVoxelVolumeActor()
 {
-    // Chunk actors no longer own PCG or skinned vegetation components.
-    // The world vegetation actor owns all vegetation render batches.
+    VegetationPointSource = CreateDefaultSubobject<
+        UCubusVegetationRendererComponent
+    >(TEXT("CubusMegaplantConfiguration"));
+
+    if (IsValid(VegetationPointSource))
+    {
+        VegetationPointSource->SetConfigurationOnly(true);
+        VegetationPointSource->bAutoRegister = false;
+        VegetationPointSource->SetAutoActivate(false);
+        VegetationPointSource->SetComponentTickEnabled(false);
+    }
 }
 
 void ACubusPCGVoxelVolumeActor::OnConstruction(
@@ -11,6 +22,12 @@ void ACubusPCGVoxelVolumeActor::OnConstruction(
 )
 {
     Super::OnConstruction(Transform);
+
+    if (IsValid(VegetationPointSource))
+    {
+        VegetationPointSource->SetConfigurationOnly(true);
+        VegetationPointSource->SetComponentTickEnabled(false);
+    }
 }
 
 void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
