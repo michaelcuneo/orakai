@@ -5,16 +5,11 @@
 
 #include "CubusPCGVoxelVolumeActor.generated.h"
 
-class UCubusVegetationRendererComponent;
 class UPCGGraphInterface;
 
 /**
  * Compatibility chunk class retained for existing Blueprint references.
  * Vegetation rendering is owned exclusively by ACubusWorldVegetationActor.
- *
- * The VegetationPointSource component remains as an unregistered configuration
- * container so existing Blueprint foliage mesh assignments are preserved and
- * editable without reviving the old per-chunk renderer.
  */
 UCLASS(
     Transient,
@@ -49,19 +44,6 @@ public:
 
     void RegenerateVegetationPCG();
     void CleanupVegetationPCG();
-
-protected:
-    /**
-     * Inspector-only foliage configuration inherited by BP_CubusVoxelPCGChunk.
-     * bAutoRegister is disabled in the constructor, so this component cannot
-     * create point carriers, skinned batches, ticks, or render-state resources.
-     */
-    UPROPERTY(
-        VisibleAnywhere,
-        BlueprintReadOnly,
-        Category = "Cubus|Vegetation|Configuration"
-    )
-    TObjectPtr<UCubusVegetationRendererComponent> VegetationPointSource;
 
 private:
     bool bTerrainRayTracingRequested = false;
