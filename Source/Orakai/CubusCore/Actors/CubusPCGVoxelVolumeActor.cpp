@@ -4,6 +4,7 @@
 #include "CubusCore/Data/CubusVegetationInstance.h"
 #include "CubusCore/Rendering/CubusVegetationRendererComponent.h"
 
+#include "Engine/World.h"
 #include "PCGComponent.h"
 #include "PCGGraph.h"
 
@@ -114,7 +115,14 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
 )
 {
     VegetationGraph = InVegetationGraph;
-    bGenerateVegetationPCG = bInGenerateVegetationPCG;
+
+    const UWorld* World = GetWorld();
+    const bool bRuntimeWorld =
+        IsValid(World) && World->IsGameWorld();
+
+    bGenerateVegetationPCG =
+        bInGenerateVegetationPCG ||
+        (bRuntimeWorld && IsValid(VegetationGraph));
 
     if (IsValid(VegetationPointSource))
     {
@@ -180,11 +188,14 @@ void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus PCG vegetation %s: regeneration requested for chunk (%d, %d, %d)"),
+        TEXT("Cubus PCG vegetation %s: regeneration requested for chunk (%d, %d, %d), placements %d"),
         *GetName(),
         GetChunkCoordinate().X,
         GetChunkCoordinate().Y,
-        GetChunkCoordinate().Z
+        GetChunkCoordinate().Z,
+        GetChunkData() != nullptr
+            ? GetChunkData()->GetVegetationInstances().Num()
+            : 0
     );
 }
 
