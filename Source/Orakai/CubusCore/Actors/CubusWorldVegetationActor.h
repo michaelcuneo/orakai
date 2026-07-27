@@ -88,6 +88,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite", meta = (ClampMin = "0", Units = "cm"))
     int32 PlantEndCullDistance = 30000;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite", meta = (ClampMin = "0"))
+    int32 MaximumRenderedPlants = 4096;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0.1", Units = "s"))
     float RefreshInterval = 1.0f;
 
