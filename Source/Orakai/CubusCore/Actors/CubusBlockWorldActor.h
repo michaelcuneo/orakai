@@ -162,8 +162,8 @@ protected:
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "16"))
     int32 HorizontalViewRadius = 3;
 
-    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "4"))
-    int32 VerticalViewRadius = 0;
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "4"))
+    int32 VerticalViewRadius = 1;
 
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
     int32 MaxChunksGeneratedPerTick = 1;
@@ -295,9 +295,6 @@ protected:
     bool bInitialSpawnAreaReady = false;
 
 private:
-    // Transitional compatibility only. These are intentionally not UPROPERTYs,
-    // cannot be set by Blueprints, and permanently keep the removed legacy PCG
-    // path disabled while old compiled call sites are retired.
     UPCGGraphInterface* VegetationPCGGraph = nullptr;
     bool bGenerateVegetationPCG = false;
 
