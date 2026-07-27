@@ -11,6 +11,7 @@ public class Orakai : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core",
 			"CoreUObject",
+			"AssetRegistry",
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
@@ -22,6 +23,7 @@ public class Orakai : ModuleRules
 			"SlateCore",
 			"ProceduralMeshComponent",
 			"PCG",
+			"DynamicWind",
 			"SpacetimeDbSdk"
 		});
 
