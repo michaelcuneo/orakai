@@ -226,6 +226,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         GrassPoints,
         ShrubPoints,
         TreePoints,
+        ConiferTreePoints,
         ReedsPoints,
         AlpinePoints
     };
@@ -271,6 +272,7 @@ void ACubusWorldVegetationActor::ClearWorldVegetation()
         GrassPoints,
         ShrubPoints,
         TreePoints,
+        ConiferTreePoints,
         ReedsPoints,
         AlpinePoints
     };
@@ -333,6 +335,21 @@ void ACubusWorldVegetationActor::EnsurePointCarriers()
             TEXT("CubusWorldTreePoints"),
             TEXT("Cubus.Vegetation.Tree")
         );
+
+        if (IsValid(TreePoints))
+        {
+            TreePoints->ComponentTags.AddUnique(
+                TEXT("Cubus.Vegetation.Tree.Broadleaf")
+            );
+        }
+    }
+
+    if (!IsValid(ConiferTreePoints))
+    {
+        ConiferTreePoints = CreatePointCarrier(
+            TEXT("CubusWorldConiferTreePoints"),
+            TEXT("Cubus.Vegetation.Tree.Conifer")
+        );
     }
 
     if (!IsValid(ReedsPoints))
@@ -356,6 +373,7 @@ void ACubusWorldVegetationActor::EnsurePointCarriers()
         GrassPoints,
         ShrubPoints,
         TreePoints,
+        ConiferTreePoints,
         ReedsPoints,
         AlpinePoints
     };
@@ -519,6 +537,9 @@ ACubusWorldVegetationActor::ResolveCarrierForType(
 
         case 5:
             return AlpinePoints;
+
+        case 6:
+            return ConiferTreePoints;
 
         default:
             return nullptr;
