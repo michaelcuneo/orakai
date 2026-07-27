@@ -130,7 +130,7 @@ protected:
         Category = "Cubus|Vegetation|PVE",
         meta = (ClampMin = "0", EditCondition = "bRenderInstancedTrees")
     )
-    int32 MaxTreeInstancesPerChunk = 64;
+    int32 MaxTreeInstancesPerChunk = 8;
 
     UPROPERTY(
         EditAnywhere,
@@ -138,7 +138,7 @@ protected:
         Category = "Cubus|Vegetation|PVE",
         meta = (ClampMin = "0", Units = "cm", EditCondition = "bRenderInstancedTrees")
     )
-    int32 TreeStartCullDistance = 20000;
+    int32 TreeStartCullDistance = 4800;
 
     UPROPERTY(
         EditAnywhere,
@@ -146,7 +146,7 @@ protected:
         Category = "Cubus|Vegetation|PVE",
         meta = (ClampMin = "0", Units = "cm", EditCondition = "bRenderInstancedTrees")
     )
-    int32 TreeEndCullDistance = 50000;
+    int32 TreeEndCullDistance = 9600;
 
     UPROPERTY(
         EditAnywhere,
@@ -154,7 +154,7 @@ protected:
         Category = "Cubus|Vegetation|Streaming",
         meta = (ClampMin = "0", Units = "cm")
     )
-    float VegetationActivationDistance = 24000.0f;
+    float VegetationActivationDistance = 6400.0f;
 
     UPROPERTY(
         EditAnywhere,
@@ -162,7 +162,7 @@ protected:
         Category = "Cubus|Vegetation|Streaming",
         meta = (ClampMin = "0", Units = "cm")
     )
-    float VegetationDeactivationDistance = 32000.0f;
+    float VegetationDeactivationDistance = 9600.0f;
 
     UPROPERTY(
         EditAnywhere,
