@@ -4,22 +4,8 @@
 #include "CubusCore/Data/CubusVegetationInstance.h"
 #include "CubusCore/Rendering/CubusVegetationRendererComponent.h"
 
-#include "Engine/World.h"
 #include "PCGComponent.h"
 #include "PCGGraph.h"
-
-namespace CubusPCGVoxelVolumeActor
-{
-    bool IsRuntimeWorld(const UObject* WorldContext)
-    {
-        const UWorld* World =
-            IsValid(WorldContext)
-                ? WorldContext->GetWorld()
-                : nullptr;
-
-        return IsValid(World) && World->IsGameWorld();
-    }
-}
 
 ACubusPCGVoxelVolumeActor::ACubusPCGVoxelVolumeActor()
 {
@@ -48,24 +34,22 @@ void ACubusPCGVoxelVolumeActor::OnConstruction(
 {
     Super::OnConstruction(Transform);
 
-    const bool bRuntimeWorld =
-        CubusPCGVoxelVolumeActor::IsRuntimeWorld(this);
-
-    if (!bRuntimeWorld)
-    {
-        ConfigurePCGComponent();
-    }
+    ConfigurePCGComponent();
 
     if (IsValid(VegetationPointSource))
     {
-        VegetationPointSource->SetComponentTickEnabled(true);
-        VegetationPointSource->RebuildVegetation();
-    }
+        VegetationPointSource->SetComponentTickEnabled(
+            bGenerateVegetationPCG
+        );
 
-    if (bRuntimeWorld && IsValid(VegetationPCG))
-    {
-        VegetationPCG->Deactivate();
-        VegetationPCG->SetComponentTickEnabled(false);
+        if (bGenerateVegetationPCG)
+        {
+            VegetationPointSource->RebuildVegetation();
+        }
+        else
+        {
+            VegetationPointSource->ClearVegetation();
+        }
     }
 
     LastVegetationPlacementHash =
@@ -96,11 +80,7 @@ void ACubusPCGVoxelVolumeActor::Tick(const float DeltaSeconds)
     const uint32 CurrentPlacementHash =
         CalculateVegetationPlacementHash();
 
-    const bool bRuntimeWorld =
-        CubusPCGVoxelVolumeActor::IsRuntimeWorld(this);
-
     const bool bGraphChanged =
-        !bRuntimeWorld &&
         LastConfiguredGraph != VegetationGraph;
 
     if (
@@ -118,10 +98,7 @@ void ACubusPCGVoxelVolumeActor::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
 {
-    if (!CubusPCGVoxelVolumeActor::IsRuntimeWorld(this))
-    {
-        CleanupVegetationPCG();
-    }
+    CleanupVegetationPCG();
 
     if (IsValid(VegetationPointSource))
     {
@@ -137,12 +114,7 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
 )
 {
     VegetationGraph = InVegetationGraph;
-
-    const bool bRuntimeWorld =
-        CubusPCGVoxelVolumeActor::IsRuntimeWorld(this);
-
-    bGenerateVegetationPCG =
-        bRuntimeWorld || bInGenerateVegetationPCG;
+    bGenerateVegetationPCG = bInGenerateVegetationPCG;
 
     if (IsValid(VegetationPointSource))
     {
@@ -161,21 +133,6 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
     }
 
     SetActorTickEnabled(bGenerateVegetationPCG);
-
-    if (bRuntimeWorld)
-    {
-        LastConfiguredGraph = nullptr;
-
-        if (IsValid(VegetationPCG))
-        {
-            VegetationPCG->Deactivate();
-            VegetationPCG->SetComponentTickEnabled(false);
-        }
-
-        LastVegetationPlacementHash = 0;
-        return;
-    }
-
     ConfigurePCGComponent();
 
     if (!bGenerateVegetationPCG)
@@ -193,11 +150,7 @@ void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
             VegetationPointSource->ClearVegetation();
         }
 
-        if (!CubusPCGVoxelVolumeActor::IsRuntimeWorld(this))
-        {
-            CleanupVegetationPCG();
-        }
-
+        CleanupVegetationPCG();
         return;
     }
 
@@ -208,20 +161,6 @@ void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
 
     LastVegetationPlacementHash =
         CalculateVegetationPlacementHash();
-
-    if (CubusPCGVoxelVolumeActor::IsRuntimeWorld(this))
-    {
-        UE_LOG(
-            LogTemp,
-            Display,
-            TEXT("Cubus runtime vegetation %s: point renderer refreshed for chunk (%d, %d, %d)"),
-            *GetName(),
-            GetChunkCoordinate().X,
-            GetChunkCoordinate().Y,
-            GetChunkCoordinate().Z
-        );
-        return;
-    }
 
     ConfigurePCGComponent();
 
@@ -234,6 +173,7 @@ void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
         return;
     }
 
+    VegetationPCG->Activate(true);
     VegetationPCG->CleanupLocal(true);
     VegetationPCG->GenerateLocal(true);
 
@@ -253,6 +193,7 @@ void ACubusPCGVoxelVolumeActor::CleanupVegetationPCG()
     if (IsValid(VegetationPCG))
     {
         VegetationPCG->CleanupLocal(true);
+        VegetationPCG->Deactivate();
     }
 }
 
@@ -297,10 +238,7 @@ uint32 ACubusPCGVoxelVolumeActor::CalculateVegetationPlacementHash() const
 
 void ACubusPCGVoxelVolumeActor::ConfigurePCGComponent()
 {
-    if (
-        CubusPCGVoxelVolumeActor::IsRuntimeWorld(this) ||
-        !IsValid(VegetationPCG)
-    )
+    if (!IsValid(VegetationPCG))
     {
         return;
     }
