@@ -10,6 +10,8 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
 
 UCubusVegetationRendererComponent::UCubusVegetationRendererComponent()
 {
@@ -31,12 +33,21 @@ void UCubusVegetationRendererComponent::OnRegister()
     }
 
     EnsurePointComponents();
-    EnsureTreeInstanceComponents();
-    RebuildVegetation();
+
+    const UWorld* World = GetWorld();
+    if (!IsValid(World) || !World->IsGameWorld())
+    {
+        SetVegetationActive(true);
+    }
+    else
+    {
+        UpdateStreamingState();
+    }
 }
 
 void UCubusVegetationRendererComponent::OnUnregister()
 {
+    SetVegetationActive(false);
     ClearVegetation();
     Super::OnUnregister();
 }
@@ -57,6 +68,12 @@ void UCubusVegetationRendererComponent::TickComponent(
     }
 
     TimeUntilNextCheck = FMath::Max(0.1f, ChangeCheckInterval);
+    UpdateStreamingState();
+
+    if (!bVegetationActive)
+    {
+        return;
+    }
 
     const int32 GrowthStep = GetCurrentGrowthStep();
     const uint32 PlacementHash = CalculatePlacementHash();
@@ -70,11 +87,89 @@ void UCubusVegetationRendererComponent::TickComponent(
     }
 }
 
+void UCubusVegetationRendererComponent::SetVegetationActive(
+    const bool bActive
+)
+{
+    if (bVegetationActive == bActive)
+    {
+        return;
+    }
+
+    bVegetationActive = bActive;
+
+    if (bVegetationActive)
+    {
+        EnsurePointComponents();
+        EnsureTreeInstanceComponents();
+        RebuildVegetation();
+        return;
+    }
+
+    ClearVegetation();
+    DestroyTreeInstanceComponents();
+    LastPlacementHash = 0;
+    LastGrowthStep = INDEX_NONE;
+}
+
+void UCubusVegetationRendererComponent::UpdateStreamingState()
+{
+    const UWorld* World = GetWorld();
+
+    if (!IsValid(World) || !World->IsGameWorld())
+    {
+        SetVegetationActive(true);
+        return;
+    }
+
+    const AActor* Owner = GetOwner();
+    const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+
+    if (!IsValid(Owner) || !IsValid(PlayerPawn))
+    {
+        return;
+    }
+
+    const float ActivationDistance = FMath::Max(
+        0.0f,
+        VegetationActivationDistance
+    );
+    const float DeactivationDistance = FMath::Max(
+        ActivationDistance,
+        VegetationDeactivationDistance
+    );
+
+    const float DistanceSquared = FVector::DistSquared2D(
+        Owner->GetActorLocation(),
+        PlayerPawn->GetActorLocation()
+    );
+
+    if (!bVegetationActive)
+    {
+        if (DistanceSquared <= FMath::Square(ActivationDistance))
+        {
+            SetVegetationActive(true);
+        }
+        return;
+    }
+
+    if (DistanceSquared > FMath::Square(DeactivationDistance))
+    {
+        SetVegetationActive(false);
+    }
+}
+
 void UCubusVegetationRendererComponent::RebuildVegetation()
 {
     EnsurePointComponents();
-    EnsureTreeInstanceComponents();
     ClearVegetation();
+
+    if (!bVegetationActive)
+    {
+        return;
+    }
+
+    EnsureTreeInstanceComponents();
 
     ACubusVoxelVolumeActor* ChunkActor =
         Cast<ACubusVoxelVolumeActor>(GetOwner());
@@ -249,7 +344,7 @@ void UCubusVegetationRendererComponent::RebuildVegetation()
         LogTemp,
         Display,
         TEXT(
-            "Cubus vegetation source %s: published %d points, batched %d PVE trees, growth step %d"
+            "Cubus vegetation %s: active, published %d points, batched %d PVE trees, growth step %d"
         ),
         *ChunkActor->GetName(),
         PublishedPointCount,
@@ -391,6 +486,30 @@ void UCubusVegetationRendererComponent::EnsureTreeInstanceComponents()
         MatureTreeInstances =
             CreateTreeStageComponent(TEXT("CubusPVEMatureTrees"));
     }
+}
+
+void UCubusVegetationRendererComponent::DestroyTreeInstanceComponents()
+{
+    DestroyTreeStageComponent(SeedlingTreeInstances);
+    DestroyTreeStageComponent(SaplingTreeInstances);
+    DestroyTreeStageComponent(YoungTreeInstances);
+    DestroyTreeStageComponent(MatureTreeInstances);
+}
+
+void UCubusVegetationRendererComponent::DestroyTreeStageComponent(
+    TObjectPtr<UInstancedSkinnedMeshComponent>& Component
+)
+{
+    if (!IsValid(Component))
+    {
+        Component = nullptr;
+        return;
+    }
+
+    Component->ClearInstances();
+    Component->UnregisterComponent();
+    Component->DestroyComponent();
+    Component = nullptr;
 }
 
 int32 UCubusVegetationRendererComponent::GetCurrentGrowthStep() const
