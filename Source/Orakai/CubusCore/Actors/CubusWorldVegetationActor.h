@@ -8,7 +8,6 @@
 class ACubusBlockWorldActor;
 class UInstancedSkinnedMeshComponent;
 class UInstancedStaticMeshComponent;
-class UPCGComponent;
 class UPCGGraphInterface;
 class USceneComponent;
 class USkeletalMesh;
@@ -16,9 +15,8 @@ class UStaticMesh;
 
 /**
  * One world-level vegetation owner for all currently streamed Cubus chunks.
- * Chunks only generate deterministic placement records. This actor publishes
- * shared PCG point carriers and owns the small, fixed set of expensive plant
- * render batches for the whole loaded world.
+ * Chunks only generate deterministic placement records; this actor owns the
+ * fixed set of shared species batches used to render those records.
  */
 UCLASS(
     BlueprintType,
@@ -38,6 +36,10 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+    void ConfigureForWorld(ACubusBlockWorldActor* InBlockWorld);
+
+    // Temporary source-compatibility overload for call sites compiled against
+    // the removed PCG configuration API. The graph and bool are ignored.
     void ConfigureForWorld(
         ACubusBlockWorldActor* InBlockWorld,
         UPCGGraphInterface* InVegetationGraph,
@@ -54,41 +56,31 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<USceneComponent> Root;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
-    TObjectPtr<UPCGComponent> VegetationPCG;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation")
     TObjectPtr<ACubusBlockWorldActor> BlockWorld = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PCG")
-    TObjectPtr<UPCGGraphInterface> VegetationGraph = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PCG")
-    bool bEnableRuntimeVegetation = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering")
     bool bRenderWorldPlantBatches = true;
 
-    /** Existing plant already configured in the project. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite|Species")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Species")
     TSoftObjectPtr<USkeletalMesh> ExistingTreeMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite|Species")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Species")
     TSoftObjectPtr<USkeletalMesh> ElderMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite|Species")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Species")
     TSoftObjectPtr<USkeletalMesh> NorwaySpruceMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite|Species")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Species")
     TSoftObjectPtr<USkeletalMesh> GreasewoodMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite", meta = (ClampMin = "0", Units = "cm"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering", meta = (ClampMin = "0", Units = "cm"))
     int32 PlantStartCullDistance = 10000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite", meta = (ClampMin = "0", Units = "cm"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering", meta = (ClampMin = "0", Units = "cm"))
     int32 PlantEndCullDistance = 30000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Nanite", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering", meta = (ClampMin = "0"))
     int32 MaximumRenderedPlants = 4096;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0.1", Units = "s"))
@@ -147,15 +139,17 @@ private:
     TObjectPtr<UInstancedSkinnedMeshComponent> GreasewoodInstances = nullptr;
 
     float TimeUntilRefresh = 0.0f;
-    TObjectPtr<UPCGGraphInterface> LastConfiguredGraph = nullptr;
 
     void ResolveBlockWorld();
     void EnsurePointCarriers();
     void EnsurePlantBatches();
-    void ConfigurePCG();
     uint32 CalculateLoadedPlacementHash(int32& OutLoadedChunkCount) const;
 
-    UInstancedStaticMeshComponent* CreatePointCarrier(FName ComponentName, FName ComponentTag);
+    UInstancedStaticMeshComponent* CreatePointCarrier(
+        FName ComponentName,
+        FName ComponentTag
+    );
+
     UInstancedSkinnedMeshComponent* CreatePlantBatch(FName ComponentName);
     UInstancedStaticMeshComponent* ResolveCarrierForType(int32 TypeId) const;
 };
