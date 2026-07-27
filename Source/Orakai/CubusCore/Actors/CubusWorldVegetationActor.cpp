@@ -12,14 +12,15 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "PCGComponent.h"
-#include "PCGGraph.h"
 #include "UObject/SoftObjectPath.h"
 
 namespace
 {
+    constexpr int32 GrassType = 1;
     constexpr int32 ShrubType = 2;
     constexpr int32 BroadleafType = 3;
+    constexpr int32 ReedsType = 4;
+    constexpr int32 AlpineType = 5;
     constexpr int32 ConiferType = 6;
 }
 
@@ -31,26 +32,31 @@ ACubusWorldVegetationActor::ACubusWorldVegetationActor()
     Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
     SetRootComponent(Root);
 
-    VegetationPCG = CreateDefaultSubobject<UPCGComponent>(
-        TEXT("WorldVegetationPCG")
-    );
-
-    if (IsValid(VegetationPCG))
-    {
-        VegetationPCG->SetIsPartitioned(false);
-        VegetationPCG->bParseActorComponents = true;
-        VegetationPCG->bOnlyTrackItself = true;
-    }
-
     ElderMesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(
         TEXT("/Game/Megaplant_Library/Tree_Elder/Tree_Elder_01/Tree_Elder_01_D.Tree_Elder_01_D")
     ));
+
     NorwaySpruceMesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(
         TEXT("/Game/Megaplant_Library/Tree_Norway_Spruce/Tree_Norway_Spruce_01/Tree_Norway_Spruce_01_D.Tree_Norway_Spruce_01_D")
     ));
+
     GreasewoodMesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(
         TEXT("/Game/Megaplant_Library/Shrub_Greasewood/Shrub_Greasewood_01/Shrub_Greasewood_01_D.Shrub_Greasewood_01_D")
     ));
+}
+
+void ACubusWorldVegetationActor::ConfigureForWorld(
+    ACubusBlockWorldActor* InBlockWorld
+)
+{
+    BlockWorld = InBlockWorld;
+    PublishedPlacementHash = 0;
+    TimeUntilRefresh = 0.0f;
+
+    if (HasActorBegunPlay())
+    {
+        RebuildWorldVegetation();
+    }
 }
 
 void ACubusWorldVegetationActor::ConfigureForWorld(
@@ -59,11 +65,7 @@ void ACubusWorldVegetationActor::ConfigureForWorld(
     const bool bInEnableRuntimeVegetation
 )
 {
-    BlockWorld = InBlockWorld;
-    VegetationGraph = InVegetationGraph;
-    bEnableRuntimeVegetation = bInEnableRuntimeVegetation;
-    TimeUntilRefresh = 0.0f;
-    ConfigurePCG();
+    ConfigureForWorld(InBlockWorld);
 }
 
 void ACubusWorldVegetationActor::OnConstruction(
@@ -74,8 +76,6 @@ void ACubusWorldVegetationActor::OnConstruction(
 
     ResolveBlockWorld();
     EnsurePointCarriers();
-    EnsurePlantBatches();
-    ConfigurePCG();
 
     if (!GetWorld() || !GetWorld()->IsGameWorld())
     {
@@ -90,18 +90,12 @@ void ACubusWorldVegetationActor::BeginPlay()
     ResolveBlockWorld();
     EnsurePointCarriers();
     EnsurePlantBatches();
-    ConfigurePCG();
     TimeUntilRefresh = 0.0f;
 }
 
 void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
-
-    if (!bEnableRuntimeVegetation)
-    {
-        return;
-    }
 
     TimeUntilRefresh -= DeltaSeconds;
 
@@ -118,9 +112,8 @@ void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
         CalculateLoadedPlacementHash(CurrentLoadedChunkCount);
 
     if (
-        CurrentHash != PublishedPlacementHash ||
-        CurrentLoadedChunkCount != LoadedChunkCount ||
-        LastConfiguredGraph != VegetationGraph
+        CurrentHash != static_cast<uint32>(PublishedPlacementHash) ||
+        CurrentLoadedChunkCount != LoadedChunkCount
     )
     {
         RebuildWorldVegetation();
@@ -131,11 +124,6 @@ void ACubusWorldVegetationActor::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
 {
-    if (IsValid(VegetationPCG))
-    {
-        VegetationPCG->CleanupLocal(true);
-    }
-
     ClearWorldVegetation();
     Super::EndPlay(EndPlayReason);
 }
@@ -145,7 +133,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     ResolveBlockWorld();
     EnsurePointCarriers();
     EnsurePlantBatches();
-    ConfigurePCG();
     ClearWorldVegetation();
 
     if (!IsValid(BlockWorld))
@@ -153,9 +140,17 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         return;
     }
 
+    UWorld* World = GetWorld();
+
+    if (!IsValid(World))
+    {
+        return;
+    }
+
     const int32 PointLimit = MaximumPublishedPoints > 0
         ? MaximumPublishedPoints
         : MAX_int32;
+
     const int32 PlantLimit = MaximumRenderedPlants > 0
         ? MaximumRenderedPlants
         : MAX_int32;
@@ -168,13 +163,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     TArray<FTransform> SpruceTransforms;
     TArray<FTransform> GreasewoodTransforms;
 
-    UWorld* World = GetWorld();
-
-    if (!IsValid(World))
-    {
-        return;
-    }
-
     for (
         TActorIterator<ACubusVoxelVolumeActor> Iterator(World);
         Iterator;
@@ -183,7 +171,10 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     {
         ACubusVoxelVolumeActor* Chunk = *Iterator;
 
-        if (!IsValid(Chunk) || Chunk->GetOwner() != BlockWorld)
+        if (
+            !IsValid(Chunk) ||
+            Chunk->GetOwner() != BlockWorld
+        )
         {
             continue;
         }
@@ -196,7 +187,9 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         }
 
         ++NewLoadedChunkCount;
-        const float SafeVoxelSize = FMath::Max(1.0f, Chunk->GetVoxelSize());
+
+        const float SafeVoxelSize =
+            FMath::Max(1.0f, Chunk->GetVoxelSize());
 
         for (
             const FCubusVegetationInstance& Instance :
@@ -207,19 +200,26 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 NewHash,
                 GetTypeHash(Instance.WorldVoxel)
             );
-            NewHash = HashCombineFast(NewHash, GetTypeHash(Instance.TypeId));
+            NewHash = HashCombineFast(
+                NewHash,
+                GetTypeHash(Instance.TypeId)
+            );
             NewHash = HashCombineFast(
                 NewHash,
                 GetTypeHash(Instance.RotationYaw)
             );
-            NewHash = HashCombineFast(NewHash, GetTypeHash(Instance.Scale));
+            NewHash = HashCombineFast(
+                NewHash,
+                GetTypeHash(Instance.Scale)
+            );
 
             const FVector WorldLocation(
                 (static_cast<double>(Instance.WorldVoxel.X) + 0.5) *
                     SafeVoxelSize,
                 (static_cast<double>(Instance.WorldVoxel.Y) + 0.5) *
                     SafeVoxelSize,
-                static_cast<double>(Instance.WorldVoxel.Z) * SafeVoxelSize
+                static_cast<double>(Instance.WorldVoxel.Z) *
+                    SafeVoxelSize
             );
 
             const FTransform WorldTransform(
@@ -258,6 +258,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                     GreasewoodTransforms.Add(LocalTransform);
                     ++RenderedPlantCount;
                 }
+
                 continue;
             }
 
@@ -268,6 +269,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                     SpruceTransforms.Add(LocalTransform);
                     ++RenderedPlantCount;
                 }
+
                 continue;
             }
 
@@ -282,10 +284,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 GetTypeHash(Instance.RotationYaw)
             );
 
-            // The original tree remains available through the existing PCG
-            // path. If an explicit world-level mesh is assigned, half of the
-            // broadleaf records move into that batch; otherwise Elder receives
-            // all broadleaf records without duplicating the PCG tree.
             if (
                 IsValid(ExistingTreeInstances) &&
                 (SpeciesHash & 1u) == 0u
@@ -302,7 +300,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         }
     }
 
-    auto PublishBatch = [this](
+    auto PublishBatch = [](
         UInstancedSkinnedMeshComponent* Component,
         const TArray<FTransform>& Transforms
     )
@@ -314,6 +312,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
         TArray<int32> AnimationIndices;
         AnimationIndices.Init(0, Transforms.Num());
+
         Component->AddInstances(
             Transforms,
             AnimationIndices,
@@ -347,17 +346,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     }
 
     LoadedChunkCount = NewLoadedChunkCount;
-    PublishedPlacementHash = NewHash;
-
-    if (
-        bEnableRuntimeVegetation &&
-        IsValid(VegetationPCG) &&
-        IsValid(VegetationGraph)
-    )
-    {
-        VegetationPCG->CleanupLocal(true);
-        VegetationPCG->GenerateLocal(true);
-    }
+    PublishedPlacementHash = static_cast<int64>(NewHash);
 
     UE_LOG(
         LogTemp,
@@ -458,15 +447,8 @@ void ACubusWorldVegetationActor::EnsurePointCarriers()
     {
         TreePoints = CreatePointCarrier(
             TEXT("CubusWorldTreePoints"),
-            TEXT("Cubus.Vegetation.Tree")
+            TEXT("Cubus.Vegetation.Tree.Broadleaf")
         );
-
-        if (IsValid(TreePoints))
-        {
-            TreePoints->ComponentTags.AddUnique(
-                TEXT("Cubus.Vegetation.Tree.Broadleaf")
-            );
-        }
     }
 
     if (!IsValid(ConiferTreePoints))
@@ -524,15 +506,26 @@ void ACubusWorldVegetationActor::EnsurePlantBatches()
     }
 
     auto EnsureBatch = [this](
+        TSoftObjectPtr<USkeletalMesh>& MeshReference,
         TObjectPtr<UInstancedSkinnedMeshComponent>& Component,
-        const FName ComponentName,
-        TSoftObjectPtr<USkeletalMesh>& MeshReference
+        const FName ComponentName
     )
     {
+        if (MeshReference.IsNull())
+        {
+            return;
+        }
+
         USkeletalMesh* Mesh = MeshReference.LoadSynchronous();
 
         if (!IsValid(Mesh))
         {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("Cubus vegetation could not load mesh %s"),
+                *MeshReference.ToSoftObjectPath().ToString()
+            );
             return;
         }
 
@@ -541,49 +534,36 @@ void ACubusWorldVegetationActor::EnsurePlantBatches()
             Component = CreatePlantBatch(ComponentName);
         }
 
-        if (IsValid(Component) && Component->GetSkinnedAsset() != Mesh)
+        if (IsValid(Component))
         {
             Component->SetSkinnedAssetAndUpdate(Mesh);
+            Component->SetCullDistances(
+                FMath::Max(0, PlantStartCullDistance),
+                FMath::Max(PlantStartCullDistance, PlantEndCullDistance)
+            );
         }
     };
 
     EnsureBatch(
+        ExistingTreeMesh,
         ExistingTreeInstances,
-        TEXT("CubusWorldExistingTrees"),
-        ExistingTreeMesh
+        TEXT("CubusWorldExistingTreeInstances")
     );
-    EnsureBatch(ElderInstances, TEXT("CubusWorldElder"), ElderMesh);
     EnsureBatch(
+        ElderMesh,
+        ElderInstances,
+        TEXT("CubusWorldElderInstances")
+    );
+    EnsureBatch(
+        NorwaySpruceMesh,
         NorwaySpruceInstances,
-        TEXT("CubusWorldNorwaySpruce"),
-        NorwaySpruceMesh
+        TEXT("CubusWorldNorwaySpruceInstances")
     );
     EnsureBatch(
+        GreasewoodMesh,
         GreasewoodInstances,
-        TEXT("CubusWorldGreasewood"),
-        GreasewoodMesh
+        TEXT("CubusWorldGreasewoodInstances")
     );
-}
-
-void ACubusWorldVegetationActor::ConfigurePCG()
-{
-    if (!IsValid(VegetationPCG))
-    {
-        return;
-    }
-
-    VegetationPCG->SetIsPartitioned(false);
-    VegetationPCG->bParseActorComponents = true;
-    VegetationPCG->bOnlyTrackItself = true;
-
-    if (LastConfiguredGraph == VegetationGraph)
-    {
-        return;
-    }
-
-    VegetationPCG->CleanupLocal(true);
-    VegetationPCG->SetGraphLocal(VegetationGraph);
-    LastConfiguredGraph = VegetationGraph;
 }
 
 uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(
@@ -614,7 +594,10 @@ uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(
     {
         const ACubusVoxelVolumeActor* Chunk = *Iterator;
 
-        if (!IsValid(Chunk) || Chunk->GetOwner() != BlockWorld)
+        if (
+            !IsValid(Chunk) ||
+            Chunk->GetOwner() != BlockWorld
+        )
         {
             continue;
         }
@@ -627,7 +610,11 @@ uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(
         }
 
         ++OutLoadedChunkCount;
-        Hash = HashCombineFast(Hash, GetTypeHash(Chunk->GetChunkCoordinate()));
+
+        Hash = HashCombineFast(
+            Hash,
+            GetTypeHash(Chunk->GetChunkCoordinate())
+        );
         Hash = HashCombineFast(
             Hash,
             GetTypeHash(ChunkData->GetVegetationInstances().Num())
@@ -638,17 +625,24 @@ uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(
             ChunkData->GetVegetationInstances()
         )
         {
-            Hash = HashCombineFast(Hash, GetTypeHash(Instance.WorldVoxel));
-            Hash = HashCombineFast(Hash, GetTypeHash(Instance.TypeId));
+            Hash = HashCombineFast(
+                Hash,
+                GetTypeHash(Instance.WorldVoxel)
+            );
+            Hash = HashCombineFast(
+                Hash,
+                GetTypeHash(Instance.TypeId)
+            );
+            Hash = HashCombineFast(
+                Hash,
+                GetTypeHash(Instance.RotationYaw)
+            );
+            Hash = HashCombineFast(
+                Hash,
+                GetTypeHash(Instance.Scale)
+            );
         }
     }
-
-    Hash = HashCombineFast(Hash, GetTypeHash(bRenderWorldPlantBatches));
-    Hash = HashCombineFast(Hash, GetTypeHash(MaximumRenderedPlants));
-    Hash = HashCombineFast(Hash, GetTypeHash(ExistingTreeMesh.ToSoftObjectPath()));
-    Hash = HashCombineFast(Hash, GetTypeHash(ElderMesh.ToSoftObjectPath()));
-    Hash = HashCombineFast(Hash, GetTypeHash(NorwaySpruceMesh.ToSoftObjectPath()));
-    Hash = HashCombineFast(Hash, GetTypeHash(GreasewoodMesh.ToSoftObjectPath()));
 
     return Hash;
 }
@@ -673,6 +667,9 @@ ACubusWorldVegetationActor::CreatePointCarrier(
 
     Component->SetupAttachment(Root);
     Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Component->SetGenerateOverlapEvents(false);
+    Component->SetCanEverAffectNavigation(false);
+    Component->SetCastShadow(false);
     Component->SetMobility(EComponentMobility::Movable);
     Component->ComponentTags.AddUnique(ComponentTag);
     Component->RegisterComponent();
@@ -699,11 +696,11 @@ ACubusWorldVegetationActor::CreatePlantBatch(
     }
 
     Component->SetupAttachment(Root);
-    Component->SetMobility(EComponentMobility::Movable);
     Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Component->SetGenerateOverlapEvents(false);
     Component->SetCanEverAffectNavigation(false);
     Component->SetCastShadow(true);
+    Component->SetMobility(EComponentMobility::Static);
     Component->SetCullDistances(
         FMath::Max(0, PlantStartCullDistance),
         FMath::Max(PlantStartCullDistance, PlantEndCullDistance)
@@ -721,17 +718,17 @@ ACubusWorldVegetationActor::ResolveCarrierForType(
 {
     switch (TypeId)
     {
-        case 1:
+        case GrassType:
             return GrassPoints;
-        case 2:
+        case ShrubType:
             return ShrubPoints;
-        case 3:
+        case BroadleafType:
             return TreePoints;
-        case 4:
+        case ReedsType:
             return ReedsPoints;
-        case 5:
+        case AlpineType:
             return AlpinePoints;
-        case 6:
+        case ConiferType:
             return ConiferTreePoints;
         default:
             return nullptr;
