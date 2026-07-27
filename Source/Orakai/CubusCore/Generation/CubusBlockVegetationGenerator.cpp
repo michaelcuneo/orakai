@@ -6,6 +6,17 @@
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Data/CubusVegetationInstance.h"
 
+namespace CubusVegetationType
+{
+    constexpr int32 Grass = 1;
+    constexpr int32 Shrub = 2;
+    constexpr int32 BroadleafTree = 3;
+    constexpr int32 Reeds = 4;
+    constexpr int32 Alpine = 5;
+    constexpr int32 ConiferTree = 6;
+    constexpr int32 Count = 7;
+}
+
 void FCubusBlockVegetationGenerator::Generate(
     FCubusBlockChunkData& Chunk,
     const UCubusGeologyProfile* GeologyProfile
@@ -23,7 +34,7 @@ void FCubusBlockVegetationGenerator::Generate(
     const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
     const int32 VegetationSeed = Chunk.GetGenerationSeeds().Vegetation;
 
-    int32 CountsByType[6] = {0, 0, 0, 0, 0, 0};
+    int32 CountsByType[CubusVegetationType::Count] = {};
 
     for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
     {
@@ -84,6 +95,9 @@ void FCubusBlockVegetationGenerator::Generate(
             const float PlacementRoll = HashToUnitFloat(
                 HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 101)
             );
+            const float SpeciesRoll = HashToUnitFloat(
+                HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 149)
+            );
 
             int32 TypeId = 0;
             float Density = 0.0f;
@@ -92,28 +106,34 @@ void FCubusBlockVegetationGenerator::Generate(
             {
                 if (SurfaceVoxel->MaterialId == GeologyProfile->ForestSurfaceMaterialId)
                 {
-                    TypeId = PlacementRoll < 0.55f ? 3 : 2;
+                    TypeId = SpeciesRoll < 0.65f
+                        ? CubusVegetationType::BroadleafTree
+                        : CubusVegetationType::ConiferTree;
                     Density = 0.42f;
                 }
                 else if (SurfaceVoxel->MaterialId == GeologyProfile->WetlandSurfaceMaterialId)
                 {
-                    TypeId = 4;
+                    TypeId = CubusVegetationType::Reeds;
                     Density = 0.36f;
                 }
                 else if (SurfaceVoxel->MaterialId == GeologyProfile->RockySurfaceMaterialId)
                 {
-                    TypeId = 5;
+                    TypeId = CubusVegetationType::Alpine;
                     Density = 0.08f;
                 }
                 else if (SurfaceVoxel->MaterialId == GeologyProfile->PlainsSurfaceMaterialId)
                 {
-                    TypeId = PlacementRoll < 0.82f ? 1 : 2;
+                    TypeId = SpeciesRoll < 0.82f
+                        ? CubusVegetationType::Grass
+                        : CubusVegetationType::Shrub;
                     Density = 0.22f;
                 }
             }
             else
             {
-                TypeId = 3;
+                TypeId = SpeciesRoll < 0.72f
+                    ? CubusVegetationType::BroadleafTree
+                    : CubusVegetationType::ConiferTree;
                 Density = 0.025f;
             }
 
@@ -146,16 +166,17 @@ void FCubusBlockVegetationGenerator::Generate(
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus vegetation chunk (%d, %d, %d), seed %d: grass %d, shrubs %d, trees %d, reeds %d, alpine %d%s"),
+        TEXT("Cubus vegetation chunk (%d, %d, %d), seed %d: grass %d, shrubs %d, broadleaf %d, conifers %d, reeds %d, alpine %d%s"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
         ChunkCoordinate.Z,
         VegetationSeed,
-        CountsByType[1],
-        CountsByType[2],
-        CountsByType[3],
-        CountsByType[4],
-        CountsByType[5],
+        CountsByType[CubusVegetationType::Grass],
+        CountsByType[CubusVegetationType::Shrub],
+        CountsByType[CubusVegetationType::BroadleafTree],
+        CountsByType[CubusVegetationType::ConiferTree],
+        CountsByType[CubusVegetationType::Reeds],
+        CountsByType[CubusVegetationType::Alpine],
         bUseConfiguredBiomes ? TEXT("") : TEXT(" (fallback)")
     );
 }
