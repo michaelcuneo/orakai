@@ -90,6 +90,12 @@ public:
         OwningBlockWorld = InBlockWorld;
     }
 
+    UFUNCTION(BlueprintPure, Category = "Cubus|Chunk")
+    ACubusBlockWorldActor* GetOwningBlockWorld() const
+    {
+        return OwningBlockWorld;
+    }
+    
     void SetGenerateCollision(const bool bEnabled)
     {
         bGenerateCollision = bEnabled;
