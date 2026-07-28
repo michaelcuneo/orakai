@@ -31,19 +31,6 @@ public class Orakai : ModuleRules
 
 		PublicIncludePaths.AddRange(new string[] {
 			"Orakai",
-			"Orakai/Variant_Platforming",
-			"Orakai/Variant_Platforming/Animation",
-			"Orakai/Variant_Combat",
-			"Orakai/Variant_Combat/AI",
-			"Orakai/Variant_Combat/Animation",
-			"Orakai/Variant_Combat/Gameplay",
-			"Orakai/Variant_Combat/Interfaces",
-			"Orakai/Variant_Combat/UI",
-			"Orakai/Variant_SideScrolling",
-			"Orakai/Variant_SideScrolling/AI",
-			"Orakai/Variant_SideScrolling/Gameplay",
-			"Orakai/Variant_SideScrolling/Interfaces",
-			"Orakai/Variant_SideScrolling/UI"
 		});
 
 		if (Target.bBuildEditor)
