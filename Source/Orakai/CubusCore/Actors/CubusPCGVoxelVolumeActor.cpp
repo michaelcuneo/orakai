@@ -1,32 +1,9 @@
 #include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 
-#include "CubusCore/Chunks/CubusBlockChunkData.h"
-#include "CubusCore/Data/CubusVegetationInstance.h"
-#include "CubusCore/Rendering/CubusVegetationRendererComponent.h"
-
-#include "Engine/World.h"
-#include "PCGComponent.h"
-#include "PCGGraph.h"
-
 ACubusPCGVoxelVolumeActor::ACubusPCGVoxelVolumeActor()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.bStartWithTickEnabled = true;
-
-    VegetationPointSource = CreateDefaultSubobject<
-        UCubusVegetationRendererComponent
-    >(TEXT("CubusMegaplantPointSource"));
-
-    VegetationPCG = CreateDefaultSubobject<UPCGComponent>(
-        TEXT("CubusVegetationPCG")
-    );
-
-    if (IsValid(VegetationPCG))
-    {
-        VegetationPCG->SetIsPartitioned(false);
-        VegetationPCG->bParseActorComponents = true;
-        VegetationPCG->bOnlyTrackItself = true;
-    }
+    // Chunk actors no longer own PCG or skinned vegetation components.
+    // The world vegetation actor owns all vegetation render batches.
 }
 
 void ACubusPCGVoxelVolumeActor::OnConstruction(
@@ -34,79 +11,6 @@ void ACubusPCGVoxelVolumeActor::OnConstruction(
 )
 {
     Super::OnConstruction(Transform);
-
-    ConfigurePCGComponent();
-
-    if (IsValid(VegetationPointSource))
-    {
-        VegetationPointSource->SetComponentTickEnabled(
-            bGenerateVegetationPCG
-        );
-
-        if (bGenerateVegetationPCG)
-        {
-            VegetationPointSource->RebuildVegetation();
-        }
-        else
-        {
-            VegetationPointSource->ClearVegetation();
-        }
-    }
-
-    LastVegetationPlacementHash =
-        CalculateVegetationPlacementHash();
-}
-
-void ACubusPCGVoxelVolumeActor::Tick(const float DeltaSeconds)
-{
-    Super::Tick(DeltaSeconds);
-
-    if (!bGenerateVegetationPCG)
-    {
-        return;
-    }
-
-    TimeUntilVegetationRefresh -= DeltaSeconds;
-
-    if (TimeUntilVegetationRefresh > 0.0f)
-    {
-        return;
-    }
-
-    TimeUntilVegetationRefresh = FMath::Max(
-        0.05f,
-        VegetationRefreshInterval
-    );
-
-    const uint32 CurrentPlacementHash =
-        CalculateVegetationPlacementHash();
-
-    const bool bGraphChanged =
-        LastConfiguredGraph != VegetationGraph;
-
-    if (
-        CurrentPlacementHash == LastVegetationPlacementHash &&
-        !bGraphChanged
-    )
-    {
-        return;
-    }
-
-    RegenerateVegetationPCG();
-}
-
-void ACubusPCGVoxelVolumeActor::EndPlay(
-    const EEndPlayReason::Type EndPlayReason
-)
-{
-    CleanupVegetationPCG();
-
-    if (IsValid(VegetationPointSource))
-    {
-        VegetationPointSource->ClearVegetation();
-    }
-
-    Super::EndPlay(EndPlayReason);
 }
 
 void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
@@ -114,156 +18,15 @@ void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
     const bool bInGenerateVegetationPCG
 )
 {
-    VegetationGraph = InVegetationGraph;
-
-    const UWorld* World = GetWorld();
-    const bool bRuntimeWorld =
-        IsValid(World) && World->IsGameWorld();
-
-    bGenerateVegetationPCG =
-        bInGenerateVegetationPCG ||
-        (bRuntimeWorld && IsValid(VegetationGraph));
-
-    if (IsValid(VegetationPointSource))
-    {
-        VegetationPointSource->SetComponentTickEnabled(
-            bGenerateVegetationPCG
-        );
-
-        if (bGenerateVegetationPCG)
-        {
-            VegetationPointSource->RebuildVegetation();
-        }
-        else
-        {
-            VegetationPointSource->ClearVegetation();
-        }
-    }
-
-    SetActorTickEnabled(bGenerateVegetationPCG);
-    ConfigurePCGComponent();
-
-    if (!bGenerateVegetationPCG)
-    {
-        CleanupVegetationPCG();
-    }
+    // Deprecated compatibility method. Intentionally ignored.
 }
 
 void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
 {
-    if (!bGenerateVegetationPCG)
-    {
-        if (IsValid(VegetationPointSource))
-        {
-            VegetationPointSource->ClearVegetation();
-        }
-
-        CleanupVegetationPCG();
-        return;
-    }
-
-    if (IsValid(VegetationPointSource))
-    {
-        VegetationPointSource->RebuildVegetation();
-    }
-
-    LastVegetationPlacementHash =
-        CalculateVegetationPlacementHash();
-
-    ConfigurePCGComponent();
-
-    if (
-        !IsValid(VegetationPCG) ||
-        !IsValid(VegetationGraph)
-    )
-    {
-        CleanupVegetationPCG();
-        return;
-    }
-
-    VegetationPCG->Activate(true);
-    VegetationPCG->CleanupLocal(true);
-    VegetationPCG->GenerateLocal(true);
-
-    UE_LOG(
-        LogTemp,
-        Display,
-        TEXT("Cubus PCG vegetation %s: regeneration requested for chunk (%d, %d, %d), placements %d"),
-        *GetName(),
-        GetChunkCoordinate().X,
-        GetChunkCoordinate().Y,
-        GetChunkCoordinate().Z,
-        GetChunkData() != nullptr
-            ? GetChunkData()->GetVegetationInstances().Num()
-            : 0
-    );
+    // Deprecated compatibility method. Intentionally ignored.
 }
 
 void ACubusPCGVoxelVolumeActor::CleanupVegetationPCG()
 {
-    if (IsValid(VegetationPCG))
-    {
-        VegetationPCG->CleanupLocal(true);
-        VegetationPCG->Deactivate();
-    }
-}
-
-uint32 ACubusPCGVoxelVolumeActor::CalculateVegetationPlacementHash() const
-{
-    const FCubusBlockChunkData* CurrentChunkData = GetChunkData();
-
-    if (CurrentChunkData == nullptr)
-    {
-        return 0;
-    }
-
-    uint32 Hash = GetTypeHash(
-        CurrentChunkData->GetVegetationInstances().Num()
-    );
-
-    for (
-        const FCubusVegetationInstance& Instance :
-        CurrentChunkData->GetVegetationInstances()
-    )
-    {
-        Hash = HashCombineFast(
-            Hash,
-            GetTypeHash(Instance.WorldVoxel)
-        );
-        Hash = HashCombineFast(
-            Hash,
-            GetTypeHash(Instance.TypeId)
-        );
-        Hash = HashCombineFast(
-            Hash,
-            GetTypeHash(Instance.RotationYaw)
-        );
-        Hash = HashCombineFast(
-            Hash,
-            GetTypeHash(Instance.Scale)
-        );
-    }
-
-    return Hash;
-}
-
-void ACubusPCGVoxelVolumeActor::ConfigurePCGComponent()
-{
-    if (!IsValid(VegetationPCG))
-    {
-        return;
-    }
-
-    VegetationPCG->SetIsPartitioned(false);
-    VegetationPCG->bParseActorComponents = true;
-    VegetationPCG->bOnlyTrackItself = true;
-
-    if (LastConfiguredGraph == VegetationGraph)
-    {
-        return;
-    }
-
-    VegetationPCG->CleanupLocal(true);
-    VegetationPCG->SetGraphLocal(VegetationGraph);
-    LastConfiguredGraph = VegetationGraph;
+    // Deprecated compatibility method. Intentionally ignored.
 }

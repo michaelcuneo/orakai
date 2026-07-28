@@ -204,7 +204,7 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
 
     UE_LOG(
         LogTemp,
-        Display,
+        Verbose,
         TEXT("Cubus generation seeds world %lld terrain %d rivers %d biomes %d caves %d ores %d vegetation %d"),
         Seeds.World,
         Seeds.Terrain,
@@ -400,7 +400,7 @@ void FCubusBlockTerrainGenerator::CarveCaves(
 
     UE_LOG(
         LogTemp,
-        Display,
+        Verbose,
         TEXT("Cubus geology chunk (%d, %d, %d), cave seed %d: carved %d cave voxels"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
@@ -509,7 +509,7 @@ void FCubusBlockTerrainGenerator::ApplyOreRules(
 
     UE_LOG(
         LogTemp,
-        Display,
+        Verbose,
         TEXT("Cubus geology chunk (%d, %d, %d), ore seed %d: generated %d ore voxels"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
@@ -522,7 +522,7 @@ void FCubusBlockTerrainGenerator::ApplyOreRules(
     {
         UE_LOG(
             LogTemp,
-            Display,
+            Verbose,
             TEXT("Cubus geology chunk (%d, %d, %d): material %d = %d ore voxels"),
             ChunkCoordinate.X,
             ChunkCoordinate.Y,

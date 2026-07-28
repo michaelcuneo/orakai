@@ -10,10 +10,6 @@ class UInstancedStaticMeshComponent;
 class USkeletalMesh;
 class UStaticMesh;
 
-/**
- * Renders deterministic Cubus vegetation placements and streams the expensive
- * instanced skinned tree components independently of terrain chunk lifetime.
- */
 UCLASS(
     BlueprintType,
     Blueprintable,
@@ -54,16 +50,25 @@ public:
         return bVegetationActive;
     }
 
+    void SetConfigurationOnly(const bool bInConfigurationOnly)
+    {
+        bConfigurationOnly = bInConfigurationOnly;
+        if (bConfigurationOnly)
+        {
+            SetComponentTickEnabled(false);
+        }
+    }
+
+    bool IsConfigurationOnly() const
+    {
+        return bConfigurationOnly;
+    }
+
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Debug")
     TObjectPtr<UStaticMesh> MarkerMesh = nullptr;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|Placement",
-        meta = (ClampMin = "1.0", Units = "cm")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Placement", meta = (ClampMin = "1.0", Units = "cm"))
     float VoxelSize = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Debug")
@@ -72,104 +77,40 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE")
     bool bRenderInstancedTrees = true;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE|Growth",
-        meta = (EditCondition = "bRenderInstancedTrees")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE|Growth", meta = (EditCondition = "bRenderInstancedTrees"))
     TObjectPtr<USkeletalMesh> SeedlingTreeMesh = nullptr;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE|Growth",
-        meta = (EditCondition = "bRenderInstancedTrees")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE|Growth", meta = (EditCondition = "bRenderInstancedTrees"))
     TObjectPtr<USkeletalMesh> SaplingTreeMesh = nullptr;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE|Growth",
-        meta = (EditCondition = "bRenderInstancedTrees")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE|Growth", meta = (EditCondition = "bRenderInstancedTrees"))
     TObjectPtr<USkeletalMesh> YoungTreeMesh = nullptr;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE|Growth",
-        meta = (EditCondition = "bRenderInstancedTrees")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE|Growth", meta = (EditCondition = "bRenderInstancedTrees"))
     TObjectPtr<USkeletalMesh> MatureTreeMesh = nullptr;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE|Growth",
-        meta = (EditCondition = "bRenderInstancedTrees")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE|Growth", meta = (EditCondition = "bRenderInstancedTrees"))
     bool bSimulateTreeGrowth = false;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE|Growth",
-        meta = (
-            ClampMin = "1.0",
-            Units = "s",
-            EditCondition = "bRenderInstancedTrees && bSimulateTreeGrowth"
-        )
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE|Growth", meta = (ClampMin = "1.0", Units = "s", EditCondition = "bRenderInstancedTrees && bSimulateTreeGrowth"))
     float GrowthStageDurationSeconds = 300.0f;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE",
-        meta = (ClampMin = "0", EditCondition = "bRenderInstancedTrees")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE", meta = (ClampMin = "0", EditCondition = "bRenderInstancedTrees"))
     int32 MaxTreeInstancesPerChunk = 8;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE",
-        meta = (ClampMin = "0", Units = "cm", EditCondition = "bRenderInstancedTrees")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE", meta = (ClampMin = "0", Units = "cm", EditCondition = "bRenderInstancedTrees"))
     int32 TreeStartCullDistance = 4800;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|PVE",
-        meta = (ClampMin = "0", Units = "cm", EditCondition = "bRenderInstancedTrees")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PVE", meta = (ClampMin = "0", Units = "cm", EditCondition = "bRenderInstancedTrees"))
     int32 TreeEndCullDistance = 9600;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|Streaming",
-        meta = (ClampMin = "0", Units = "cm")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0", Units = "cm"))
     float VegetationActivationDistance = 6400.0f;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|Streaming",
-        meta = (ClampMin = "0", Units = "cm")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0", Units = "cm"))
     float VegetationDeactivationDistance = 9600.0f;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation",
-        meta = (ClampMin = "0.1", Units = "s")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation", meta = (ClampMin = "0.1", Units = "s"))
     float ChangeCheckInterval = 0.5f;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
@@ -182,6 +123,8 @@ protected:
     bool bVegetationActive = false;
 
 private:
+    bool bConfigurationOnly = false;
+
     UPROPERTY(Transient)
     TObjectPtr<UInstancedStaticMeshComponent> GrassPoints = nullptr;
 
@@ -217,19 +160,12 @@ private:
     void EnsurePointComponents();
     void EnsureTreeInstanceComponents();
     void DestroyTreeInstanceComponents();
-    void DestroyTreeStageComponent(
-        TObjectPtr<UInstancedSkinnedMeshComponent>& Component
-    );
+    void DestroyTreeStageComponent(TObjectPtr<UInstancedSkinnedMeshComponent>& Component);
     void UpdateStreamingState();
     int32 GetCurrentGrowthStep() const;
     uint32 CalculatePlacementHash() const;
 
     UInstancedSkinnedMeshComponent* CreateTreeStageComponent(FName ComponentName);
-
-    UInstancedStaticMeshComponent* CreatePointComponent(
-        FName ComponentName,
-        FName ComponentTag
-    );
-
+    UInstancedStaticMeshComponent* CreatePointComponent(FName ComponentName, FName ComponentTag);
     UInstancedStaticMeshComponent* ResolvePointComponentForType(int32 TypeId) const;
 };

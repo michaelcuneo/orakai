@@ -88,7 +88,12 @@ void ACubusVoxelVolumeActor::OnConstruction(
         OwningBlockWorld->RegisterChunk(this);
     }
 
-    if (bRebuildAutomatically)
+    const UWorld* World = GetWorld();
+    const bool bCanAutoGenerateInConstruction =
+        !IsValid(World) ||
+        !World->IsGameWorld();
+
+    if (bRebuildAutomatically && bCanAutoGenerateInConstruction)
     {
         GenerateTestShape();
     }
@@ -99,6 +104,7 @@ void ACubusVoxelVolumeActor::GenerateTestShapeData()
     EnsureChunkData();
 
     ChunkData->Clear();
+    bChunkCacheDirty = true;
 
     switch (TestShape)
     {
@@ -178,6 +184,7 @@ void ACubusVoxelVolumeActor::FillVolume()
     SolidVoxel.Flags = 0;
 
     ChunkData->Fill(SolidVoxel);
+    bChunkCacheDirty = true;
     RebuildVolume();
 }
 
@@ -186,6 +193,7 @@ void ACubusVoxelVolumeActor::ClearVolume()
     EnsureChunkData();
 
     ChunkData->Clear();
+    bChunkCacheDirty = true;
 
     RebuildVolume();
 }
