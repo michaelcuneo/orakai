@@ -2,16 +2,20 @@
 
 #include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
+#include "CubusCore/Actors/CubusWorldVegetationActor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "CubusCore/Persistence/OrakaiPersistenceSubsystem.h"
 #include "CubusCore/Persistence/OrakaiPersistenceTypes.h"
+#include "CubusCore/Storage/CubusChunkStore.h"
 
 #include "Components/SceneComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 
@@ -87,7 +91,7 @@ void ACubusBlockWorldActor::OnConstruction(
 
     InitialLoadRadius = FMath::Max(0, InitialLoadRadius);
     HorizontalViewRadius = FMath::Max(InitialLoadRadius, HorizontalViewRadius);
-    VerticalViewRadius = FMath::Max(0, VerticalViewRadius);
+    VerticalViewRadius = FMath::Max(1, VerticalViewRadius);
     MaxChunksGeneratedPerTick = FMath::Max(1, MaxChunksGeneratedPerTick);
     MaxChunksRemovedPerTick = FMath::Max(1, MaxChunksRemovedPerTick);
     StreamingUpdateInterval = FMath::Max(0.05f, StreamingUpdateInterval);
@@ -114,10 +118,23 @@ void ACubusBlockWorldActor::BeginPlay()
 
     PublishWorldConfig();
 
+    EnsureWorldVegetationActor();
+
     if (!bEnableRuntimeStreaming)
     {
         return;
     }
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("Cubus runtime streaming settings: initial=%d horizontal=%d vertical=%d genPerTick=%d interval=%.2fs"),
+        InitialLoadRadius,
+        HorizontalViewRadius,
+        VerticalViewRadius,
+        MaxChunksGeneratedPerTick,
+        StreamingUpdateInterval
+    );
 
     RefreshChunkRegistry();
 
@@ -136,6 +153,76 @@ void ACubusBlockWorldActor::BeginPlay()
     }
 
     UpdateRuntimeStreaming(true);
+}
+
+void ACubusBlockWorldActor::EnsureWorldVegetationActor()
+{
+    if (!bEnableWorldVegetation)
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+
+    if (!IsValid(World))
+    {
+        return;
+    }
+
+    ACubusWorldVegetationActor* VegetationActor = WorldVegetationActor.Get();
+
+    if (!IsValid(VegetationActor))
+    {
+        for (TActorIterator<ACubusWorldVegetationActor> Iterator(World); Iterator; ++Iterator)
+        {
+            if (IsValid(*Iterator))
+            {
+                VegetationActor = *Iterator;
+                break;
+            }
+        }
+    }
+
+    if (!IsValid(VegetationActor))
+    {
+        TSubclassOf<ACubusWorldVegetationActor> ResolvedClass =
+            WorldVegetationActorClass;
+
+        if (!ResolvedClass)
+        {
+            ResolvedClass = ACubusWorldVegetationActor::StaticClass();
+        }
+
+        FActorSpawnParameters SpawnParameters;
+        SpawnParameters.Owner = this;
+        SpawnParameters.OverrideLevel = GetLevel();
+        SpawnParameters.SpawnCollisionHandlingOverride =
+            ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+        if (World->IsGameWorld())
+        {
+            SpawnParameters.ObjectFlags |= RF_Transient;
+        }
+
+        VegetationActor =
+            World->SpawnActor<ACubusWorldVegetationActor>(
+                ResolvedClass,
+                GetActorLocation(),
+                FRotator::ZeroRotator,
+                SpawnParameters
+            );
+
+        if (IsValid(VegetationActor))
+        {
+            UE_LOG(LogTemp, Display, TEXT("Cubus spawned world vegetation actor: %s"), *VegetationActor->GetName());
+        }
+    }
+
+    if (IsValid(VegetationActor))
+    {
+        WorldVegetationActor = VegetationActor;
+        VegetationActor->ConfigureForWorld(this);
+    }
 }
 
 void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
@@ -170,6 +257,8 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
 
     if (bPawnHeldForStreaming && IsValid(PlayerPawn))
     {
+        HeldPawnElapsedSeconds += DeltaSeconds;
+
         PlayerPawn->SetActorLocation(
             HeldPawnLocation,
             false,
@@ -349,6 +438,7 @@ bool ACubusBlockWorldActor::EditVoxelAtWorldVoxel(
         return false;
     }
 
+    Chunk->MarkChunkCacheDirty();
     Chunk->SaveCachedChunk();
     RebuildChunkAndNeighbours(ChunkCoordinate);
 
@@ -453,10 +543,20 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
         SpawnParameters.ObjectFlags |= RF_Transient;
     }
 
+    const double ChunkWorldSize =
+        static_cast<double>(Cubus::ChunkSize) *
+        static_cast<double>(FMath::Max(1.0f, GeneratedVoxelSize));
+
+    const FVector SpawnLocation(
+        static_cast<double>(Coordinate.X) * ChunkWorldSize,
+        static_cast<double>(Coordinate.Y) * ChunkWorldSize,
+        static_cast<double>(Coordinate.Z) * ChunkWorldSize
+    );
+
     ACubusVoxelVolumeActor* ChunkActor =
         World->SpawnActor<ACubusVoxelVolumeActor>(
             ResolvedChunkClass,
-            FVector::ZeroVector,
+            SpawnLocation,
             FRotator::ZeroRotator,
             SpawnParameters
         );
@@ -794,10 +894,28 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 {
     APawn* PlayerPawn = TrackedPawn.Get();
 
+    FVector ViewLocation = FVector::ZeroVector;
+    bool bHasViewLocation = false;
+
+    if (APlayerController* PlayerController =
+            UGameplayStatics::GetPlayerController(this, 0))
+    {
+        if (APlayerCameraManager* CameraManager =
+                PlayerController->PlayerCameraManager)
+        {
+            ViewLocation = CameraManager->GetCameraLocation();
+            bHasViewLocation = true;
+        }
+    }
+
     const FVector TrackingLocation =
-        IsValid(PlayerPawn)
-            ? (bPawnHeldForStreaming ? HeldPawnLocation : PlayerPawn->GetActorLocation())
-            : GetActorLocation();
+        bPawnHeldForStreaming
+            ? HeldPawnLocation
+            : (bHasViewLocation
+                ? ViewLocation
+                : (IsValid(PlayerPawn)
+                    ? PlayerPawn->GetActorLocation()
+                    : GetActorLocation()));
 
     const FIntVector CentreCoordinate =
         WorldLocationToChunkCoordinate(TrackingLocation);
@@ -850,7 +968,8 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
                 FMath::Abs(B.Y - CentreCoordinate.Y) +
                 FMath::Abs(B.Z - CentreCoordinate.Z);
 
-            return DistanceA < DistanceB;
+            // Sort far-to-near so Pop() returns nearest-first in O(1).
+            return DistanceA > DistanceB;
         }
     );
 
@@ -874,8 +993,8 @@ void ACubusBlockWorldActor::ProcessRuntimeQueues()
         !PendingChunkRemoval.IsEmpty()
     )
     {
-        const FIntVector Coordinate = PendingChunkRemoval[0];
-        PendingChunkRemoval.RemoveAt(0, 1, EAllowShrinking::No);
+        const FIntVector Coordinate = PendingChunkRemoval.Last();
+        PendingChunkRemoval.Pop(EAllowShrinking::No);
 
         ACubusVoxelVolumeActor* ChunkActor = FindChunk(Coordinate);
 
@@ -895,8 +1014,8 @@ void ACubusBlockWorldActor::ProcessRuntimeQueues()
         !PendingChunkGeneration.IsEmpty()
     )
     {
-        const FIntVector Coordinate = PendingChunkGeneration[0];
-        PendingChunkGeneration.RemoveAt(0, 1, EAllowShrinking::No);
+        const FIntVector Coordinate = PendingChunkGeneration.Last();
+        PendingChunkGeneration.Pop(EAllowShrinking::No);
 
         const bool bInitialTerrainStillLoading =
             !bInitialSpawnAreaReady;
@@ -956,6 +1075,7 @@ void ACubusBlockWorldActor::HoldPawnForInitialStreaming()
     }
 
     HeldPawnLocation = PlayerPawn->GetActorLocation();
+    HeldPawnElapsedSeconds = 0.0f;
     PlayerPawn->SetActorEnableCollision(false);
     PlayerPawn->SetActorTickEnabled(false);
     bPawnHeldForStreaming = true;
@@ -963,7 +1083,11 @@ void ACubusBlockWorldActor::HoldPawnForInitialStreaming()
 
 void ACubusBlockWorldActor::TryReleasePawnToTerrain()
 {
-    if (!bPawnHeldForStreaming || !bInitialSpawnAreaReady)
+    const bool bSpawnHoldTimedOut =
+        SpawnHoldTimeoutSeconds > 0.0f &&
+        HeldPawnElapsedSeconds >= SpawnHoldTimeoutSeconds;
+
+    if (!bPawnHeldForStreaming || (!bInitialSpawnAreaReady && !bSpawnHoldTimedOut))
     {
         return;
     }
@@ -975,6 +1099,115 @@ void ACubusBlockWorldActor::TryReleasePawnToTerrain()
     {
         return;
     }
+
+    auto ReleasePawnAtSurfaceZ =
+        [this, PlayerPawn](const double SurfaceZ, const TCHAR* Reason)
+        {
+            PlayerPawn->SetActorLocation(
+                FVector(
+                    HeldPawnLocation.X,
+                    HeldPawnLocation.Y,
+                    SurfaceZ + static_cast<double>(SpawnHeightOffset)
+                ),
+                false,
+                nullptr,
+                ETeleportType::TeleportPhysics
+            );
+
+            PlayerPawn->SetActorEnableCollision(true);
+            PlayerPawn->SetActorTickEnabled(true);
+            bPawnHeldForStreaming = false;
+            HeldPawnElapsedSeconds = 0.0f;
+
+            UE_LOG(
+                LogTemp,
+                Display,
+                TEXT("Cubus released player (%s) at runtime terrain surface Z=%.2f"),
+                Reason,
+                SurfaceZ
+            );
+
+            UpdateRuntimeStreaming(true);
+        };
+
+    auto TryFindSurfaceFromChunkData =
+        [this](double& OutSurfaceZ)
+        {
+            bool bFoundSurface = false;
+            double HighestSurfaceZ = -TNumericLimits<double>::Max();
+
+            for (const auto& Entry : ChunksByCoordinate)
+            {
+                ACubusVoxelVolumeActor* ChunkActor = Entry.Value.Get();
+
+                if (!IsValid(ChunkActor))
+                {
+                    continue;
+                }
+
+                const FCubusBlockChunkData* ChunkData =
+                    ChunkActor->GetChunkData();
+
+                if (ChunkData == nullptr || !ChunkData->HasAnyOccupiedVoxel())
+                {
+                    continue;
+                }
+
+                const double VoxelSize =
+                    static_cast<double>(FMath::Max(1.0f, ChunkActor->GetVoxelSize()));
+
+                const double HalfChunkWorldSize =
+                    static_cast<double>(Cubus::ChunkSize) * VoxelSize * 0.5;
+
+                const FVector ChunkLocation = ChunkActor->GetActorLocation();
+
+                const int32 LocalX = FMath::FloorToInt(
+                    (HeldPawnLocation.X - ChunkLocation.X + HalfChunkWorldSize) /
+                    VoxelSize
+                );
+
+                const int32 LocalY = FMath::FloorToInt(
+                    (HeldPawnLocation.Y - ChunkLocation.Y + HalfChunkWorldSize) /
+                    VoxelSize
+                );
+
+                if (
+                    LocalX < 0 || LocalX >= Cubus::ChunkSize ||
+                    LocalY < 0 || LocalY >= Cubus::ChunkSize
+                )
+                {
+                    continue;
+                }
+
+                for (int32 LocalZ = Cubus::ChunkSize - 1; LocalZ >= 0; --LocalZ)
+                {
+                    if (ChunkData->IsEmpty(LocalX, LocalY, LocalZ))
+                    {
+                        continue;
+                    }
+
+                    const double SurfaceZ =
+                        ChunkLocation.Z +
+                        ((static_cast<double>(LocalZ) + 1.0) * VoxelSize) -
+                        HalfChunkWorldSize;
+
+                    if (!bFoundSurface || SurfaceZ > HighestSurfaceZ)
+                    {
+                        HighestSurfaceZ = SurfaceZ;
+                        bFoundSurface = true;
+                    }
+
+                    break;
+                }
+            }
+
+            if (bFoundSurface)
+            {
+                OutSurfaceZ = HighestSurfaceZ;
+            }
+
+            return bFoundSurface;
+        };
 
     const float ChunkWorldSize =
         static_cast<float>(Cubus::ChunkSize) *
@@ -1009,28 +1242,98 @@ void ACubusBlockWorldActor::TryReleasePawnToTerrain()
 
     if (!bHitTerrain)
     {
+        const FIntVector HeldChunkCoordinate =
+            WorldLocationToChunkCoordinate(HeldPawnLocation);
+
+        const FCubusChunkStoreContext StoreContext
+        {
+            WorldSeed,
+            FCubusGenerationSeeds::CurrentGenerationVersion
+        };
+
+        bool bRecoveredAnyChunk = false;
+
+        auto RecoverChunkAtCoordinate =
+            [this, &StoreContext, &bRecoveredAnyChunk](const FIntVector& Coordinate)
+            {
+                ACubusVoxelVolumeActor* ChunkActor = FindChunk(Coordinate);
+
+                if (!IsValid(ChunkActor))
+                {
+                    ChunkActor = SpawnChunkAtCoordinate(Coordinate, false);
+                }
+
+                if (!IsValid(ChunkActor))
+                {
+                    return;
+                }
+
+                const FCubusBlockChunkData* ChunkData =
+                    ChunkActor->GetChunkData();
+
+                const bool bNeedsRegeneration =
+                    ChunkData == nullptr ||
+                    !ChunkData->HasAnyOccupiedVoxel();
+
+                if (bNeedsRegeneration)
+                {
+                    FCubusChunkStore::DeleteChunk(Coordinate, StoreContext);
+                    ChunkActor->GenerateTestShapeData();
+                    ChunkActor->RebuildVolume();
+                    ChunkActor->SaveCachedChunk();
+                    bRecoveredAnyChunk = true;
+                }
+            };
+
+        const int32 RecoveryHorizontalRadius = FMath::Max(1, InitialLoadRadius);
+        const int32 RecoveryVerticalRadius = FMath::Max(1, VerticalViewRadius);
+
+        TSet<FIntVector> RecoveryCoordinates;
+        BuildRequiredCoordinates(
+            HeldChunkCoordinate,
+            RecoveryHorizontalRadius,
+            RecoveryVerticalRadius,
+            RecoveryCoordinates
+        );
+
+        for (const FIntVector& Coordinate : RecoveryCoordinates)
+        {
+            RecoverChunkAtCoordinate(Coordinate);
+        }
+
+        RecoverChunkAtCoordinate(HeldChunkCoordinate + FIntVector(0, 0, -1));
+
+        if (bRecoveredAnyChunk)
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("Cubus spawn trace missed terrain; force-regenerated spawn neighborhood around (%d, %d, %d)"),
+                HeldChunkCoordinate.X,
+                HeldChunkCoordinate.Y,
+                HeldChunkCoordinate.Z
+            );
+
+            UpdateRuntimeStreaming(true);
+        }
+
+        double DataSurfaceZ = 0.0;
+
+        if (TryFindSurfaceFromChunkData(DataSurfaceZ))
+        {
+            ReleasePawnAtSurfaceZ(DataSurfaceZ, TEXT("voxel-data fallback"));
+            return;
+        }
+
+        if (bSpawnHoldTimedOut)
+        {
+            ReleasePawnAtSurfaceZ(HeldPawnLocation.Z, TEXT("timeout fallback"));
+        }
+
         return;
     }
 
-    PlayerPawn->SetActorLocation(
-        HitResult.ImpactPoint + FVector(0.0f, 0.0f, SpawnHeightOffset),
-        false,
-        nullptr,
-        ETeleportType::TeleportPhysics
-    );
-
-    PlayerPawn->SetActorEnableCollision(true);
-    PlayerPawn->SetActorTickEnabled(true);
-    bPawnHeldForStreaming = false;
-
-    UE_LOG(
-        LogTemp,
-        Display,
-        TEXT("Cubus released player at runtime terrain surface Z=%.2f"),
-        HitResult.ImpactPoint.Z
-    );
-
-    UpdateRuntimeStreaming(true);
+    ReleasePawnAtSurfaceZ(HitResult.ImpactPoint.Z, TEXT("line-trace"));
 }
 
 void ACubusBlockWorldActor::RemoveInvalidChunks()

@@ -7,6 +7,7 @@
 #include "CubusBlockWorldActor.generated.h"
 
 class ACubusVoxelVolumeActor;
+class ACubusWorldVegetationActor;
 class APawn;
 class USceneComponent;
 class UCubusMaterialRegistry;
@@ -85,6 +86,12 @@ public:
         return MaxChunksGeneratedPerTick;
     }
 
+    UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Spawn")
+    bool IsInitialSpawnAreaReady() const
+    {
+        return bInitialSpawnAreaReady;
+    }
+
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
     void GenerateChunkGrid();
 
@@ -100,21 +107,12 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Terrain")
     void RegenerateTerrain();
 
-    // --- Authoritative runtime edits (applied locally and persisted) ---
-
-    /**
-     * Apply a voxel edit at a world voxel coordinate: mutate the owning chunk,
-     * rebuild it, and record the delta with the persistence subsystem. Returns
-     * false when the owning chunk is not currently loaded.
-     */
     UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
     bool EditVoxelAtWorldVoxel(FIntVector WorldVoxel, int32 MaterialId, bool bIsWater);
 
-    /** Record removal of a voxel edit, restoring the generated voxel on reload. */
     UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
     bool ClearVoxelEditAtWorldVoxel(FIntVector WorldVoxel);
 
-    /** Record a foliage placement/modification at a world voxel coordinate. */
     UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
     void RecordFoliageEditAtWorldVoxel(
         FIntVector WorldVoxel,
@@ -123,7 +121,6 @@ public:
         float Scale
     );
 
-    /** Record removal of generated foliage at a world voxel coordinate. */
     UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
     void RemoveFoliageAtWorldVoxel(FIntVector WorldVoxel);
 
@@ -138,8 +135,6 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Seed")
     int64 WorldSeed = 1;
-
-    // --- SpacetimeDB persistence ---
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
     bool bConnectToSpacetimeDB = false;
@@ -159,89 +154,47 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
     FIntVector GridOrigin = FIntVector::ZeroValue;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Generation",
-        meta = (ClampMin = "1.0", Units = "cm")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation", meta = (ClampMin = "1.0", Units = "cm"))
     float GeneratedVoxelSize = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
     TSubclassOf<ACubusVoxelVolumeActor> ChunkActorClass;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming")
     bool bEnableRuntimeStreaming = true;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming",
-        meta = (ClampMin = "0", UIMax = "8")
-    )
-    int32 InitialLoadRadius = 1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation")
+    bool bEnableWorldVegetation = true;
 
-    UPROPERTY(
-        Config,
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming",
-        meta = (ClampMin = "0", UIMax = "16")
-    )
-    int32 HorizontalViewRadius = 3;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation")
+    TSubclassOf<ACubusWorldVegetationActor> WorldVegetationActorClass;
 
-    UPROPERTY(
-        Config,
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming",
-        meta = (ClampMin = "0", UIMax = "4")
-    )
-    int32 VerticalViewRadius = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "16"))
+    int32 InitialLoadRadius = 2;
 
-    UPROPERTY(
-        Config,
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming",
-        meta = (ClampMin = "1", UIMax = "16")
-    )
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "32"))
+    int32 HorizontalViewRadius = 8;
+
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
+    int32 VerticalViewRadius = 3;
+
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
     int32 MaxChunksGeneratedPerTick = 1;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming",
-        meta = (ClampMin = "1", UIMax = "32")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
     int32 MaxChunksRemovedPerTick = 2;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming",
-        meta = (ClampMin = "0.05", Units = "s")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0.05", Units = "s"))
     float StreamingUpdateInterval = 0.25f;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming|Spawn"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn")
     bool bHoldPawnUntilInitialAreaReady = true;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming|Spawn",
-        meta = (ClampMin = "0.0", Units = "cm")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn", meta = (ClampMin = "0.0", Units = "cm"))
     float SpawnHeightOffset = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn", meta = (ClampMin = "0.0", Units = "s"))
+    float SpawnHoldTimeoutSeconds = 3.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
     bool bUseHeightTerrain = true;
@@ -315,12 +268,6 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Geology")
     TObjectPtr<UCubusGeologyProfile> GeologyProfile = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PCG")
-    TObjectPtr<UPCGGraphInterface> VegetationPCGGraph = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|PCG")
-    bool bGenerateVegetationPCG = true;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
     TObjectPtr<UMaterialInterface> FallbackVoxelMaterial = nullptr;
 
@@ -364,6 +311,9 @@ protected:
     bool bInitialSpawnAreaReady = false;
 
 private:
+    UPCGGraphInterface* VegetationPCGGraph = nullptr;
+    bool bGenerateVegetationPCG = false;
+
     TMap<FIntVector, TWeakObjectPtr<ACubusVoxelVolumeActor>> ChunksByCoordinate;
 
     UPROPERTY(Transient)
@@ -375,15 +325,15 @@ private:
     TSet<FIntVector> InitialRequiredCoordinates;
 
     TWeakObjectPtr<APawn> TrackedPawn;
+    TWeakObjectPtr<ACubusWorldVegetationActor> WorldVegetationActor;
     FIntVector LastTrackedChunk = FIntVector(MAX_int32, MAX_int32, MAX_int32);
     FVector HeldPawnLocation = FVector::ZeroVector;
     bool bPawnHeldForStreaming = false;
+    float HeldPawnElapsedSeconds = 0.0f;
     float TimeUntilStreamingUpdate = 0.0f;
 
     void RemoveInvalidChunks();
     void RebuildChunkAtCoordinate(const FIntVector& ChunkCoordinate);
-
-    // Persistence hooks.
     void PublishWorldConfig();
     void RecordTrackedPawnCoordinate();
 
@@ -407,4 +357,5 @@ private:
 
     void HoldPawnForInitialStreaming();
     void TryReleasePawnToTerrain();
+    void EnsureWorldVegetationActor();
 };

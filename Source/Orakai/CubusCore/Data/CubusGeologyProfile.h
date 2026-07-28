@@ -119,6 +119,42 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes")
     int32 WetlandSurfaceMaterialId = 8;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ForestTreeDensity = 0.025f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ForestBroadleafFraction = 0.68f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.05", ClampMax = "1.0"))
+    float ForestGroveCoverage = 0.45f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "4", UIMin = "6", UIMax = "32"))
+    int32 ForestGroveCellSizeVoxels = 12;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PlainsTreeDensity = 0.0015f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PlainsGroundCoverDensity = 0.10f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PlainsShrubFraction = 0.18f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WetlandTreeDensity = 0.004f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WetlandReedDensity = 0.16f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float RockyTreeDensity = 0.003f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float RockyAlpineDensity = 0.04f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FallbackTreeDensity = 0.012f;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Caves")
     bool bGenerateCaves = false;
 

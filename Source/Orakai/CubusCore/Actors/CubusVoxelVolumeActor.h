@@ -80,6 +80,11 @@ public:
     bool SaveCachedChunk() const;
     void RegenerateVegetationData();
 
+    void MarkChunkCacheDirty()
+    {
+        bChunkCacheDirty = true;
+    }
+
     void SetOwningBlockWorld(ACubusBlockWorldActor* InBlockWorld)
     {
         OwningBlockWorld = InBlockWorld;
@@ -311,6 +316,7 @@ protected:
 
 private:
     TUniquePtr<FCubusBlockChunkData> ChunkData;
+    bool bChunkCacheDirty = false;
 
     void EnsureChunkData();
     void SynchronizeChunkState();

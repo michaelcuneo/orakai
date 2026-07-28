@@ -7,10 +7,12 @@
 
 #include "Components/InstancedSkinnedMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 
 UCubusVegetationRendererComponent::UCubusVegetationRendererComponent()
@@ -124,11 +126,18 @@ void UCubusVegetationRendererComponent::UpdateStreamingState()
 
     const AActor* Owner = GetOwner();
     const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+    const APlayerController* PlayerController =
+        UGameplayStatics::GetPlayerController(this, 0);
 
-    if (!IsValid(Owner) || !IsValid(PlayerPawn))
+    if (!IsValid(Owner) || (!IsValid(PlayerPawn) && !IsValid(PlayerController)))
     {
         return;
     }
+
+    const FVector ViewLocation =
+        IsValid(PlayerController) && IsValid(PlayerController->PlayerCameraManager)
+            ? PlayerController->PlayerCameraManager->GetCameraLocation()
+            : PlayerPawn->GetActorLocation();
 
     const float ActivationDistance = FMath::Max(
         0.0f,
@@ -141,7 +150,7 @@ void UCubusVegetationRendererComponent::UpdateStreamingState()
 
     const float DistanceSquared = FVector::DistSquared2D(
         Owner->GetActorLocation(),
-        PlayerPawn->GetActorLocation()
+        ViewLocation
     );
 
     if (!bVegetationActive)
@@ -603,15 +612,27 @@ uint32 UCubusVegetationRendererComponent::CalculatePlacementHash() const
     uint32 Hash =
         GetTypeHash(ChunkData->GetVegetationInstances().Num());
 
-    for (
-        const FCubusVegetationInstance& Instance :
-        ChunkData->GetVegetationInstances()
-    )
+    const auto Instances =
+        ChunkData->GetVegetationInstances();
+
+    if (!Instances.IsEmpty())
     {
-        Hash = HashCombineFast(Hash, GetTypeHash(Instance.WorldVoxel));
-        Hash = HashCombineFast(Hash, GetTypeHash(Instance.TypeId));
-        Hash = HashCombineFast(Hash, GetTypeHash(Instance.RotationYaw));
-        Hash = HashCombineFast(Hash, GetTypeHash(Instance.Scale));
+        const int32 SampleCount = 8;
+        const int32 Step = FMath::Max(1, Instances.Num() / SampleCount);
+
+        for (int32 Index = 0; Index < Instances.Num(); Index += Step)
+        {
+            const FCubusVegetationInstance& Instance = Instances[Index];
+            Hash = HashCombineFast(Hash, GetTypeHash(Instance.WorldVoxel));
+            Hash = HashCombineFast(Hash, GetTypeHash(Instance.TypeId));
+            Hash = HashCombineFast(Hash, GetTypeHash(Instance.RotationYaw));
+            Hash = HashCombineFast(Hash, GetTypeHash(Instance.Scale));
+        }
+
+        const FCubusVegetationInstance& LastInstance =
+            Instances[Instances.Num() - 1];
+        Hash = HashCombineFast(Hash, GetTypeHash(LastInstance.WorldVoxel));
+        Hash = HashCombineFast(Hash, GetTypeHash(LastInstance.TypeId));
     }
 
     Hash = HashCombineFast(Hash, GetTypeHash(MarkerMesh));

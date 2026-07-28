@@ -42,7 +42,7 @@ namespace CubusClientStreamingSettings
             UE_LOG(
                 LogTemp,
                 Display,
-                TEXT("Usage: Cubus.ViewDistance <horizontal 0-16> [vertical 0-4]")
+                TEXT("Usage: Cubus.ViewDistance <horizontal 0-64> [vertical 1-16]")
             );
             return;
         }
@@ -106,13 +106,13 @@ void ACubusBlockWorldActor::SetClientViewDistance(
     HorizontalViewRadius = FMath::Clamp(
         InHorizontalViewRadius,
         FMath::Max(0, InitialLoadRadius),
-        16
+        64
     );
 
     VerticalViewRadius = FMath::Clamp(
         InVerticalViewRadius,
-        0,
-        4
+        1,
+        16
     );
 
     if (bSaveSetting)
