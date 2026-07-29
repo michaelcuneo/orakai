@@ -10,7 +10,6 @@
 #include "CubusCore/Generation/CubusBlockTerrainGenerator.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
 
-#include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
@@ -50,152 +49,23 @@ ACubusVoxelVolumeActor::ACubusVoxelVolumeActor()
     ProceduralMesh->SetCollisionEnabled(
         ECollisionEnabled::NoCollision
     );
-
-    Dimensions = FIntVector(
-        Cubus::ChunkSize,
-        Cubus::ChunkSize,
-        Cubus::ChunkSize
-    );
 }
 
-void ACubusVoxelVolumeActor::OnConstruction(
-    const FTransform& Transform
-)
-{
-    Super::OnConstruction(Transform);
-
-    Dimensions = FIntVector(
-        Cubus::ChunkSize,
-        Cubus::ChunkSize,
-        Cubus::ChunkSize
-    );
-
-    VoxelSize = FMath::Max(
-        1.0f,
-        VoxelSize
-    );
-
-    TestSolidMaterialId =
-        CubusVoxelVolumeActor::ResolveMaterialId(
-            TestSolidMaterialId
-        );
-
-    SynchronizeChunkState();
-    ResolveOwningBlockWorld();
-
-    if (IsValid(OwningBlockWorld.Get()))
-    {
-        OwningBlockWorld->RegisterChunk(this);
-    }
-
-    const UWorld* World = GetWorld();
-    const bool bCanAutoGenerateInConstruction =
-        !IsValid(World) ||
-        !World->IsGameWorld();
-
-    if (bRebuildAutomatically && bCanAutoGenerateInConstruction)
-    {
-        GenerateTestShape();
-    }
-}
-
-void ACubusVoxelVolumeActor::GenerateTestShapeData()
+void ACubusVoxelVolumeActor::GenerateTerrainData()
 {
     EnsureChunkData();
 
     ChunkData->Clear();
     bChunkCacheDirty = true;
 
-    switch (TestShape)
+    if (bUseHeightTerrain)
     {
-        case ECubusVolumeTestShape::FlatTerrain:
-        {
-            GenerateFlatTerrain();
-            break;
-        }
-
-        case ECubusVolumeTestShape::HeightTerrain:
-        {
-            GenerateHeightTerrain();
-            break;
-        }
-
-        case ECubusVolumeTestShape::SolidBlock:
-        {
-            GenerateSolidBlock();
-            break;
-        }
-
-        case ECubusVolumeTestShape::Platform:
-        {
-            GeneratePlatform();
-            break;
-        }
-
-        case ECubusVolumeTestShape::Steps:
-        {
-            GenerateSteps();
-            break;
-        }
-
-        case ECubusVolumeTestShape::HollowRoom:
-        {
-            GenerateHollowRoom();
-            break;
-        }
-
-        case ECubusVolumeTestShape::Pillars:
-        {
-            GeneratePillars();
-            break;
-        }
-
-        case ECubusVolumeTestShape::MixedMaterials:
-        {
-            GenerateMixedMaterials();
-            break;
-        }
-
-        default:
-        {
-            checkNoEntry();
-            break;
-        }
+        GenerateHeightTerrain();
     }
-}
-
-void ACubusVoxelVolumeActor::GenerateTestShape()
-{
-    GenerateTestShapeData();
-    RebuildVolume();
-}
-
-void ACubusVoxelVolumeActor::FillVolume()
-{
-    EnsureChunkData();
-
-    FCubusBlockVoxel SolidVoxel;
-
-    SolidVoxel.MaterialId =
-        CubusVoxelVolumeActor::ResolveMaterialId(
-            TestSolidMaterialId
-        );
-
-    SolidVoxel.Flags = 0;
-
-    ChunkData->Fill(SolidVoxel);
-    bChunkCacheDirty = true;
-    RebuildVolume();
-}
-
-void ACubusVoxelVolumeActor::ClearVolume()
-{
-    EnsureChunkData();
-
-    ChunkData->Clear();
-    bChunkCacheDirty = true;
-
-    RebuildVolume();
+    else
+    {
+        GenerateFlatTerrain();
+    }
 }
 
 void ACubusVoxelVolumeActor::RebuildVolume()
@@ -203,7 +73,6 @@ void ACubusVoxelVolumeActor::RebuildVolume()
     ++RebuildCount;
 
     EnsureChunkData();
-    ResolveOwningBlockWorld();
 
     if (!IsValid(ProceduralMesh))
     {
@@ -266,24 +135,14 @@ void ACubusVoxelVolumeActor::RebuildVolume()
             bGenerateCollision
         );
 
-        UMaterialInterface* ResolvedMaterial =
-            VoxelMaterial.Get();
+        UMaterialInterface* ResolvedMaterial = nullptr;
 
         if (IsValid(MaterialRegistry.Get()))
         {
-            const FCubusMaterialDefinition* Definition =
-                MaterialRegistry->FindMaterialDefinition(
+            ResolvedMaterial =
+                MaterialRegistry->ResolveMaterial(
                     MaterialId
                 );
-
-            if (
-                Definition != nullptr &&
-                IsValid(Definition->Material.Get())
-            )
-            {
-                ResolvedMaterial =
-                    Definition->Material.Get();
-            }
         }
 
         ProceduralMesh->SetMaterial(
@@ -371,38 +230,6 @@ void ACubusVoxelVolumeActor::SynchronizeChunkState()
     );
 }
 
-void ACubusVoxelVolumeActor::ResolveOwningBlockWorld()
-{
-    if (IsValid(OwningBlockWorld.Get()))
-    {
-        return;
-    }
-
-    UWorld* World = GetWorld();
-
-    if (!IsValid(World))
-    {
-        return;
-    }
-
-    for (
-        TActorIterator<ACubusBlockWorldActor>
-            Iterator(World);
-        Iterator;
-        ++Iterator
-    )
-    {
-        ACubusBlockWorldActor* FoundWorld =
-            *Iterator;
-
-        if (IsValid(FoundWorld))
-        {
-            OwningBlockWorld = FoundWorld;
-            return;
-        }
-    }
-}
-
 void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(
     const FIntVector& InChunkCoordinate,
     const float InVoxelSize,
@@ -430,21 +257,11 @@ void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(
 }
 
 void ACubusVoxelVolumeActor::ConfigureRendering(
-    UCubusMaterialRegistry* InMaterialRegistry,
-    UMaterialInterface* InFallbackVoxelMaterial
+    UCubusMaterialRegistry* InMaterialRegistry
 )
 {
-    if (IsValid(InMaterialRegistry))
-    {
-        MaterialRegistry =
-            InMaterialRegistry;
-    }
-
-    if (IsValid(InFallbackVoxelMaterial))
-    {
-        VoxelMaterial =
-            InFallbackVoxelMaterial;
-    }
+    MaterialRegistry =
+        InMaterialRegistry;
 }
 
 void ACubusVoxelVolumeActor::ConfigureGeology(
@@ -489,10 +306,7 @@ void ACubusVoxelVolumeActor::ConfigureTerrain(
     const int32 InTerrainWaterMaterialId
 )
 {
-    TestShape =
-        bInUseHeightTerrain
-            ? ECubusVolumeTestShape::HeightTerrain
-            : ECubusVolumeTestShape::FlatTerrain;
+    bUseHeightTerrain = bInUseHeightTerrain;
 
     TerrainSurfaceWorldZ =
         InTerrainSurfaceWorldZ;
@@ -733,8 +547,6 @@ ACubusVoxelVolumeActor::BuildNeighborhood() const
 
 void ACubusVoxelVolumeActor::RebuildAffectedChunks()
 {
-    ResolveOwningBlockWorld();
-
     if (IsValid(OwningBlockWorld.Get()))
     {
         OwningBlockWorld->RebuildChunkAndNeighbours(
@@ -792,332 +604,6 @@ void ACubusVoxelVolumeActor::GenerateHeightTerrain()
         TerrainWaterMaterialId,
         GeologyProfile.Get()
     );
-}
-
-void ACubusVoxelVolumeActor::GenerateSolidBlock()
-{
-    FCubusBlockVoxel SolidVoxel;
-
-    SolidVoxel.MaterialId =
-        CubusVoxelVolumeActor::ResolveMaterialId(
-            TestSolidMaterialId
-        );
-
-    SolidVoxel.Flags = 0;
-
-    ChunkData->Fill(SolidVoxel);
-}
-
-void ACubusVoxelVolumeActor::GeneratePlatform()
-{
-    const int32 SolidMaterialId =
-        CubusVoxelVolumeActor::ResolveMaterialId(
-            TestSolidMaterialId
-        );
-
-    const int32 PlatformHeight =
-        FMath::Max(
-            1,
-            Cubus::ChunkSize / 4
-        );
-
-    for (
-        int32 Z = 0;
-        Z < PlatformHeight;
-        ++Z
-    )
-    {
-        for (
-            int32 Y = 0;
-            Y < Cubus::ChunkSize;
-            ++Y
-        )
-        {
-            for (
-                int32 X = 0;
-                X < Cubus::ChunkSize;
-                ++X
-            )
-            {
-                ChunkData->SetMaterialId(
-                    X,
-                    Y,
-                    Z,
-                    SolidMaterialId
-                );
-            }
-        }
-    }
-}
-
-void ACubusVoxelVolumeActor::GenerateSteps()
-{
-    const int32 SolidMaterialId =
-        CubusVoxelVolumeActor::ResolveMaterialId(
-            TestSolidMaterialId
-        );
-
-    for (
-        int32 X = 0;
-        X < Cubus::ChunkSize;
-        ++X
-    )
-    {
-        const float NormalizedX =
-            Cubus::ChunkSize > 1
-                ? static_cast<float>(X) /
-                    static_cast<float>(
-                        Cubus::ChunkSize - 1
-                    )
-                : 0.0f;
-
-        const int32 ColumnHeight =
-            FMath::Clamp(
-                FMath::FloorToInt(
-                    NormalizedX *
-                    static_cast<float>(
-                        Cubus::ChunkSize - 1
-                    )
-                ) + 1,
-                1,
-                Cubus::ChunkSize
-            );
-
-        for (
-            int32 Y = 0;
-            Y < Cubus::ChunkSize;
-            ++Y
-        )
-        {
-            for (
-                int32 Z = 0;
-                Z < ColumnHeight;
-                ++Z
-            )
-            {
-                ChunkData->SetMaterialId(
-                    X,
-                    Y,
-                    Z,
-                    SolidMaterialId
-                );
-            }
-        }
-    }
-}
-
-void ACubusVoxelVolumeActor::GenerateHollowRoom()
-{
-    const int32 SolidMaterialId =
-        CubusVoxelVolumeActor::ResolveMaterialId(
-            TestSolidMaterialId
-        );
-
-    for (
-        int32 Z = 0;
-        Z < Cubus::ChunkSize;
-        ++Z
-    )
-    {
-        for (
-            int32 Y = 0;
-            Y < Cubus::ChunkSize;
-            ++Y
-        )
-        {
-            for (
-                int32 X = 0;
-                X < Cubus::ChunkSize;
-                ++X
-            )
-            {
-                const bool bBoundary =
-                    X == 0 ||
-                    Y == 0 ||
-                    Z == 0 ||
-                    X == Cubus::ChunkSize - 1 ||
-                    Y == Cubus::ChunkSize - 1 ||
-                    Z == Cubus::ChunkSize - 1;
-
-                if (bBoundary)
-                {
-                    ChunkData->SetMaterialId(
-                        X,
-                        Y,
-                        Z,
-                        SolidMaterialId
-                    );
-                }
-            }
-        }
-    }
-
-    const int32 DoorCentreX =
-        Cubus::ChunkSize / 2;
-
-    const int32 DoorHalfWidth =
-        FMath::Max(
-            0,
-            Cubus::ChunkSize / 8
-        );
-
-    const int32 DoorHeight =
-        FMath::Max(
-            1,
-            Cubus::ChunkSize / 2
-        );
-
-    for (
-        int32 X =
-            DoorCentreX -
-            DoorHalfWidth;
-        X <=
-            DoorCentreX +
-            DoorHalfWidth;
-        ++X
-    )
-    {
-        for (
-            int32 Z = 0;
-            Z < DoorHeight;
-            ++Z
-        )
-        {
-            ChunkData->SetMaterialId(
-                X,
-                0,
-                Z,
-                0
-            );
-        }
-    }
-}
-
-void ACubusVoxelVolumeActor::GeneratePillars()
-{
-    const int32 SolidMaterialId =
-        CubusVoxelVolumeActor::ResolveMaterialId(
-            TestSolidMaterialId
-        );
-
-    const int32 MaximumCoordinate =
-        Cubus::ChunkSize - 1;
-
-    const FIntPoint PillarPositions[] =
-    {
-        FIntPoint(0, 0),
-        FIntPoint(MaximumCoordinate, 0),
-        FIntPoint(0, MaximumCoordinate),
-        FIntPoint(
-            MaximumCoordinate,
-            MaximumCoordinate
-        )
-    };
-
-    for (
-        const FIntPoint& PillarPosition :
-        PillarPositions
-    )
-    {
-        for (
-            int32 Z = 0;
-            Z < Cubus::ChunkSize;
-            ++Z
-        )
-        {
-            ChunkData->SetMaterialId(
-                PillarPosition.X,
-                PillarPosition.Y,
-                Z,
-                SolidMaterialId
-            );
-        }
-    }
-
-    for (
-        int32 Y = 0;
-        Y < Cubus::ChunkSize;
-        ++Y
-    )
-    {
-        for (
-            int32 X = 0;
-            X < Cubus::ChunkSize;
-            ++X
-        )
-        {
-            ChunkData->SetMaterialId(
-                X,
-                Y,
-                0,
-                SolidMaterialId
-            );
-        }
-    }
-}
-
-void ACubusVoxelVolumeActor::GenerateMixedMaterials()
-{
-    constexpr int32 StoneMaterialId = 1;
-    constexpr int32 DirtMaterialId = 2;
-    constexpr int32 SandMaterialId = 3;
-
-    const int32 FirstLayerHeight =
-        FMath::Max(
-            1,
-            Cubus::ChunkSize / 3
-        );
-
-    const int32 SecondLayerHeight =
-        FMath::Max(
-            FirstLayerHeight + 1,
-            (
-                Cubus::ChunkSize *
-                2
-            ) / 3
-        );
-
-    for (
-        int32 Z = 0;
-        Z < Cubus::ChunkSize;
-        ++Z
-    )
-    {
-        int32 MaterialId =
-            SandMaterialId;
-
-        if (Z < FirstLayerHeight)
-        {
-            MaterialId =
-                StoneMaterialId;
-        }
-        else if (Z < SecondLayerHeight)
-        {
-            MaterialId =
-                DirtMaterialId;
-        }
-
-        for (
-            int32 Y = 0;
-            Y < Cubus::ChunkSize;
-            ++Y
-        )
-        {
-            for (
-                int32 X = 0;
-                X < Cubus::ChunkSize;
-                ++X
-            )
-            {
-                ChunkData->SetMaterialId(
-                    X,
-                    Y,
-                    Z,
-                    MaterialId
-                );
-            }
-        }
-    }
 }
 
 void ACubusVoxelVolumeActor::ResetDiagnostics()

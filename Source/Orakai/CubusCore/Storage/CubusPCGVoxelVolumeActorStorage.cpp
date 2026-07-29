@@ -1,6 +1,6 @@
 #include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 
-void ACubusPCGVoxelVolumeActor::GenerateTestShapeData()
+void ACubusPCGVoxelVolumeActor::GenerateTerrainData()
 {
     // The procedural mesh is about to be replaced. Remove it from the ray
     // tracing scene first; the near-field manager will restore it after the
@@ -27,7 +27,7 @@ void ACubusPCGVoxelVolumeActor::GenerateTestShapeData()
         return;
     }
 
-    Super::GenerateTestShapeData();
+    Super::GenerateTerrainData();
     RegenerateVegetationPCG();
 
     if (SaveCachedChunk())

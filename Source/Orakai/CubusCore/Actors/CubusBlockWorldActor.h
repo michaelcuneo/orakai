@@ -12,7 +12,6 @@ class APawn;
 class USceneComponent;
 class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
-class UMaterialInterface;
 class UPCGGraphInterface;
 
 UCLASS(
@@ -267,9 +266,6 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Geology")
     TObjectPtr<UCubusGeologyProfile> GeologyProfile = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
-    TObjectPtr<UMaterialInterface> FallbackVoxelMaterial = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
     int32 TerrainRockMaterialId = 3;

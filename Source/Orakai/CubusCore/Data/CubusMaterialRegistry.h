@@ -7,6 +7,8 @@
 
 #include "CubusMaterialRegistry.generated.h"
 
+class UMaterialInterface;
+
 /**
  * Editor-authored collection of every voxel material available to Cubus.
  */
@@ -24,6 +26,13 @@ public:
         BlueprintReadOnly,
         Category = "Cubus|Materials"
     )
+    TObjectPtr<UMaterialInterface> DefaultMaterial = nullptr;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Materials"
+    )
     TArray<FCubusMaterialDefinition> Materials;
 
     UFUNCTION(
@@ -35,6 +44,10 @@ public:
     ) const;
 
     const FCubusMaterialDefinition* FindMaterialDefinition(
+        int32 MaterialId
+    ) const;
+
+    UMaterialInterface* ResolveMaterial(
         int32 MaterialId
     ) const;
 
@@ -56,6 +69,20 @@ public:
     )
     void ValidateRegistry();
 
+    virtual void PostLoad() override;
+
+    #if WITH_EDITOR
+    virtual void PostEditChangeProperty(
+        FPropertyChangedEvent& PropertyChangedEvent
+    ) override;
+    #endif
+
 private:
+    void RebuildLookupCache() const;
+
+    mutable TMap<int32, int32> MaterialIndexById;
+
+    mutable bool bLookupCacheDirty = true;
+    
     static const FCubusMaterialDefinition InvalidDefinition;
 };

@@ -26,7 +26,7 @@ public:
     ACubusPCGVoxelVolumeActor();
 
     virtual void OnConstruction(const FTransform& Transform) override;
-    virtual void GenerateTestShapeData() override;
+    virtual void GenerateTerrainData() override;
 
     void SetTerrainRayTracingEnabled(bool bEnabled);
 
