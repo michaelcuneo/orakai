@@ -36,6 +36,13 @@ void FCubusBlockMesher::BuildChunk(
 )
 {
     OutMaterialMeshes.Reset();
+
+    OutMaterialMeshes.Reserve(
+        MaterialRegistry != nullptr
+            ? MaterialRegistry->Materials.Num()
+            : 1
+    );
+
     OutGeneratedFaceCount = 0;
 
     if (
