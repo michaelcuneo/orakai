@@ -2,13 +2,11 @@
 
 #include "CoreMinimal.h"
 
-#include "CubusCore/Data/CubusVoxel.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 
 class FCubusBlockChunkData;
-class FCubusVoxelVolume;
 class UCubusMaterialRegistry;
 struct FCubusBlockChunkNeighborhood;
 
@@ -23,25 +21,6 @@ using FCubusMaterialMeshMap = TMap<int32, FCubusMeshData>;
 class ORAKAI_API FCubusBlockMesher
 {
 public:
-    static void BuildSingleVoxel(
-        const FCubusVoxel& Voxel,
-        float VoxelSize,
-        FCubusMeshData& OutMeshData
-    );
-
-    /**
-     * Generates one mesh-data collection per material ID.
-     *
-     * Faces touching an occluding voxel are not generated.
-     */
-    static void BuildVolume(
-        const FCubusVoxelVolume& Volume,
-        const UCubusMaterialRegistry* MaterialRegistry,
-        float VoxelSize,
-        FCubusMaterialMeshMap& OutMaterialMeshes,
-        int32& OutGeneratedFaceCount
-    );
-
     static void BuildChunk(
         const FCubusBlockChunkNeighborhood& Neighborhood,
         const UCubusMaterialRegistry* MaterialRegistry,

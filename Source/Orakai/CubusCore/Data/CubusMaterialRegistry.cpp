@@ -1,4 +1,5 @@
 #include "CubusCore/Data/CubusMaterialRegistry.h"
+#include "Materials/MaterialInterface.h"
 
 const FCubusMaterialDefinition
     UCubusMaterialRegistry::InvalidDefinition;
@@ -8,18 +9,23 @@ UCubusMaterialRegistry::FindMaterialDefinition(
     const int32 MaterialId
 ) const
 {
-    for (
-        const FCubusMaterialDefinition& Definition :
-        Materials
-    )
+    if (bLookupCacheDirty)
     {
-        if (Definition.MaterialId == MaterialId)
-        {
-            return &Definition;
-        }
+        RebuildLookupCache();
     }
 
-    return nullptr;
+    const int32* MaterialIndex =
+        MaterialIndexById.Find(MaterialId);
+
+    if (
+        MaterialIndex == nullptr ||
+        !Materials.IsValidIndex(*MaterialIndex)
+    )
+    {
+        return nullptr;
+    }
+
+    return &Materials[*MaterialIndex];
 }
 
 const FCubusMaterialDefinition&
@@ -40,6 +46,24 @@ UCubusMaterialRegistry::GetMaterialDefinition(
     return Definition != nullptr
         ? *Definition
         : InvalidDefinition;
+}
+
+UMaterialInterface* UCubusMaterialRegistry::ResolveMaterial(
+    const int32 MaterialId
+) const
+{
+    const FCubusMaterialDefinition* Definition =
+        FindMaterialDefinition(MaterialId);
+
+    if (
+        Definition != nullptr &&
+        IsValid(Definition->Material.Get())
+    )
+    {
+        return Definition->Material.Get();
+    }
+
+    return DefaultMaterial.Get();
 }
 
 bool UCubusMaterialRegistry::IsRenderableSolid(
@@ -83,6 +107,21 @@ bool UCubusMaterialRegistry::OccludesBlockFaces(
 
 void UCubusMaterialRegistry::ValidateRegistry()
 {
+
+    if (!IsValid(DefaultMaterial.Get()))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT(
+                "Cubus material registry has no valid DefaultMaterial."
+            )
+        );
+    }
+
+    bLookupCacheDirty = true;
+    RebuildLookupCache();
+
     TSet<int32> UsedIds;
 
     for (
@@ -90,6 +129,22 @@ void UCubusMaterialRegistry::ValidateRegistry()
         Materials
     )
     {
+        if (
+            Definition.bRenderable &&
+            !IsValid(Definition.Material.Get())
+        )
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT(
+                    "Renderable Cubus material '%s' using ID %d has no material asset. M_DEFAULT will be used."
+                ),
+                *Definition.Name.ToString(),
+                Definition.MaterialId
+            );
+        }
+        
         if (UsedIds.Contains(Definition.MaterialId))
         {
             UE_LOG(
@@ -145,3 +200,53 @@ void UCubusMaterialRegistry::ValidateRegistry()
         );
     }
 }
+
+void UCubusMaterialRegistry::PostLoad()
+{
+    Super::PostLoad();
+
+    bLookupCacheDirty = true;
+    RebuildLookupCache();
+}
+
+void UCubusMaterialRegistry::RebuildLookupCache() const
+{
+    MaterialIndexById.Reset();
+    MaterialIndexById.Reserve(Materials.Num());
+
+    for (
+        int32 MaterialIndex = 0;
+        MaterialIndex < Materials.Num();
+        ++MaterialIndex
+    )
+    {
+        const FCubusMaterialDefinition& Definition =
+            Materials[MaterialIndex];
+
+        /*
+         * Preserve the first definition when duplicate IDs exist.
+         * ValidateRegistry() will report the duplicate separately.
+         */
+        if (!MaterialIndexById.Contains(Definition.MaterialId))
+        {
+            MaterialIndexById.Add(
+                Definition.MaterialId,
+                MaterialIndex
+            );
+        }
+    }
+
+    bLookupCacheDirty = false;
+}
+
+#if WITH_EDITOR
+void UCubusMaterialRegistry::PostEditChangeProperty(
+    FPropertyChangedEvent& PropertyChangedEvent
+)
+{
+    Super::PostEditChangeProperty(PropertyChangedEvent);
+
+    bLookupCacheDirty = true;
+    RebuildLookupCache();
+}
+#endif

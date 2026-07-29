@@ -581,8 +581,7 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
     );
 
     ChunkActor->ConfigureRendering(
-        MaterialRegistry,
-        FallbackVoxelMaterial
+        MaterialRegistry
     );
 
     ChunkActor->ConfigureGeology(GeologyProfile);
@@ -640,7 +639,7 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
 
     RegisterChunk(ChunkActor);
 
-    ChunkActor->GenerateTestShapeData();
+    ChunkActor->GenerateTerrainData();
     ChunkActor->RebuildVolume();
 
     if (
@@ -778,10 +777,7 @@ void ACubusBlockWorldActor::RegenerateTerrain()
             continue;
         }
 
-        ChunkActor->ConfigureRendering(
-            MaterialRegistry,
-            FallbackVoxelMaterial
-        );
+        ChunkActor->ConfigureRendering(MaterialRegistry);
         ChunkActor->ConfigureGeology(GeologyProfile);
         ChunkActor->ConfigureTerrain(
             bUseHeightTerrain,
@@ -828,7 +824,7 @@ void ACubusBlockWorldActor::RegenerateTerrain()
             );
         }
 
-        ChunkActor->GenerateTestShapeData();
+        ChunkActor->GenerateTerrainData();
         ChunkActor->RebuildVolume();
 
         if (
@@ -1278,7 +1274,7 @@ void ACubusBlockWorldActor::TryReleasePawnToTerrain()
                 if (bNeedsRegeneration)
                 {
                     FCubusChunkStore::DeleteChunk(Coordinate, StoreContext);
-                    ChunkActor->GenerateTestShapeData();
+                    ChunkActor->GenerateTerrainData();
                     ChunkActor->RebuildVolume();
                     ChunkActor->SaveCachedChunk();
                     bRecoveredAnyChunk = true;

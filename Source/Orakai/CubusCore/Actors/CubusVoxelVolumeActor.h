@@ -9,22 +9,8 @@
 class ACubusBlockWorldActor;
 class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
-class UMaterialInterface;
 class UProceduralMeshComponent;
 struct FCubusBlockChunkNeighborhood;
-
-UENUM(BlueprintType)
-enum class ECubusVolumeTestShape : uint8
-{
-    FlatTerrain UMETA(DisplayName = "Flat Terrain"),
-    HeightTerrain UMETA(DisplayName = "Height Terrain"),
-    SolidBlock UMETA(DisplayName = "Solid Block"),
-    Platform UMETA(DisplayName = "Platform"),
-    Steps UMETA(DisplayName = "Steps"),
-    HollowRoom UMETA(DisplayName = "Hollow Room"),
-    Pillars UMETA(DisplayName = "Pillars"),
-    MixedMaterials UMETA(DisplayName = "Mixed Materials")
-};
 
 UCLASS(
     BlueprintType,
@@ -39,19 +25,8 @@ class ORAKAI_API ACubusVoxelVolumeActor : public AActor
 public:
     ACubusVoxelVolumeActor();
 
-    virtual void OnConstruction(const FTransform& Transform) override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Chunk")
-    void GenerateTestShape();
-
-    virtual void GenerateTestShapeData();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Chunk")
-    void FillVolume();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Chunk")
-    void ClearVolume();
+    virtual void GenerateTerrainData();
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Rendering")
     void RebuildVolume();
@@ -114,8 +89,7 @@ public:
     );
 
     void ConfigureRendering(
-        UCubusMaterialRegistry* InMaterialRegistry,
-        UMaterialInterface* InFallbackVoxelMaterial
+        UCubusMaterialRegistry* InMaterialRegistry
     );
 
     void ConfigureGeology(UCubusGeologyProfile* InGeologyProfile);
@@ -158,25 +132,29 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<UProceduralMeshComponent> ProceduralMesh;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Chunk")
-    FIntVector Dimensions = FIntVector(32, 32, 32);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Chunk")
+    UPROPERTY(
+        VisibleInstanceOnly,
+        BlueprintReadOnly,
+        Category = "Cubus|Chunk"
+    )
     FIntVector ChunkCoordinate = FIntVector::ZeroValue;
 
-    UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Cubus|Chunk")
+    UPROPERTY(
+        VisibleInstanceOnly,
+        BlueprintReadOnly,
+        Category = "Cubus|Chunk"
+    )
     TObjectPtr<ACubusBlockWorldActor> OwningBlockWorld;
 
     UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
+        VisibleInstanceOnly,
+        BlueprintReadOnly,
         Category = "Cubus|Chunk",
-        meta = (ClampMin = "1.0", UIMin = "1.0", UIMax = "500.0", Units = "cm")
+        meta = (Units = "cm")
     )
     float VoxelSize = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Chunk")
-    ECubusVolumeTestShape TestShape = ECubusVolumeTestShape::FlatTerrain;
+    bool bUseHeightTerrain = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
     int32 TerrainSurfaceWorldZ = 8;
@@ -187,14 +165,8 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain", meta = (ClampMin = "1"))
     int32 TerrainSubsurfaceMaterialId = 2;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
-    TObjectPtr<UMaterialInterface> VoxelMaterial;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Collision")
     bool bGenerateCollision = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Editor")
-    bool bRebuildAutomatically = true;
 
     UPROPERTY(
         VisibleInstanceOnly,
@@ -272,9 +244,6 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "0.001", ClampMax = "1.0"))
     float TerrainMountainBlend = 0.20f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Materials", meta = (ClampMin = "1", ClampMax = "65535"))
-    int32 TestSolidMaterialId = 1;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
     int32 TerrainRockMaterialId = 3;
 
@@ -326,7 +295,6 @@ private:
 
     void EnsureChunkData();
     void SynchronizeChunkState();
-    void ResolveOwningBlockWorld();
 
     const FCubusBlockChunkData* FindNeighbourChunkData(
         const FIntVector& CoordinateOffset
@@ -337,11 +305,5 @@ private:
     void RebuildAffectedChunks();
     void GenerateHeightTerrain();
     void GenerateFlatTerrain();
-    void GenerateSolidBlock();
-    void GeneratePlatform();
-    void GenerateSteps();
-    void GenerateHollowRoom();
-    void GeneratePillars();
-    void GenerateMixedMaterials();
     void ResetDiagnostics();
 };
