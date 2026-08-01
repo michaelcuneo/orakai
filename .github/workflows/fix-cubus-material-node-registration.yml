@@ -1,0 +1,114 @@
+name: Fix Cubus material node registration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-cubus-material-node-registration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use MaterialEditingLibrary for expression ownership
+        shell: python
+        run: |
+          from pathlib import Path
+
+          cpp = Path('Source/Orakai/CubusCore/Editor/CubusMaterialBuilderLibrary.cpp')
+          text = cpp.read_text()
+
+          anchor = '#include "Factories/MaterialFactoryNew.h"\n'
+          replacement = anchor + '#include "MaterialEditingLibrary.h"\n'
+          if '#include "MaterialEditingLibrary.h"' not in text:
+              if anchor not in text:
+                  raise SystemExit('include anchor not found')
+              text = text.replace(anchor, replacement, 1)
+
+          old = '''        TExpression* Expression =
+            NewObject<TExpression>(Material);
+
+        Expression->MaterialExpressionEditorX = X;
+        Expression->MaterialExpressionEditorY = Y;
+
+        Material
+            ->GetEditorOnlyData()
+            ->ExpressionCollection
+            .Expressions
+            .Add(Expression);
+
+        return Expression;'''
+          new = '''        UMaterialExpression* CreatedExpression =
+            UMaterialEditingLibrary::CreateMaterialExpressionEx(
+                Material,
+                nullptr,
+                TExpression::StaticClass(),
+                nullptr,
+                X,
+                Y,
+                false
+            );
+
+        TExpression* Expression =
+            Cast<TExpression>(CreatedExpression);
+
+        check(Expression != nullptr);
+        return Expression;'''
+          if old not in text:
+              raise SystemExit('AddExpression implementation anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''        Material->PreEditChange(nullptr);
+        Material->PostEditChange();
+        Material->MarkPackageDirty();'''
+          new = '''        UMaterialEditingLibrary::RecompileMaterial(Material);
+        Material->PostEditChange();
+        Material->MarkPackageDirty();'''
+          if old not in text:
+              raise SystemExit('SaveMaterial anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    UMaterialEditorOnlyData* EditorData =
+        Material->GetEditorOnlyData();
+
+    EditorData->ExpressionCollection.Empty();
+
+    Material->BlendMode = BLEND_Opaque;'''
+          new = '''    Material->Modify();
+    Material->PreEditChange(nullptr);
+    UMaterialEditingLibrary::DeleteAllMaterialExpressions(Material);
+
+    UMaterialEditorOnlyData* EditorData =
+        Material->GetEditorOnlyData();
+
+    Material->BlendMode = BLEND_Opaque;'''
+          if old not in text:
+              raise SystemExit('builder reset anchor not found')
+          text = text.replace(old, new, 1)
+
+          cpp.write_text(text)
+
+          build = Path('Source/Orakai/Orakai.Build.cs')
+          build_text = build.read_text()
+          old = 'PrivateDependencyModuleNames.Add("UnrealEd");'
+          new = 'PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "MaterialEditor" });'
+          if old not in build_text:
+              raise SystemExit('Build.cs UnrealEd anchor not found')
+          build.write_text(build_text.replace(old, new, 1))
+
+          Path('.github/workflows/fix-cubus-material-node-registration.yml').unlink()
+
+      - name: Commit fix
+        run: |
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Fix Cubus material node registration"
+          git push
