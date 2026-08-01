@@ -1,9 +1,9 @@
 #include "CubusCore/Vegetation/CubusVegetationRepresentationSelector.h"
 
-static void RouteCandidates(
+void FCubusVegetationRepresentationSelector::RouteCandidates(
     TArray<FCubusVegetationRepresentationCandidate>& Candidates,
-    int32 HeroLimit,
-    float HeroMaxDistance,
+    const int32 HeroLimit,
+    const float HeroMaxDistance,
     TMap<int64, TArray<FTransform>>& RegularTransformsByBatchKey,
     TMap<int64, TArray<FTransform>>& HeroTransformsByBatchKey
 )
