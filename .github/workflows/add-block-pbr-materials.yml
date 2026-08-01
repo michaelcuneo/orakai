@@ -1,0 +1,481 @@
+name: Add block PBR material architecture
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/add-block-pbr-materials.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add PBR block surface support
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise RuntimeError(f'{label} anchor not found')
+              return text.replace(old, new, 1)
+
+          # Material definition: reusable PBR texture set and face-specific surfaces.
+          path = Path('Source/Orakai/CubusCore/Data/CubusMaterialDefinition.h')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              'class UMaterialInterface;\n',
+              'class UMaterialInterface;\nclass UTexture2D;\n',
+              'texture forward declaration'
+          )
+
+          surface_struct = r'''
+/**
+ * PBR texture set used by one face group of a block material.
+ * ORM uses red=ambient occlusion, green=roughness and blue=metallic.
+ */
+USTRUCT(BlueprintType)
+struct ORAKAI_API FCubusBlockSurfaceTextures
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PBR")
+    TObjectPtr<UTexture2D> BaseColor = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PBR")
+    TObjectPtr<UTexture2D> Normal = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PBR")
+    TObjectPtr<UTexture2D> ORM = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PBR")
+    TObjectPtr<UTexture2D> Height = nullptr;
+
+    bool HasAnyTexture() const
+    {
+        return
+            IsValid(BaseColor.Get()) ||
+            IsValid(Normal.Get()) ||
+            IsValid(ORM.Get()) ||
+            IsValid(Height.Get());
+    }
+};
+
+'''
+          text = replace_once(
+              text,
+              '/**\n * Shared definition referenced by voxel MaterialId.\n */\n',
+              surface_struct + '/**\n * Shared definition referenced by voxel MaterialId.\n */\n',
+              'surface structure insertion'
+          )
+
+          rendering_anchor = r'''    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Rendering"
+    )
+    TObjectPtr<UMaterialInterface> Material = nullptr;
+
+'''
+          rendering_fields = rendering_anchor + r'''    /**
+     * Side is the fallback texture set. Empty top or bottom sets inherit it.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
+    FCubusBlockSurfaceTextures SideSurface;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
+    FCubusBlockSurfaceTextures TopSurface;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
+    FCubusBlockSurfaceTextures BottomSurface;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Rendering|PBR",
+        meta = (ClampMin = "0.01")
+    )
+    float TextureScale = 1.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Rendering|PBR",
+        meta = (ClampMin = "0.0")
+    )
+    float HeightStrength = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
+    FLinearColor Tint = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
+    FLinearColor EmissiveColor = FLinearColor::Black;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Rendering|PBR",
+        meta = (ClampMin = "0.0")
+    )
+    float EmissiveStrength = 0.0f;
+
+    bool UsesPbrTextures() const
+    {
+        return
+            SideSurface.HasAnyTexture() ||
+            TopSurface.HasAnyTexture() ||
+            BottomSurface.HasAnyTexture();
+    }
+
+'''
+          text = replace_once(text, rendering_anchor, rendering_fields, 'PBR material fields')
+          path.write_text(text)
+
+          # Registry API and runtime MID cache.
+          path = Path('Source/Orakai/CubusCore/Data/CubusMaterialRegistry.h')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              'class UMaterialInterface;\n',
+              'class UMaterialInterface;\nclass UMaterialInstanceDynamic;\n',
+              'MID forward declaration'
+          )
+          text = replace_once(
+              text,
+              '''    UMaterialInterface* ResolveMaterial(
+        int32 MaterialId
+    ) const;
+
+''',
+              '''    UMaterialInterface* ResolveMaterial(
+        int32 MaterialId
+    ) const;
+
+    /**
+     * Returns a cached dynamic instance populated from the block PBR fields.
+     * Falls back to ResolveMaterial when the definition has no texture set.
+     */
+    UMaterialInterface* ResolveRuntimeMaterial(
+        int32 MaterialId
+    ) const;
+
+''',
+              'runtime material declaration'
+          )
+          text = replace_once(
+              text,
+              '''    mutable TMap<int32, int32> MaterialIndexById;
+
+    mutable bool bLookupCacheDirty = true;
+''',
+              '''    mutable TMap<int32, int32> MaterialIndexById;
+    mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>>
+        RuntimeMaterialById;
+
+    mutable bool bLookupCacheDirty = true;
+''',
+              'runtime material cache declaration'
+          )
+          path.write_text(text)
+
+          # Registry implementation: construct and cache parameterised MIDs.
+          path = Path('Source/Orakai/CubusCore/Data/CubusMaterialRegistry.cpp')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '#include "Materials/MaterialInterface.h"\n',
+              '#include "Materials/MaterialInterface.h"\n#include "Materials/MaterialInstanceDynamic.h"\n#include "Engine/Texture2D.h"\n',
+              'MID includes'
+          )
+
+          method_anchor = '''bool UCubusMaterialRegistry::IsRenderableSolid(
+'''
+          runtime_method = r'''namespace CubusMaterialRegistry
+{
+    void ApplySurface(
+        UMaterialInstanceDynamic* Material,
+        const TCHAR* Prefix,
+        const FCubusBlockSurfaceTextures& Surface,
+        const FCubusBlockSurfaceTextures& Fallback
+    )
+    {
+        if (!IsValid(Material))
+        {
+            return;
+        }
+
+        const FCubusBlockSurfaceTextures& Resolved =
+            Surface.HasAnyTexture()
+                ? Surface
+                : Fallback;
+
+        auto SetTexture =
+            [Material, Prefix](
+                const TCHAR* Suffix,
+                UTexture2D* Texture
+            )
+            {
+                if (!IsValid(Texture))
+                {
+                    return;
+                }
+
+                Material->SetTextureParameterValue(
+                    FName(FString(Prefix) + Suffix),
+                    Texture
+                );
+            };
+
+        SetTexture(TEXT("BaseColor"), Resolved.BaseColor.Get());
+        SetTexture(TEXT("Normal"), Resolved.Normal.Get());
+        SetTexture(TEXT("ORM"), Resolved.ORM.Get());
+        SetTexture(TEXT("Height"), Resolved.Height.Get());
+    }
+}
+
+UMaterialInterface* UCubusMaterialRegistry::ResolveRuntimeMaterial(
+    const int32 MaterialId
+) const
+{
+    const FCubusMaterialDefinition* Definition =
+        FindMaterialDefinition(MaterialId);
+
+    if (Definition == nullptr || !Definition->UsesPbrTextures())
+    {
+        return ResolveMaterial(MaterialId);
+    }
+
+    if (
+        const TWeakObjectPtr<UMaterialInstanceDynamic>* Cached =
+            RuntimeMaterialById.Find(MaterialId)
+    )
+    {
+        if (Cached->IsValid())
+        {
+            return Cached->Get();
+        }
+    }
+
+    UMaterialInterface* Parent = ResolveMaterial(MaterialId);
+
+    if (!IsValid(Parent))
+    {
+        return nullptr;
+    }
+
+    UMaterialInstanceDynamic* RuntimeMaterial =
+        UMaterialInstanceDynamic::Create(
+            Parent,
+            const_cast<UCubusMaterialRegistry*>(this)
+        );
+
+    if (!IsValid(RuntimeMaterial))
+    {
+        return Parent;
+    }
+
+    CubusMaterialRegistry::ApplySurface(
+        RuntimeMaterial,
+        TEXT("Side"),
+        Definition->SideSurface,
+        Definition->SideSurface
+    );
+
+    CubusMaterialRegistry::ApplySurface(
+        RuntimeMaterial,
+        TEXT("Top"),
+        Definition->TopSurface,
+        Definition->SideSurface
+    );
+
+    CubusMaterialRegistry::ApplySurface(
+        RuntimeMaterial,
+        TEXT("Bottom"),
+        Definition->BottomSurface,
+        Definition->SideSurface
+    );
+
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("TextureScale"),
+        FMath::Max(0.01f, Definition->TextureScale)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("HeightStrength"),
+        FMath::Max(0.0f, Definition->HeightStrength)
+    );
+    RuntimeMaterial->SetVectorParameterValue(
+        TEXT("Tint"),
+        Definition->Tint
+    );
+    RuntimeMaterial->SetVectorParameterValue(
+        TEXT("EmissiveColor"),
+        Definition->EmissiveColor
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("EmissiveStrength"),
+        FMath::Max(0.0f, Definition->EmissiveStrength)
+    );
+
+    RuntimeMaterialById.Add(MaterialId, RuntimeMaterial);
+    return RuntimeMaterial;
+}
+
+'''
+          text = replace_once(text, method_anchor, runtime_method + method_anchor, 'runtime material method')
+          text = replace_once(
+              text,
+              '''    bLookupCacheDirty = true;
+    RebuildLookupCache();
+
+    TSet<int32> UsedIds;
+''',
+              '''    bLookupCacheDirty = true;
+    RuntimeMaterialById.Reset();
+    RebuildLookupCache();
+
+    TSet<int32> UsedIds;
+''',
+              'validation cache reset'
+          )
+          text = replace_once(
+              text,
+              '''    bLookupCacheDirty = true;
+    RebuildLookupCache();
+}
+
+void UCubusMaterialRegistry::RebuildLookupCache() const
+''',
+              '''    bLookupCacheDirty = true;
+    RuntimeMaterialById.Reset();
+    RebuildLookupCache();
+}
+
+void UCubusMaterialRegistry::RebuildLookupCache() const
+''',
+              'post load cache reset'
+          )
+          text = replace_once(
+              text,
+              '''    bLookupCacheDirty = true;
+    RebuildLookupCache();
+}
+#endif
+''',
+              '''    bLookupCacheDirty = true;
+    RuntimeMaterialById.Reset();
+    RebuildLookupCache();
+}
+#endif
+''',
+              'editor cache reset'
+          )
+          path.write_text(text)
+
+          # Mesher header: face selector is encoded in vertex alpha.
+          path = Path('Source/Orakai/CubusCore/Meshing/CubusBlockMesher.h')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '''        const FVector& Vertex3,
+        const FVector& Normal
+    );
+''',
+              '''        const FVector& Vertex3,
+        const FVector& Normal,
+        float SurfaceSelector
+    );
+''',
+              'AddFace surface selector declaration'
+          )
+          path.write_text(text)
+
+          # Mesher implementation: alpha 0=side, 0.5=top, 1=bottom.
+          path = Path('Source/Orakai/CubusCore/Meshing/CubusBlockMesher.cpp')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '''        Vertices[3],
+        FaceNormals[FaceIndex]
+    );
+''',
+              '''        Vertices[3],
+        FaceNormals[FaceIndex],
+        FaceIndex == CubusBlockMesher::PositiveZ
+            ? 0.5f
+            : FaceIndex == CubusBlockMesher::NegativeZ
+                ? 1.0f
+                : 0.0f
+    );
+''',
+              'face selector call'
+          )
+          text = replace_once(
+              text,
+              '''    const FVector& Vertex3,
+    const FVector& Normal
+)
+''',
+              '''    const FVector& Vertex3,
+    const FVector& Normal,
+    const float SurfaceSelector
+)
+''',
+              'AddFace surface selector definition'
+          )
+          text = replace_once(
+              text,
+              '''    MeshData.VertexColors.Add(FLinearColor::White);
+    MeshData.VertexColors.Add(FLinearColor::White);
+    MeshData.VertexColors.Add(FLinearColor::White);
+    MeshData.VertexColors.Add(FLinearColor::White);
+''',
+              '''    const FLinearColor SurfaceData(
+        1.0f,
+        1.0f,
+        1.0f,
+        SurfaceSelector
+    );
+
+    MeshData.VertexColors.Add(SurfaceData);
+    MeshData.VertexColors.Add(SurfaceData);
+    MeshData.VertexColors.Add(SurfaceData);
+    MeshData.VertexColors.Add(SurfaceData);
+''',
+              'vertex surface data'
+          )
+          path.write_text(text)
+
+          # Chunk renderer uses cached PBR instances where configured.
+          path = Path('Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.cpp')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '''                MaterialRegistry->ResolveMaterial(
+                    MaterialId
+                );
+''',
+              '''                MaterialRegistry->ResolveRuntimeMaterial(
+                    MaterialId
+                );
+''',
+              'runtime material resolution'
+          )
+          path.write_text(text)
+
+          Path('.github/workflows/add-block-pbr-materials.yml').unlink()
+
+      - name: Commit PBR block material architecture
+        run: |
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Add PBR block material architecture"
+          git push
