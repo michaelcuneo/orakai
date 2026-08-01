@@ -16,15 +16,9 @@
 
 namespace CubusVoxelVolumeActor
 {
-    int32 ResolveMaterialId(
-        const int32 MaterialId
-    )
+    int32 ResolveMaterialId(const int32 MaterialId)
     {
-        return FMath::Clamp(
-            MaterialId,
-            1,
-            65535
-        );
+        return FMath::Clamp(MaterialId, 1, 65535);
     }
 }
 
@@ -32,29 +26,18 @@ ACubusVoxelVolumeActor::ACubusVoxelVolumeActor()
 {
     PrimaryActorTick.bCanEverTick = false;
 
-    ProceduralMesh =
-        CreateDefaultSubobject<UProceduralMeshComponent>(
-            TEXT("ProceduralMesh")
-        );
-
+    ProceduralMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("ProceduralMesh"));
     SetRootComponent(ProceduralMesh);
 
     ProceduralMesh->bUseAsyncCooking = true;
     ProceduralMesh->SetCastShadow(true);
-
-    ProceduralMesh->SetMobility(
-        EComponentMobility::Static
-    );
-
-    ProceduralMesh->SetCollisionEnabled(
-        ECollisionEnabled::NoCollision
-    );
+    ProceduralMesh->SetMobility(EComponentMobility::Static);
+    ProceduralMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ACubusVoxelVolumeActor::GenerateTerrainData()
 {
     EnsureChunkData();
-
     ChunkData->Clear();
     bChunkCacheDirty = true;
 
@@ -71,7 +54,6 @@ void ACubusVoxelVolumeActor::GenerateTerrainData()
 void ACubusVoxelVolumeActor::RebuildVolume()
 {
     ++RebuildCount;
-
     EnsureChunkData();
 
     if (!IsValid(ProceduralMesh))
@@ -79,16 +61,13 @@ void ACubusVoxelVolumeActor::RebuildVolume()
         return;
     }
 
-    const double BuildStartTime =
-        FPlatformTime::Seconds();
+    const double BuildStartTime = FPlatformTime::Seconds();
 
     ProceduralMesh->ClearAllMeshSections();
     ResetDiagnostics();
 
     FCubusMaterialMeshMap MaterialMeshes;
-
-    const FCubusBlockChunkNeighborhood Neighborhood =
-        BuildNeighborhood();
+    const FCubusBlockChunkNeighborhood Neighborhood = BuildNeighborhood();
 
     FCubusBlockMesher::BuildChunk(
         Neighborhood,
@@ -98,14 +77,10 @@ void ACubusVoxelVolumeActor::RebuildVolume()
         GeneratedFaceCount
     );
 
-    TotalVoxelCount =
-        ChunkData->GetVoxelCount();
-
-    SolidVoxelCount =
-        ChunkData->GetOccupiedVoxelCount();
+    TotalVoxelCount = ChunkData->GetVoxelCount();
+    SolidVoxelCount = ChunkData->GetOccupiedVoxelCount();
 
     TArray<int32> MaterialIds;
-
     MaterialMeshes.GetKeys(MaterialIds);
     MaterialIds.Sort();
 
@@ -113,13 +88,9 @@ void ACubusVoxelVolumeActor::RebuildVolume()
 
     for (const int32 MaterialId : MaterialIds)
     {
-        FCubusMeshData* MeshData =
-            MaterialMeshes.Find(MaterialId);
+        FCubusMeshData* MeshData = MaterialMeshes.Find(MaterialId);
 
-        if (
-            MeshData == nullptr ||
-            !MeshData->IsValid()
-        )
+        if (MeshData == nullptr || !MeshData->IsValid())
         {
             continue;
         }
@@ -139,93 +110,53 @@ void ACubusVoxelVolumeActor::RebuildVolume()
 
         if (IsValid(MaterialRegistry.Get()))
         {
-            ResolvedMaterial =
-                MaterialRegistry->ResolveMaterial(
-                    MaterialId
-                );
+            ResolvedMaterial = MaterialRegistry->ResolveRuntimeMaterial(MaterialId);
         }
 
-        ProceduralMesh->SetMaterial(
-            MeshSectionIndex,
-            ResolvedMaterial
-        );
+        ProceduralMesh->SetMaterial(MeshSectionIndex, ResolvedMaterial);
 
-        GeneratedVertexCount +=
-            MeshData->GetVertexCount();
-
-        GeneratedTriangleCount +=
-            MeshData->GetTriangleCount();
-
+        GeneratedVertexCount += MeshData->GetVertexCount();
+        GeneratedTriangleCount += MeshData->GetTriangleCount();
         ++MeshSectionIndex;
     }
 
-    GeneratedMaterialSectionCount =
-        MeshSectionIndex;
+    GeneratedMaterialSectionCount = MeshSectionIndex;
 
     ProceduralMesh->SetCollisionEnabled(
-        bGenerateCollision &&
-        MeshSectionIndex > 0
+        bGenerateCollision && MeshSectionIndex > 0
             ? ECollisionEnabled::QueryAndPhysics
             : ECollisionEnabled::NoCollision
     );
 
-    const double BuildEndTime =
-        FPlatformTime::Seconds();
-
-    LastBuildTimeMilliseconds =
-        static_cast<float>(
-            (
-                BuildEndTime -
-                BuildStartTime
-            ) *
-            1000.0
-        );
+    const double BuildEndTime = FPlatformTime::Seconds();
+    LastBuildTimeMilliseconds = static_cast<float>((BuildEndTime - BuildStartTime) * 1000.0);
 }
 
 void ACubusVoxelVolumeActor::EnsureChunkData()
 {
     if (!ChunkData.IsValid())
     {
-        ChunkData =
-            MakeUnique<FCubusBlockChunkData>(
-                ChunkCoordinate
-            );
+        ChunkData = MakeUnique<FCubusBlockChunkData>(ChunkCoordinate);
     }
     else
     {
-        ChunkData->SetChunkCoordinate(
-            ChunkCoordinate
-        );
+        ChunkData->SetChunkCoordinate(ChunkCoordinate);
     }
 }
 
 void ACubusVoxelVolumeActor::SynchronizeChunkState()
 {
     EnsureChunkData();
-
-    ChunkData->SetChunkCoordinate(
-        ChunkCoordinate
-    );
+    ChunkData->SetChunkCoordinate(ChunkCoordinate);
 
     const double ChunkWorldSize =
-        static_cast<double>(
-            Cubus::ChunkSize
-        ) *
-        static_cast<double>(
-            VoxelSize
-        );
+        static_cast<double>(Cubus::ChunkSize) * static_cast<double>(VoxelSize);
 
     SetActorLocation(
         FVector(
-            static_cast<double>(
-                ChunkCoordinate.X
-            ) * ChunkWorldSize,
-            static_cast<double>(
-                ChunkCoordinate.Y
-            ) * ChunkWorldSize,
-            static_cast<double>(
-                ChunkCoordinate.Z
-            ) * ChunkWorldSize
+            static_cast<double>(ChunkCoordinate.X) * ChunkWorldSize,
+            static_cast<double>(ChunkCoordinate.Y) * ChunkWorldSize,
+            static_cast<double>(ChunkCoordinate.Z) * ChunkWorldSize
         )
     );
 }
@@ -236,17 +167,9 @@ void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(
     ACubusBlockWorldActor* InBlockWorld
 )
 {
-    ChunkCoordinate =
-        InChunkCoordinate;
-
-    VoxelSize =
-        FMath::Max(
-            1.0f,
-            InVoxelSize
-        );
-
-    OwningBlockWorld =
-        InBlockWorld;
+    ChunkCoordinate = InChunkCoordinate;
+    VoxelSize = FMath::Max(1.0f, InVoxelSize);
+    OwningBlockWorld = InBlockWorld;
 
     SynchronizeChunkState();
 
@@ -256,20 +179,14 @@ void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(
     }
 }
 
-void ACubusVoxelVolumeActor::ConfigureRendering(
-    UCubusMaterialRegistry* InMaterialRegistry
-)
+void ACubusVoxelVolumeActor::ConfigureRendering(UCubusMaterialRegistry* InMaterialRegistry)
 {
-    MaterialRegistry =
-        InMaterialRegistry;
+    MaterialRegistry = InMaterialRegistry;
 }
 
-void ACubusVoxelVolumeActor::ConfigureGeology(
-    UCubusGeologyProfile* InGeologyProfile
-)
+void ACubusVoxelVolumeActor::ConfigureGeology(UCubusGeologyProfile* InGeologyProfile)
 {
-    GeologyProfile =
-        InGeologyProfile;
+    GeologyProfile = InGeologyProfile;
 }
 
 void ACubusVoxelVolumeActor::ConfigureTerrain(
@@ -307,181 +224,39 @@ void ACubusVoxelVolumeActor::ConfigureTerrain(
 )
 {
     bUseHeightTerrain = bInUseHeightTerrain;
-
-    TerrainSurfaceWorldZ =
-        InTerrainSurfaceWorldZ;
-
-    TerrainBaseHeight =
-        InTerrainBaseHeight;
-
-    TerrainContinentAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainContinentAmplitude
-        );
-
-    TerrainContinentFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainContinentFrequency
-        );
-
-    TerrainHillAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainHillAmplitude
-        );
-
-    TerrainHillFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainHillFrequency
-        );
-
-    TerrainDetailAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainDetailAmplitude
-        );
-
-    TerrainDetailFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainDetailFrequency
-        );
-
-    TerrainRidgeAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainRidgeAmplitude
-        );
-
-    TerrainRidgeFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainRidgeFrequency
-        );
-
-    TerrainValleyDepth =
-        FMath::Max(
-            0.0f,
-            InTerrainValleyDepth
-        );
-
-    TerrainValleyFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainValleyFrequency
-        );
-
-    TerrainValleyWidth =
-        FMath::Clamp(
-            InTerrainValleyWidth,
-            0.0f,
-            1.0f
-        );
-
-    TerrainValleyFalloff =
-        FMath::Clamp(
-            InTerrainValleyFalloff,
-            0.001f,
-            1.0f
-        );
-
-    TerrainValleyWarpAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainValleyWarpAmplitude
-        );
-
-    TerrainValleyWarpFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainValleyWarpFrequency
-        );
-
-    TerrainRegionFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainRegionFrequency
-        );
-
-    TerrainPlainsThreshold =
-        FMath::Clamp(
-            InTerrainPlainsThreshold,
-            -1.0f,
-            1.0f
-        );
-
-    TerrainPlainsBlend =
-        FMath::Clamp(
-            InTerrainPlainsBlend,
-            0.001f,
-            1.0f
-        );
-
-    TerrainMountainThreshold =
-        FMath::Clamp(
-            InTerrainMountainThreshold,
-            TerrainPlainsThreshold,
-            1.0f
-        );
-
-    TerrainMountainBlend =
-        FMath::Clamp(
-            InTerrainMountainBlend,
-            0.001f,
-            1.0f
-        );
-
-    TerrainSurfaceMaterialId =
-        FMath::Max(
-            1,
-            InTerrainSurfaceMaterialId
-        );
-
-    TerrainSubsurfaceMaterialId =
-        FMath::Max(
-            1,
-            InTerrainSubsurfaceMaterialId
-        );
-
-    TerrainRockMaterialId =
-        FMath::Max(
-            1,
-            InTerrainRockMaterialId
-        );
-
-    TerrainSnowMaterialId =
-        FMath::Max(
-            1,
-            InTerrainSnowMaterialId
-        );
-
-    TerrainRockSlopeThreshold =
-        FMath::Max(
-            0.0f,
-            InTerrainRockSlopeThreshold
-        );
-
-    TerrainSnowMinimumHeight =
-        InTerrainSnowMinimumHeight;
-
-    bGenerateWater =
-        bInGenerateWater;
-
-    TerrainWaterLevel =
-        InTerrainWaterLevel;
-
-    TerrainWaterMaterialId =
-        FMath::Max(
-            1,
-            InTerrainWaterMaterialId
-        );
+    TerrainSurfaceWorldZ = InTerrainSurfaceWorldZ;
+    TerrainBaseHeight = InTerrainBaseHeight;
+    TerrainContinentAmplitude = FMath::Max(0.0f, InTerrainContinentAmplitude);
+    TerrainContinentFrequency = FMath::Max(0.000001f, InTerrainContinentFrequency);
+    TerrainHillAmplitude = FMath::Max(0.0f, InTerrainHillAmplitude);
+    TerrainHillFrequency = FMath::Max(0.000001f, InTerrainHillFrequency);
+    TerrainDetailAmplitude = FMath::Max(0.0f, InTerrainDetailAmplitude);
+    TerrainDetailFrequency = FMath::Max(0.000001f, InTerrainDetailFrequency);
+    TerrainRidgeAmplitude = FMath::Max(0.0f, InTerrainRidgeAmplitude);
+    TerrainRidgeFrequency = FMath::Max(0.000001f, InTerrainRidgeFrequency);
+    TerrainValleyDepth = FMath::Max(0.0f, InTerrainValleyDepth);
+    TerrainValleyFrequency = FMath::Max(0.000001f, InTerrainValleyFrequency);
+    TerrainValleyWidth = FMath::Clamp(InTerrainValleyWidth, 0.0f, 1.0f);
+    TerrainValleyFalloff = FMath::Clamp(InTerrainValleyFalloff, 0.001f, 1.0f);
+    TerrainValleyWarpAmplitude = FMath::Max(0.0f, InTerrainValleyWarpAmplitude);
+    TerrainValleyWarpFrequency = FMath::Max(0.000001f, InTerrainValleyWarpFrequency);
+    TerrainRegionFrequency = FMath::Max(0.000001f, InTerrainRegionFrequency);
+    TerrainPlainsThreshold = FMath::Clamp(InTerrainPlainsThreshold, -1.0f, 1.0f);
+    TerrainPlainsBlend = FMath::Clamp(InTerrainPlainsBlend, 0.001f, 1.0f);
+    TerrainMountainThreshold = FMath::Clamp(InTerrainMountainThreshold, TerrainPlainsThreshold, 1.0f);
+    TerrainMountainBlend = FMath::Clamp(InTerrainMountainBlend, 0.001f, 1.0f);
+    TerrainSurfaceMaterialId = FMath::Max(1, InTerrainSurfaceMaterialId);
+    TerrainSubsurfaceMaterialId = FMath::Max(1, InTerrainSubsurfaceMaterialId);
+    TerrainRockMaterialId = FMath::Max(1, InTerrainRockMaterialId);
+    TerrainSnowMaterialId = FMath::Max(1, InTerrainSnowMaterialId);
+    TerrainRockSlopeThreshold = FMath::Max(0.0f, InTerrainRockSlopeThreshold);
+    TerrainSnowMinimumHeight = InTerrainSnowMinimumHeight;
+    bGenerateWater = bInGenerateWater;
+    TerrainWaterLevel = InTerrainWaterLevel;
+    TerrainWaterMaterialId = FMath::Max(1, InTerrainWaterMaterialId);
 }
 
-const FCubusBlockChunkData*
-ACubusVoxelVolumeActor::FindNeighbourChunkData(
+const FCubusBlockChunkData* ACubusVoxelVolumeActor::FindNeighbourChunkData(
     const FIntVector& CoordinateOffset
 ) const
 {
@@ -491,10 +266,7 @@ ACubusVoxelVolumeActor::FindNeighbourChunkData(
     }
 
     ACubusVoxelVolumeActor* NeighbourActor =
-        OwningBlockWorld->FindChunk(
-            ChunkCoordinate +
-            CoordinateOffset
-        );
+        OwningBlockWorld->FindChunk(ChunkCoordinate + CoordinateOffset);
 
     if (!IsValid(NeighbourActor))
     {
@@ -504,44 +276,16 @@ ACubusVoxelVolumeActor::FindNeighbourChunkData(
     return NeighbourActor->GetChunkData();
 }
 
-FCubusBlockChunkNeighborhood
-ACubusVoxelVolumeActor::BuildNeighborhood() const
+FCubusBlockChunkNeighborhood ACubusVoxelVolumeActor::BuildNeighborhood() const
 {
     FCubusBlockChunkNeighborhood Neighborhood;
-
-    Neighborhood.Centre =
-        ChunkData.Get();
-
-    Neighborhood.PositiveX =
-        FindNeighbourChunkData(
-            FIntVector(1, 0, 0)
-        );
-
-    Neighborhood.NegativeX =
-        FindNeighbourChunkData(
-            FIntVector(-1, 0, 0)
-        );
-
-    Neighborhood.PositiveY =
-        FindNeighbourChunkData(
-            FIntVector(0, 1, 0)
-        );
-
-    Neighborhood.NegativeY =
-        FindNeighbourChunkData(
-            FIntVector(0, -1, 0)
-        );
-
-    Neighborhood.PositiveZ =
-        FindNeighbourChunkData(
-            FIntVector(0, 0, 1)
-        );
-
-    Neighborhood.NegativeZ =
-        FindNeighbourChunkData(
-            FIntVector(0, 0, -1)
-        );
-
+    Neighborhood.Centre = ChunkData.Get();
+    Neighborhood.PositiveX = FindNeighbourChunkData(FIntVector(1, 0, 0));
+    Neighborhood.NegativeX = FindNeighbourChunkData(FIntVector(-1, 0, 0));
+    Neighborhood.PositiveY = FindNeighbourChunkData(FIntVector(0, 1, 0));
+    Neighborhood.NegativeY = FindNeighbourChunkData(FIntVector(0, -1, 0));
+    Neighborhood.PositiveZ = FindNeighbourChunkData(FIntVector(0, 0, 1));
+    Neighborhood.NegativeZ = FindNeighbourChunkData(FIntVector(0, 0, -1));
     return Neighborhood;
 }
 
@@ -549,10 +293,7 @@ void ACubusVoxelVolumeActor::RebuildAffectedChunks()
 {
     if (IsValid(OwningBlockWorld.Get()))
     {
-        OwningBlockWorld->RebuildChunkAndNeighbours(
-            ChunkCoordinate
-        );
-
+        OwningBlockWorld->RebuildChunkAndNeighbours(ChunkCoordinate);
         return;
     }
 
