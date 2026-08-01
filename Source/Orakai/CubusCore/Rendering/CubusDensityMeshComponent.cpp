@@ -15,7 +15,10 @@
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
 
-UCubusDensityMeshComponent::UCubusDensityMeshComponent()
+UCubusDensityMeshComponent::UCubusDensityMeshComponent(
+    const FObjectInitializer& ObjectInitializer
+)
+    : Super(ObjectInitializer)
 {
     PrimaryComponentTick.bCanEverTick = false;
     bUseAsyncCooking = true;
