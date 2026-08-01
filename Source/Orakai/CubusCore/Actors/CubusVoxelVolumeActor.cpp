@@ -9,6 +9,7 @@
 #include "CubusCore/Meshing/CubusMeshData.h"
 #include "CubusCore/Generation/CubusBlockTerrainGenerator.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
+#include "CubusCore/Rendering/CubusDensityMeshComponent.h"
 
 #include "HAL/PlatformTime.h"
 #include "Materials/MaterialInterface.h"
@@ -26,13 +27,26 @@ ACubusVoxelVolumeActor::ACubusVoxelVolumeActor()
 {
     PrimaryActorTick.bCanEverTick = false;
 
-    ProceduralMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("ProceduralMesh"));
+    ProceduralMesh = CreateDefaultSubobject<UProceduralMeshComponent>(
+        TEXT("ProceduralMesh")
+    );
     SetRootComponent(ProceduralMesh);
 
     ProceduralMesh->bUseAsyncCooking = true;
     ProceduralMesh->SetCastShadow(true);
     ProceduralMesh->SetMobility(EComponentMobility::Static);
     ProceduralMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    DensityMesh = CreateDefaultSubobject<UCubusDensityMeshComponent>(
+        TEXT("DensityMesh")
+    );
+    DensityMesh->SetupAttachment(ProceduralMesh);
+    DensityMesh->bAutoRebuildOnBeginPlay = false;
+    DensityMesh->SetMobility(EComponentMobility::Movable);
+    DensityMesh->SetVisibleInRayTracing(false);
+    DensityMesh->SetVisibility(false);
+    DensityMesh->SetHiddenInGame(true);
+    DensityMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ACubusVoxelVolumeActor::GenerateTerrainData()
@@ -64,8 +78,88 @@ void ACubusVoxelVolumeActor::RebuildVolume()
     const double BuildStartTime = FPlatformTime::Seconds();
 
     ProceduralMesh->ClearAllMeshSections();
+    ProceduralMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    if (IsValid(DensityMesh))
+    {
+        DensityMesh->ClearDensityMesh();
+        DensityMesh->SetVisibility(false);
+        DensityMesh->SetHiddenInGame(true);
+    }
+
     ResetDiagnostics();
 
+    TotalVoxelCount = ChunkData->GetVoxelCount();
+    SolidVoxelCount = ChunkData->GetOccupiedVoxelCount();
+
+    const ECubusVoxelRenderMode EffectiveRenderMode =
+        GetEffectiveRenderMode();
+
+    const bool bBuildBlocks =
+        EffectiveRenderMode != ECubusVoxelRenderMode::Density;
+
+    const bool bBuildDensity =
+        EffectiveRenderMode != ECubusVoxelRenderMode::Blocks;
+
+    if (bBuildBlocks)
+    {
+        RebuildBlockMesh(
+            bGenerateCollision
+        );
+    }
+
+    if (bBuildDensity)
+    {
+        if (!IsValid(DensityMesh))
+        {
+            UE_LOG(
+                LogTemp,
+                Error,
+                TEXT("Cubus chunk %s requested density rendering without a density mesh component."),
+                *GetName()
+            );
+        }
+        else
+        {
+            DensityMesh->MaterialRegistry =
+                MaterialRegistry.Get();
+
+            // Hybrid mode uses block collision for now so the same surface is
+            // not submitted twice to the physics scene.
+            DensityMesh->bGenerateDensityCollision =
+                bGenerateCollision &&
+                EffectiveRenderMode ==
+                    ECubusVoxelRenderMode::Density;
+
+            DensityMesh->SetVisibility(true);
+            DensityMesh->SetHiddenInGame(false);
+            DensityMesh->RebuildDensityMesh();
+        }
+    }
+
+    const double BuildEndTime = FPlatformTime::Seconds();
+    LastBuildTimeMilliseconds =
+        static_cast<float>(
+            (BuildEndTime - BuildStartTime) *
+            1000.0
+        );
+}
+
+ECubusVoxelRenderMode
+ACubusVoxelVolumeActor::GetEffectiveRenderMode() const
+{
+    if (IsValid(OwningBlockWorld.Get()))
+    {
+        return OwningBlockWorld->GetVoxelRenderMode();
+    }
+
+    return StandaloneRenderMode;
+}
+
+void ACubusVoxelVolumeActor::RebuildBlockMesh(
+    const bool bGenerateBlockCollision
+)
+{
     FCubusMaterialMeshMap MaterialMeshes;
     const FCubusBlockChunkNeighborhood Neighborhood = BuildNeighborhood();
 
@@ -76,9 +170,6 @@ void ACubusVoxelVolumeActor::RebuildVolume()
         MaterialMeshes,
         GeneratedFaceCount
     );
-
-    TotalVoxelCount = ChunkData->GetVoxelCount();
-    SolidVoxelCount = ChunkData->GetOccupiedVoxelCount();
 
     TArray<int32> MaterialIds;
     MaterialMeshes.GetKeys(MaterialIds);
@@ -103,17 +194,23 @@ void ACubusVoxelVolumeActor::RebuildVolume()
             MeshData->UV0,
             MeshData->VertexColors,
             MeshData->Tangents,
-            bGenerateCollision
+            bGenerateBlockCollision
         );
 
         UMaterialInterface* ResolvedMaterial = nullptr;
 
         if (IsValid(MaterialRegistry.Get()))
         {
-            ResolvedMaterial = MaterialRegistry->ResolveRuntimeMaterial(MaterialId);
+            ResolvedMaterial =
+                MaterialRegistry->ResolveRuntimeMaterial(
+                    MaterialId
+                );
         }
 
-        ProceduralMesh->SetMaterial(MeshSectionIndex, ResolvedMaterial);
+        ProceduralMesh->SetMaterial(
+            MeshSectionIndex,
+            ResolvedMaterial
+        );
 
         GeneratedVertexCount += MeshData->GetVertexCount();
         GeneratedTriangleCount += MeshData->GetTriangleCount();
@@ -123,13 +220,11 @@ void ACubusVoxelVolumeActor::RebuildVolume()
     GeneratedMaterialSectionCount = MeshSectionIndex;
 
     ProceduralMesh->SetCollisionEnabled(
-        bGenerateCollision && MeshSectionIndex > 0
+        bGenerateBlockCollision &&
+        MeshSectionIndex > 0
             ? ECollisionEnabled::QueryAndPhysics
             : ECollisionEnabled::NoCollision
     );
-
-    const double BuildEndTime = FPlatformTime::Seconds();
-    LastBuildTimeMilliseconds = static_cast<float>((BuildEndTime - BuildStartTime) * 1000.0);
 }
 
 void ACubusVoxelVolumeActor::EnsureChunkData()
@@ -150,7 +245,8 @@ void ACubusVoxelVolumeActor::SynchronizeChunkState()
     ChunkData->SetChunkCoordinate(ChunkCoordinate);
 
     const double ChunkWorldSize =
-        static_cast<double>(Cubus::ChunkSize) * static_cast<double>(VoxelSize);
+        static_cast<double>(Cubus::ChunkSize) *
+        static_cast<double>(VoxelSize);
 
     SetActorLocation(
         FVector(
@@ -179,12 +275,21 @@ void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(
     }
 }
 
-void ACubusVoxelVolumeActor::ConfigureRendering(UCubusMaterialRegistry* InMaterialRegistry)
+void ACubusVoxelVolumeActor::ConfigureRendering(
+    UCubusMaterialRegistry* InMaterialRegistry
+)
 {
     MaterialRegistry = InMaterialRegistry;
+
+    if (IsValid(DensityMesh))
+    {
+        DensityMesh->MaterialRegistry = InMaterialRegistry;
+    }
 }
 
-void ACubusVoxelVolumeActor::ConfigureGeology(UCubusGeologyProfile* InGeologyProfile)
+void ACubusVoxelVolumeActor::ConfigureGeology(
+    UCubusGeologyProfile* InGeologyProfile
+)
 {
     GeologyProfile = InGeologyProfile;
 }
@@ -243,7 +348,11 @@ void ACubusVoxelVolumeActor::ConfigureTerrain(
     TerrainRegionFrequency = FMath::Max(0.000001f, InTerrainRegionFrequency);
     TerrainPlainsThreshold = FMath::Clamp(InTerrainPlainsThreshold, -1.0f, 1.0f);
     TerrainPlainsBlend = FMath::Clamp(InTerrainPlainsBlend, 0.001f, 1.0f);
-    TerrainMountainThreshold = FMath::Clamp(InTerrainMountainThreshold, TerrainPlainsThreshold, 1.0f);
+    TerrainMountainThreshold = FMath::Clamp(
+        InTerrainMountainThreshold,
+        TerrainPlainsThreshold,
+        1.0f
+    );
     TerrainMountainBlend = FMath::Clamp(InTerrainMountainBlend, 0.001f, 1.0f);
     TerrainSurfaceMaterialId = FMath::Max(1, InTerrainSurfaceMaterialId);
     TerrainSubsurfaceMaterialId = FMath::Max(1, InTerrainSubsurfaceMaterialId);
@@ -266,7 +375,9 @@ const FCubusBlockChunkData* ACubusVoxelVolumeActor::FindNeighbourChunkData(
     }
 
     ACubusVoxelVolumeActor* NeighbourActor =
-        OwningBlockWorld->FindChunk(ChunkCoordinate + CoordinateOffset);
+        OwningBlockWorld->FindChunk(
+            ChunkCoordinate + CoordinateOffset
+        );
 
     if (!IsValid(NeighbourActor))
     {
@@ -276,7 +387,8 @@ const FCubusBlockChunkData* ACubusVoxelVolumeActor::FindNeighbourChunkData(
     return NeighbourActor->GetChunkData();
 }
 
-FCubusBlockChunkNeighborhood ACubusVoxelVolumeActor::BuildNeighborhood() const
+FCubusBlockChunkNeighborhood
+ACubusVoxelVolumeActor::BuildNeighborhood() const
 {
     FCubusBlockChunkNeighborhood Neighborhood;
     Neighborhood.Centre = ChunkData.Get();
