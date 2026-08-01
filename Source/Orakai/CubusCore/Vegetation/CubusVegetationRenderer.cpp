@@ -263,6 +263,11 @@ void FCubusVegetationRenderer::ApplyShadowSettings(
     }
 }
 
+void ApplyFoliageMaterialOverride(
+    USkinnedMeshComponent* Component,
+    UMaterialInterface* OverrideMaterial
+) const;
+
 void FCubusVegetationRenderer::ClearBatches(
     const TMap<
         int64,
@@ -649,6 +654,87 @@ void FCubusVegetationRenderer::EnsureBatches(
     );
 }
 
+void FCubusVegetationRenderer::ApplyFoliageMaterialOverride(
+    USkinnedMeshComponent* Component,
+    UMaterialInterface* OverrideMaterial
+) const
+{
+    if (
+        !IsValid(Component) ||
+        !IsValid(OverrideMaterial)
+    )
+    {
+        return;
+    }
+
+    const int32 MaterialCount =
+        Component->GetNumMaterials();
+
+    if (MaterialCount <= 0)
+    {
+        return;
+    }
+
+    bool bOverrodeAnySlot = false;
+
+    for (
+        int32 MaterialIndex = 0;
+        MaterialIndex < MaterialCount;
+        ++MaterialIndex
+    )
+    {
+        UMaterialInterface* ExistingMaterial =
+            Component->GetMaterial(MaterialIndex);
+
+        const FString ExistingName =
+            IsValid(ExistingMaterial)
+                ? ExistingMaterial->GetName()
+                : FString();
+
+        const bool bLooksLikeFoliageSlot =
+            ExistingName.IsEmpty() ||
+            ExistingName.Contains(
+                TEXT("Foliage"),
+                ESearchCase::IgnoreCase
+            ) ||
+            ExistingName.Contains(
+                TEXT("Leaf"),
+                ESearchCase::IgnoreCase
+            ) ||
+            ExistingName.Contains(
+                TEXT("Needle"),
+                ESearchCase::IgnoreCase
+            ) ||
+            ExistingName.Contains(
+                TEXT("Twig"),
+                ESearchCase::IgnoreCase
+            );
+
+        if (!bLooksLikeFoliageSlot)
+        {
+            continue;
+        }
+
+        Component->SetMaterial(
+            MaterialIndex,
+            OverrideMaterial
+        );
+
+        bOverrodeAnySlot = true;
+    }
+
+    if (
+        !bOverrodeAnySlot &&
+        MaterialCount == 1
+    )
+    {
+        Component->SetMaterial(
+            0,
+            OverrideMaterial
+        );
+    }
+}
+
 FCubusHeroVegetationRenderResult
 FCubusVegetationRenderer::RenderSkeletalBatch(
     AActor* Owner,
@@ -948,28 +1034,14 @@ FCubusVegetationRenderer::RenderSkeletalBatch(
                     HeroComponent
                         ->EmptyOverrideMaterials();
                 }
-                else if (
-                    IsValid(FoliageOverrideMaterial)
-                )
+                else
                 {
-                    const int32 MaterialCount =
-                        HeroComponent
-                            ->GetNumMaterials();
-
-                    for (
-                        int32 MaterialIndex = 0;
-                        MaterialIndex <
-                            MaterialCount;
-                        ++MaterialIndex
-                    )
-                    {
-                        HeroComponent->SetMaterial(
-                            MaterialIndex,
-                            FoliageOverrideMaterial
-                        );
-                    }
+                    ApplyFoliageMaterialOverride(
+                        HeroComponent,
+                        FoliageOverrideMaterial
+                    );
                 }
-
+                
                 HeroComponent->SetRelativeTransform(
                     LocalTransform
                 );
