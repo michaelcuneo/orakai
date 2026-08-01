@@ -1,0 +1,68 @@
+name: Unwrap hero render branch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/unwrap-hero-render-branch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove redundant hero branch wrapper
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('Source/Orakai/CubusCore/Vegetation/CubusVegetationRenderer.cpp')
+          text = path.read_text()
+
+          marker = '''    for (const FTransform& LocalTransform : Transforms)\n    {\n        const bool bUseHero = true;\n\n        if (bUseHero)\n        {\n'''
+
+          start = text.find(marker)
+          if start == -1:
+              raise RuntimeError('Expected hero wrapper was not found')
+
+          body_start = start + len(marker)
+          depth = 1
+          i = body_start
+
+          while i < len(text) and depth > 0:
+              if text[i] == '{':
+                  depth += 1
+              elif text[i] == '}':
+                  depth -= 1
+              i += 1
+
+          if depth != 0:
+              raise RuntimeError('Could not find matching hero wrapper brace')
+
+          body = text[body_start:i - 1]
+          dedented_lines = []
+          for line in body.splitlines(True):
+              if line.startswith('    '):
+                  line = line[4:]
+              dedented_lines.append(line)
+
+          replacement = '''    for (const FTransform& LocalTransform : Transforms)\n    {\n''' + ''.join(dedented_lines)
+
+          text = text[:start] + replacement + text[i:]
+          path.write_text(text)
+
+          Path('.github/workflows/unwrap-hero-render-branch.yml').unlink()
+
+      - name: Commit renderer cleanup
+        run: |
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Remove redundant hero render branch"
+          git push
