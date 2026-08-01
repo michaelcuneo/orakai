@@ -1022,6 +1022,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     TArray<FCubusVegetationRepresentationCandidate>
         HeroTreeCandidates;
     TMap<int64, TArray<FTransform>> CatalogTransformsByBatchKey;
+    TMap<int64, TArray<FTransform>> HeroTransformsByBatchKey;
     int32 StaticBatchTransformCount = 0;
     int32 SkeletalBatchTransformCount = 0;
 
@@ -1346,44 +1347,33 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     );
 
     for (const TPair<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& Pair
-         : CatalogStaticBatchComponents)
+     : CatalogStaticBatchComponents)
+{
+    UHierarchicalInstancedStaticMeshComponent* Component =
+        Pair.Value;
+
+    if (!IsValid(Component))
     {
-        UHierarchicalInstancedStaticMeshComponent* Component =
-            Pair.Value;
-
-        if (!IsValid(Component))
-        {
-            continue;
-        }
-
-        const TArray<FTransform>* RegularTransforms =
-            CatalogTransformsByBatchKey.Find(Pair.Key);
-
-        const TArray<FTransform>* HeroTransforms =
-            HeroTransformsByBatchKey.Find(Pair.Key);
-
-        const bool bHasRegularTransforms =
-            RegularTransforms != nullptr &&
-            !RegularTransforms->IsEmpty();
-
-        const bool bHasHeroTransforms =
-            HeroTransforms != nullptr &&
-            !HeroTransforms->IsEmpty();
-
-        if (!bHasRegularTransforms && !bHasHeroTransforms)
-        {
-            continue;
-        }
-
-        if (!bForceMegaplantFoliageMaterialOverride)
-        {
-            Component->EmptyOverrideMaterials();
-        }
-
-        Component->AddInstances(*Transforms, false, false, false);
-        Component->BuildTreeIfOutdated(false, false);
-        StaticBatchTransformCount += Transforms->Num();
+        continue;
     }
+
+    const TArray<FTransform>* Transforms =
+        CatalogTransformsByBatchKey.Find(Pair.Key);
+
+    if (Transforms == nullptr || Transforms->IsEmpty())
+    {
+        continue;
+    }
+
+    if (!bForceMegaplantFoliageMaterialOverride)
+    {
+        Component->EmptyOverrideMaterials();
+    }
+
+    Component->AddInstances(*Transforms, false, false, false);
+    Component->BuildTreeIfOutdated(false, false);
+    StaticBatchTransformCount += Transforms->Num();
+}
 
     int32 ActiveHeroComponentCount = 0;
     int32 ActiveHeroPveActorCount = 0;
@@ -1426,136 +1416,135 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     }
 
     for (const TPair<int64, TObjectPtr<UInstancedSkinnedMeshComponent>>& Pair
-         : CatalogSkeletalBatchComponents)
+     : CatalogSkeletalBatchComponents)
+{
+    UInstancedSkinnedMeshComponent* Component = Pair.Value;
+
+    if (!IsValid(Component))
     {
-        UInstancedSkinnedMeshComponent* Component = Pair.Value;
+        continue;
+    }
 
-        if (!IsValid(Component))
+    const TArray<FTransform>* RegularTransforms =
+        CatalogTransformsByBatchKey.Find(Pair.Key);
+
+    const TArray<FTransform>* HeroTransforms =
+        HeroTransformsByBatchKey.Find(Pair.Key);
+
+    const bool bHasRegularTransforms =
+        RegularTransforms != nullptr &&
+        !RegularTransforms->IsEmpty();
+
+    const bool bHasHeroTransforms =
+        HeroTransforms != nullptr &&
+        !HeroTransforms->IsEmpty();
+
+    if (!bHasRegularTransforms && !bHasHeroTransforms)
+    {
+        continue;
+    }
+
+    const int32 SpeciesIndex =
+        static_cast<int32>(Pair.Key >> 32);
+
+    UMaterialInterface* FoliageOverrideMaterial = nullptr;
+    UClass* HeroPveActorClass = nullptr;
+    UTransformProviderData* SpeciesTransformProvider = nullptr;
+
+    if (SpeciesCatalog.IsValidIndex(SpeciesIndex))
+    {
+        const FCubusVegetationSpeciesCatalogEntry& SpeciesEntry =
+            SpeciesCatalog[SpeciesIndex];
+
+        if (!IsValid(Component->GetTransformProvider()))
         {
-            continue;
+            SpeciesTransformProvider =
+                FCubusVegetationAssetResolver::ResolveTransformProvider(
+                    SpeciesEntry.SpeciesId
+                );
         }
 
-        const TArray<FTransform>* Transforms =
-            CatalogTransformsByBatchKey.Find(Pair.Key);
-
-        if (Transforms == nullptr || Transforms->IsEmpty())
+        if (
+            IsValid(SpeciesTransformProvider) &&
+            Component->GetTransformProvider() != SpeciesTransformProvider
+        )
         {
-            continue;
+            Component->SetTransformProvider(SpeciesTransformProvider);
+            Component->MarkRenderStateDirty();
+            Component->MarkRenderDynamicDataDirty();
+            ++BoundSpeciesTransformProviderCount;
         }
 
-        const int32 SpeciesIndex =
-            static_cast<int32>(Pair.Key >> 32);
-
-        UMaterialInterface* FoliageOverrideMaterial = nullptr;
-        UClass* HeroPveActorClass = nullptr;
-        UTransformProviderData* SpeciesTransformProvider = nullptr;
-
-        if (SpeciesCatalog.IsValidIndex(SpeciesIndex))
-        {
-            const FCubusVegetationSpeciesCatalogEntry& SpeciesEntry =
-                SpeciesCatalog[SpeciesIndex];
-
-            if (!IsValid(Component->GetTransformProvider()))
-            {
-                SpeciesTransformProvider =
-                    FCubusVegetationAssetResolver::ResolveTransformProvider(
-                        SpeciesEntry.SpeciesId
-                    );
-            }
-
-            if (
-                IsValid(SpeciesTransformProvider) &&
-                Component->GetTransformProvider() != SpeciesTransformProvider
-            )
-            {
-                Component->SetTransformProvider(SpeciesTransformProvider);
-                Component->MarkRenderStateDirty();
-                Component->MarkRenderDynamicDataDirty();
-                ++BoundSpeciesTransformProviderCount;
-            }
-
-            const bool bHasNativeDynamicWindProvider =
-                Cast<UDynamicWindData>(Component->GetTransformProvider()) != nullptr;
-
-            if (bUseHeroPveActorWindMode && !bHasNativeDynamicWindProvider)
-            {
-                HeroPveActorClass =
-                    FCubusVegetationAssetResolver::ResolveHeroPveActorClass(
-                        SpeciesEntry
-                    );
-            }
-
-            if (bForceMegaplantFoliageMaterialOverride)
-            {
-                const TSoftObjectPtr<UMaterialInterface> FoliageMaterialRef =
-                    FCubusVegetationAssetResolver::ResolveFoliageMaterial(
-                        SpeciesEntry.SpeciesId
-                    );
-
-                if (!FoliageMaterialRef.IsNull())
-                {
-                    FoliageOverrideMaterial = FoliageMaterialRef.LoadSynchronous();
-                    if (IsValid(FoliageOverrideMaterial))
-                    {
-                        ++FoliageMaterialOverrideComponentCount;
-                    }
-                    VegetationRenderer.ApplyFoliageMaterialOverride(
-                        Component,
-                        FoliageOverrideMaterial
-                    );
-                }
-            }
-        }
-
-        const bool bHasNativeDynamicWindProvider =
+        const bool bSpeciesHasNativeDynamicWindProvider =
             Cast<UDynamicWindData>(
                 Component->GetTransformProvider()
             ) != nullptr;
 
-        FCubusHeroVegetationRenderSettings HeroRenderSettings;
+        if (
+            bUseHeroPveActorWindMode &&
+            !bSpeciesHasNativeDynamicWindProvider
+        )
+        {
+            HeroPveActorClass =
+                FCubusVegetationAssetResolver::ResolveHeroPveActorClass(
+                    SpeciesEntry
+                );
+        }
 
-        HeroRenderSettings.bEnabled =
-            bEnableHeroSkeletalWindMode &&
-            !bHasNativeDynamicWindProvider;
+        if (bForceMegaplantFoliageMaterialOverride)
+        {
+            const TSoftObjectPtr<UMaterialInterface> FoliageMaterialRef =
+                FCubusVegetationAssetResolver::ResolveFoliageMaterial(
+                    SpeciesEntry.SpeciesId
+                );
 
-        HeroRenderSettings.bUsePveActors =
-            bUseHeroPveActorWindMode;
+            if (!FoliageMaterialRef.IsNull())
+            {
+                FoliageOverrideMaterial =
+                    FoliageMaterialRef.LoadSynchronous();
 
-        HeroRenderSettings.bUseInstancedSkeletalFallback =
-            bUseInstancedSkeletalFallbackBeyondHeroDistance;
+                if (IsValid(FoliageOverrideMaterial))
+                {
+                    ++FoliageMaterialOverrideComponentCount;
+                }
 
-        HeroRenderSettings.bForceFoliageMaterialOverride =
-            bForceMegaplantFoliageMaterialOverride;
+                VegetationRenderer.ApplyFoliageMaterialOverride(
+                    Component,
+                    FoliageOverrideMaterial
+                );
+            }
+        }
+    }
 
-        HeroRenderSettings.bCastShadow =
-            bCastWorldPlantShadows;
+    const bool bHasNativeDynamicWindProvider =
+        Cast<UDynamicWindData>(
+            Component->GetTransformProvider()
+        ) != nullptr;
 
-        HeroRenderSettings.bHasCamera =
-            bHasCamera;
+    FCubusHeroVegetationRenderSettings RenderSettings;
+    RenderSettings.bUsePveActors = bUseHeroPveActorWindMode;
+    RenderSettings.bUseInstancedSkeletalFallback =
+        bUseInstancedSkeletalFallbackBeyondHeroDistance;
+    RenderSettings.bForceFoliageMaterialOverride =
+        bForceMegaplantFoliageMaterialOverride;
+    RenderSettings.bCastShadow = bCastWorldPlantShadows;
+    RenderSettings.bAppendOnly = bAppendOnly;
 
-        HeroRenderSettings.bAppendOnly =
-            bAppendOnly;
+    if (bHasRegularTransforms)
+    {
+        RenderSettings.bEnabled = false;
 
-        HeroRenderSettings.MaxHeroComponents =
-            HeroComponentLimit;
-
-        HeroRenderSettings.MaxHeroDistance =
-            HeroSkeletalWindMaxDistance;
-
-        HeroRenderSettings.CameraLocation =
-            CameraLocation;
-
-        const FCubusHeroVegetationRenderResult HeroRenderResult =
+        const FCubusHeroVegetationRenderResult RegularResult =
             VegetationRenderer.RenderSkeletalBatch(
                 this,
                 World,
                 Root,
                 Component,
-                *Transforms,
+                *RegularTransforms,
                 HeroPveActorClass,
                 FoliageOverrideMaterial,
                 CachedUltraDynamicWeatherActor,
-                HeroRenderSettings,
+                RenderSettings,
                 ActiveHeroComponentCount,
                 ActiveHeroPveActorCount,
                 RemainingInstancedSkeletalFallbackBudget,
@@ -1564,11 +1553,43 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             );
 
         SkeletalBatchTransformCount +=
-            HeroRenderResult.SkeletalInstanceCount;
+            RegularResult.SkeletalInstanceCount;
 
         InstancedSkeletalFallbackCount +=
-            HeroRenderResult.InstancedFallbackCount;
+            RegularResult.InstancedFallbackCount;
     }
+
+    if (bHasHeroTransforms)
+    {
+        RenderSettings.bEnabled =
+            bEnableHeroSkeletalWindMode &&
+            !bHasNativeDynamicWindProvider;
+
+        const FCubusHeroVegetationRenderResult HeroResult =
+            VegetationRenderer.RenderSkeletalBatch(
+                this,
+                World,
+                Root,
+                Component,
+                *HeroTransforms,
+                HeroPveActorClass,
+                FoliageOverrideMaterial,
+                CachedUltraDynamicWeatherActor,
+                RenderSettings,
+                ActiveHeroComponentCount,
+                ActiveHeroPveActorCount,
+                RemainingInstancedSkeletalFallbackBudget,
+                HeroSkeletalWindComponents,
+                HeroPveWindActors
+            );
+
+        SkeletalBatchTransformCount +=
+            HeroResult.SkeletalInstanceCount;
+
+        InstancedSkeletalFallbackCount +=
+            HeroResult.InstancedFallbackCount;
+    }
+}
 
     int32 SignatureLoadedChunkCount = 0;
     const uint32 SignatureHash =

@@ -24,14 +24,7 @@ struct FCubusHeroVegetationRenderSettings
     bool bUseInstancedSkeletalFallback = false;
     bool bForceFoliageMaterialOverride = false;
     bool bCastShadow = true;
-    bool bHasCamera = false;
     bool bAppendOnly = false;
-
-    int32 MaxHeroComponents = 0;
-
-    float MaxHeroDistance = 0.0f;
-
-    FVector CameraLocation = FVector::ZeroVector;
 };
 
 struct FCubusHeroVegetationRenderResult
