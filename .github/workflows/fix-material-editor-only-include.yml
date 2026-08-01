@@ -1,0 +1,35 @@
+name: Fix Unreal 5.8 material editor include
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-material-editor-only-include.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove obsolete include
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('Source/Orakai/CubusCore/Editor/CubusMaterialBuilderLibrary.cpp')
+          text = path.read_text()
+          line = '#include "Materials/MaterialEditorOnlyData.h"\n'
+          if line not in text:
+              raise SystemExit('obsolete include not found')
+          path.write_text(text.replace(line, '', 1))
+          Path('.github/workflows/fix-material-editor-only-include.yml').unlink()
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Fix Unreal 5.8 material editor include"
+          git push
