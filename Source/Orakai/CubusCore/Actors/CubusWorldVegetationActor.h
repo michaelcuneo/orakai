@@ -2,59 +2,23 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "CubusCore/Vegetation/CubusVegetationTypes.h"
+#include "CubusCore/Vegetation/CubusVegetationCatalog.h"
+#include "CubusCore/Vegetation/CubusVegetationRenderer.h"
+#include "CubusCore/Vegetation/CubusVegetationPlacement.h"
 
 #include "CubusWorldVegetationActor.generated.h"
 
 class ACubusBlockWorldActor;
 class UHierarchicalInstancedStaticMeshComponent;
 class UInstancedSkinnedMeshComponent;
-class UInstancedStaticMeshComponent;
 class UMaterialParameterCollection;
-class UPCGGraphInterface;
 class USkeletalMeshComponent;
 class USceneComponent;
 class UObject;
 class USkeletalMesh;
 class UStaticMesh;
 struct FCubusVegetationInstance;
-
-UENUM(BlueprintType, meta = (Bitflags))
-enum class ECubusVegetationBiome : uint8
-{
-    None = 0 UMETA(Hidden),
-    Plains = 1 << 0,
-    Forest = 1 << 1,
-    Rocky = 1 << 2,
-    Wetland = 1 << 3
-};
-
-USTRUCT(BlueprintType)
-struct FCubusVegetationSpeciesCatalogEntry
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
-    FName SpeciesId = NAME_None;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
-    int32 TypeId = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (ClampMin = "0.001"))
-    float Weight = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (Bitmask, BitmaskEnum = "/Script/Orakai.ECubusVegetationBiome"))
-    int32 BiomeMask = static_cast<int32>(ECubusVegetationBiome::Forest);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (AllowedClasses = "/Script/Engine.StaticMesh,/Script/Engine.SkeletalMesh"))
-    TArray<TSoftObjectPtr<UObject>> GrowthStageMeshes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (AllowedClasses = "/Script/Engine.Actor"))
-    TSoftClassPtr<AActor> HeroPveActorClassOverride;
-
-    // Accepts data assets/blueprints that indirectly reference the runtime actor class.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
-    TSoftObjectPtr<UObject> HeroPveActorAssetOverride;
-};
 
 /**
  * One world-level vegetation owner for all currently streamed Cubus chunks.
@@ -74,20 +38,11 @@ class ORAKAI_API ACubusWorldVegetationActor : public AActor
 public:
     ACubusWorldVegetationActor();
 
-    virtual void OnConstruction(const FTransform& Transform) override;
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     void ConfigureForWorld(ACubusBlockWorldActor* InBlockWorld);
-
-    // Temporary source-compatibility overload for call sites compiled against
-    // the removed PCG configuration API. The graph and bool are ignored.
-    void ConfigureForWorld(
-        ACubusBlockWorldActor* InBlockWorld,
-        UPCGGraphInterface* InVegetationGraph,
-        bool bInEnableRuntimeVegetation
-    );
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation")
     void RebuildWorldVegetation();
@@ -138,6 +93,18 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind", meta = (EditCondition = "bEnableHeroSkeletalWindMode", ClampMin = "0", Units = "cm"))
     float HeroSkeletalWindMaxDistance = 10000.0f;
 
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Wind",
+        meta = (
+            EditCondition = "bEnableHeroSkeletalWindMode",
+            ClampMin = "100.0",
+            Units = "cm"
+        )
+    )
+    float HeroRepresentationRefreshDistance = 500.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind", meta = (EditCondition = "bEnableHeroSkeletalWindMode"))
     bool bUseInstancedSkeletalFallbackBeyondHeroDistance = false;
 
@@ -149,18 +116,6 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind", meta = (EditCondition = "bEnableHeroSkeletalWindMode"))
     bool bUseHeroPveActorWindMode = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind", meta = (EditCondition = "bEnableHeroSkeletalWindMode"))
-    bool bForceHeroWindVisualSway = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind", meta = (EditCondition = "bEnableHeroSkeletalWindMode && bForceHeroWindVisualSway", ClampMin = "0.0", ClampMax = "25.0", Units = "deg"))
-    float HeroWindSwayMaxDegrees = 6.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind", meta = (EditCondition = "bEnableHeroSkeletalWindMode && bForceHeroWindVisualSway", ClampMin = "0.01", ClampMax = "10.0"))
-    float HeroWindSwayFrequency = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind", meta = (EditCondition = "bEnableHeroSkeletalWindMode && bForceHeroWindVisualSway", ClampMin = "0.01", ClampMax = "4.0"))
-    float HeroWindSwayIntensityScale = 0.35f;
 
     // DynamicWind foliage should participate in the world's dynamic shadows.
     // Disable only as an explicit performance tradeoff.
@@ -269,20 +224,8 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0", UIMax = "12", EditCondition = "bCullByCameraChunkRadius"))
     int32 CameraChunkVerticalRadius = 4;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0"))
-    int32 MaximumPublishedPoints = 20000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Debug")
-    TObjectPtr<UStaticMesh> MarkerMesh = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Debug")
-    bool bShowDebugMarkers = false;
-
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int32 LoadedChunkCount = 0;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
-    int32 PublishedPointCount = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int32 RenderedPlantCount = 0;
@@ -291,31 +234,6 @@ protected:
     int64 PublishedPlacementHash = 0;
 
 private:
-    struct FCubusRuntimeRandomizationSample
-    {
-        bool bPruned = false;
-        float ScaleMultiplier = 1.0f;
-        FVector2f PositionJitterUnit = FVector2f::ZeroVector;
-        float YawJitterUnit = 0.0f;
-    };
-
-    UPROPERTY(Transient)
-    TObjectPtr<UInstancedStaticMeshComponent> GrassPoints = nullptr;
-
-    UPROPERTY(Transient)
-    TObjectPtr<UInstancedStaticMeshComponent> ShrubPoints = nullptr;
-
-    UPROPERTY(Transient)
-    TObjectPtr<UInstancedStaticMeshComponent> TreePoints = nullptr;
-
-    UPROPERTY(Transient)
-    TObjectPtr<UInstancedStaticMeshComponent> ConiferTreePoints = nullptr;
-
-    UPROPERTY(Transient)
-    TObjectPtr<UInstancedStaticMeshComponent> ReedsPoints = nullptr;
-
-    UPROPERTY(Transient)
-    TObjectPtr<UInstancedStaticMeshComponent> AlpinePoints = nullptr;
 
     UPROPERTY(Transient)
     TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> CatalogStaticBatchComponents;
@@ -330,9 +248,6 @@ private:
     TArray<TObjectPtr<AActor>> HeroPveWindActors;
 
     UPROPERTY(Transient)
-    TArray<FTransform> HeroSkeletalWindBaseLocalTransforms;
-
-    UPROPERTY(Transient)
     TObjectPtr<AActor> CachedUltraDynamicWeatherActor = nullptr;
 
     UPROPERTY(Transient)
@@ -343,46 +258,20 @@ private:
 
     FVector LastBridgedWindDirection = FVector::ZeroVector;
     float LastBridgedWindIntensity = -1.0f;
-    bool bLoggedHeroMaterialWindBridge = false;
-    bool bLoggedInstancedMaterialWindBridge = false;
-    bool bLoggedSpawnedSkeletalWindPropertyScan = false;
 
-    TMap<uint64, FCubusRuntimeRandomizationSample> RuntimeRandomizationSamplesByPlant;
     TMap<FIntVector, uint32> PublishedChunkVegetationSignatures;
-    FRandomStream RuntimeRandomizationStream;
-    bool bRuntimeRandomizationStreamInitialized = false;
-    int32 RuntimeRandomizationSeedSnapshot = 0;
-    uint32 RuntimeRandomizationSettingsHashSnapshot = 0;
     uint32 PublishedVegetationSettingsHash = 0;
 
-    TMap<int32, TArray<int32>> CatalogSpeciesIndicesByType;
-    TMap<int32, float> CatalogTotalWeightByType;
-
     float TimeUntilRefresh = 0.0f;
-    float HeroWindSwayTime = 0.0f;
+    
+    FCubusVegetationCatalog VegetationCatalog;
+    FCubusVegetationRenderer VegetationRenderer;
+    FCubusVegetationPlacement VegetationPlacement;
 
     void ResolveBlockWorld();
-    void EnsurePointCarriers();
-    void EnsurePlantBatches();
-    void BuildDefaultSpeciesCatalogIfNeeded();
-    void RebuildCatalogLookups();
-    int32 SelectCatalogSpeciesIndex(const FCubusVegetationInstance& Instance) const;
-    int32 ResolveGrowthStageIndex(const FCubusVegetationInstance& Instance, int32 StageCount) const;
+    void RefreshVegetationBatches();
     void UpdateDynamicWindBridge();
-    void ApplyWindParametersToHeroMaterials();
-    void ApplyWindParametersToSpawnedSkinnedMaterials();
-    void ApplyHeroWindVisualSway(float DeltaSeconds);
+
     uint32 CalculateLoadedPlacementHash(int32& OutLoadedChunkCount) const;
     uint32 CalculateVegetationSettingsHash() const;
-    uint32 CalculateRuntimeRandomizationSettingsHash() const;
-
-    UInstancedStaticMeshComponent* CreatePointCarrier(
-        FName ComponentName,
-        FName ComponentTag
-    );
-
-    UHierarchicalInstancedStaticMeshComponent* CreatePlantBatch(FName ComponentName);
-    UInstancedSkinnedMeshComponent* CreateSkeletalPlantBatch(FName ComponentName);
-    USkeletalMeshComponent* CreateHeroSkeletalWindComponent(FName ComponentName);
-    UInstancedStaticMeshComponent* ResolveCarrierForType(int32 TypeId) const;
 };
