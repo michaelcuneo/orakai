@@ -1341,7 +1341,8 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         HeroTreeCandidates,
         HeroComponentLimit,
         HeroSkeletalWindMaxDistance,
-        CatalogTransformsByBatchKey
+        CatalogTransformsByBatchKey,
+        HeroTransformsByBatchKey
     );
 
     for (const TPair<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& Pair
@@ -1355,10 +1356,21 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             continue;
         }
 
-        const TArray<FTransform>* Transforms =
+        const TArray<FTransform>* RegularTransforms =
             CatalogTransformsByBatchKey.Find(Pair.Key);
 
-        if (Transforms == nullptr || Transforms->IsEmpty())
+        const TArray<FTransform>* HeroTransforms =
+            HeroTransformsByBatchKey.Find(Pair.Key);
+
+        const bool bHasRegularTransforms =
+            RegularTransforms != nullptr &&
+            !RegularTransforms->IsEmpty();
+
+        const bool bHasHeroTransforms =
+            HeroTransforms != nullptr &&
+            !HeroTransforms->IsEmpty();
+
+        if (!bHasRegularTransforms && !bHasHeroTransforms)
         {
             continue;
         }

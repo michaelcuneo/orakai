@@ -1,10 +1,11 @@
 #include "CubusCore/Vegetation/CubusVegetationRepresentationSelector.h"
 
-void FCubusVegetationRepresentationSelector::RouteCandidates(
+static void RouteCandidates(
     TArray<FCubusVegetationRepresentationCandidate>& Candidates,
-    const int32 HeroLimit,
-    const float HeroMaxDistance,
-    TMap<int64, TArray<FTransform>>& TransformsByBatchKey
+    int32 HeroLimit,
+    float HeroMaxDistance,
+    TMap<int64, TArray<FTransform>>& RegularTransformsByBatchKey,
+    TMap<int64, TArray<FTransform>>& HeroTransformsByBatchKey
 )
 {
     Candidates.Sort(
@@ -39,7 +40,7 @@ void FCubusVegetationRepresentationSelector::RouteCandidates(
 
         if (bUseHero)
         {
-            TransformsByBatchKey
+            HeroTransformsByBatchKey
                 .FindOrAdd(Candidate.PrimaryBatchKey)
                 .Add(Candidate.LocalTransform);
 
@@ -49,14 +50,14 @@ void FCubusVegetationRepresentationSelector::RouteCandidates(
 
         if (Candidate.bHasStaticFallback)
         {
-            TransformsByBatchKey
+            RegularTransformsByBatchKey
                 .FindOrAdd(Candidate.StaticFallbackBatchKey)
                 .Add(Candidate.LocalTransform);
 
             continue;
         }
 
-        TransformsByBatchKey
+        RegularTransformsByBatchKey
             .FindOrAdd(Candidate.PrimaryBatchKey)
             .Add(Candidate.LocalTransform);
     }

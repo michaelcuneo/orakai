@@ -238,6 +238,8 @@ private:
     UPROPERTY(Transient)
     TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> CatalogStaticBatchComponents;
 
+    TMap<int64, TArray<FTransform>> HeroTransformsByBatchKey;
+
     UPROPERTY(Transient)
     TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>> CatalogSkeletalBatchComponents;
 
