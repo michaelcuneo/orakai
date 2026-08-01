@@ -92,54 +92,6 @@ namespace
 
         return Hash;
     }
-
-    void ApplyFoliageMaterialOverrideToSkinnedComponent(
-        USkinnedMeshComponent* Component,
-        UMaterialInterface* OverrideMaterial
-    )
-    {
-        if (!IsValid(Component) || !IsValid(OverrideMaterial))
-        {
-            return;
-        }
-
-        const int32 MaterialCount = Component->GetNumMaterials();
-
-        if (MaterialCount <= 0)
-        {
-            return;
-        }
-
-        bool bOverrodeAnySlot = false;
-
-        for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
-        {
-            UMaterialInterface* ExistingMaterial =
-                Component->GetMaterial(MaterialIndex);
-
-            const FString ExistingName = IsValid(ExistingMaterial)
-                ? ExistingMaterial->GetName()
-                : FString();
-
-            const bool bLooksLikeFoliageSlot =
-                ExistingName.IsEmpty() ||
-                ExistingName.Contains(TEXT("Foliage"), ESearchCase::IgnoreCase) ||
-                ExistingName.Contains(TEXT("Leaf"), ESearchCase::IgnoreCase) ||
-                ExistingName.Contains(TEXT("Needle"), ESearchCase::IgnoreCase) ||
-                ExistingName.Contains(TEXT("Twig"), ESearchCase::IgnoreCase);
-
-            if (bLooksLikeFoliageSlot)
-            {
-                Component->SetMaterial(MaterialIndex, OverrideMaterial);
-                bOverrodeAnySlot = true;
-            }
-        }
-
-        if (!bOverrodeAnySlot && MaterialCount == 1)
-        {
-            Component->SetMaterial(0, OverrideMaterial);
-        }
-    }
 }
 
 ACubusWorldVegetationActor::ACubusWorldVegetationActor()
@@ -1605,7 +1557,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                     {
                         ++FoliageMaterialOverrideComponentCount;
                     }
-                    ApplyFoliageMaterialOverrideToSkinnedComponent(
+                    VegetationRenderer.ApplyFoliageMaterialOverride(
                         Component,
                         FoliageOverrideMaterial
                     );
@@ -1613,170 +1565,67 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             }
         }
 
-        if (
-            !bEnableHeroSkeletalWindMode ||
-            Cast<UDynamicWindData>(Component->GetTransformProvider()) != nullptr
-        )
-        {
-            TArray<int32> AnimationIndices;
-            AnimationIndices.Init(0, Transforms->Num());
+        const bool bHasNativeDynamicWindProvider =
+            Cast<UDynamicWindData>(
+                Component->GetTransformProvider()
+            ) != nullptr;
 
-            Component->AddInstances(*Transforms, AnimationIndices, false, false);
+        FCubusHeroVegetationRenderSettings HeroRenderSettings;
 
-            if (!bAppendOnly)
-            {
-                Component->OptimizeInstanceData(false);
-            }
+        HeroRenderSettings.bEnabled =
+            bEnableHeroSkeletalWindMode &&
+            !bHasNativeDynamicWindProvider;
 
-            SkeletalBatchTransformCount += Transforms->Num();
-            continue;
-        }
+        HeroRenderSettings.bUsePveActors =
+            bUseHeroPveActorWindMode;
 
-        const USkeletalMesh* SkeletalMesh =
-            Cast<USkeletalMesh>(Component->GetSkinnedAsset());
+        HeroRenderSettings.bUseInstancedSkeletalFallback =
+            bUseInstancedSkeletalFallbackBeyondHeroDistance;
 
-        if (!IsValid(SkeletalMesh))
-        {
-            continue;
-        }
+        HeroRenderSettings.bForceFoliageMaterialOverride =
+            bForceMegaplantFoliageMaterialOverride;
 
-        const float MaxHeroDistance =
-            FMath::Max(0.0f, HeroSkeletalWindMaxDistance);
-        const float MaxHeroDistanceSquared =
-            MaxHeroDistance * MaxHeroDistance;
+        HeroRenderSettings.bCastShadow =
+            bCastWorldPlantShadows;
 
-        TArray<FTransform> FallbackTransforms;
+        HeroRenderSettings.bHasCamera =
+            bHasCamera;
 
-        for (const FTransform& LocalTransform : *Transforms)
-        {
-            bool bUseHeroComponent =
-                HeroComponentLimit > 0 &&
-                ActiveHeroComponentCount < HeroComponentLimit;
+        HeroRenderSettings.bAppendOnly =
+            bAppendOnly;
 
-            if (bUseHeroComponent && bHasCamera)
-            {
-                const FVector WorldLocation =
-                    GetActorTransform().TransformPosition(
-                        LocalTransform.GetLocation()
-                    );
+        HeroRenderSettings.MaxHeroComponents =
+            HeroComponentLimit;
 
-                const float DistanceSquared =
-                    FVector::DistSquared(WorldLocation, CameraLocation);
+        HeroRenderSettings.MaxHeroDistance =
+            HeroSkeletalWindMaxDistance;
 
-                if (DistanceSquared > MaxHeroDistanceSquared)
-                {
-                    bUseHeroComponent = false;
-                }
-            }
+        HeroRenderSettings.CameraLocation =
+            CameraLocation;
 
-            if (bUseHeroComponent)
-            {
-                const int32 HeroComponentIndex = ActiveHeroComponentCount;
+        const FCubusHeroVegetationRenderResult HeroRenderResult =
+            VegetationRenderer.RenderSkeletalBatch(
+                this,
+                World,
+                Root,
+                Component,
+                *Transforms,
+                HeroPveActorClass,
+                FoliageOverrideMaterial,
+                CachedUltraDynamicWeatherActor,
+                HeroRenderSettings,
+                ActiveHeroComponentCount,
+                ActiveHeroPveActorCount,
+                RemainingInstancedSkeletalFallbackBudget,
+                HeroSkeletalWindComponents,
+                HeroPveWindActors
+            );
 
-                if (bUseHeroPveActorWindMode && HeroPveActorClass != nullptr)
-                {
-                    AActor* HeroPveActor =
-                        AcquireHeroPveActor(
-                            HeroComponentIndex,
-                            HeroPveActorClass
-                        );
+        SkeletalBatchTransformCount +=
+            HeroRenderResult.SkeletalInstanceCount;
 
-                    if (IsValid(HeroPveActor))
-                    {
-                        HeroPveActor->SetActorRelativeTransform(
-                            LocalTransform,
-                            false,
-                            nullptr,
-                            ETeleportType::None
-                        );
-                        HeroPveActor->SetActorHiddenInGame(false);
-
-                        FCubusVegetationWindUtilities::AssignLikelyWindProviderActor(
-                            HeroPveActor,
-                            CachedUltraDynamicWeatherActor
-                        );
-
-                        TInlineComponentArray<UActorComponent*> Components(HeroPveActor);
-                        for (UActorComponent* ComponentObject : Components)
-                        {
-                            FCubusVegetationWindUtilities::AssignLikelyWindProviderActor(
-                                ComponentObject,
-                                CachedUltraDynamicWeatherActor
-                            );
-                        }
-
-                        ++ActiveHeroPveActorCount;
-                        ++ActiveHeroComponentCount;
-                        continue;
-                    }
-                }
-
-                USkeletalMeshComponent* HeroComponent =
-                    AcquireHeroComponent(HeroComponentIndex);
-
-                if (IsValid(HeroComponent))
-                {
-                    if (HeroComponent->GetSkeletalMeshAsset() != SkeletalMesh)
-                    {
-                        HeroComponent->SetSkeletalMesh(
-                            const_cast<USkeletalMesh*>(SkeletalMesh)
-                        );
-                    }
-
-                    if (!bForceMegaplantFoliageMaterialOverride)
-                    {
-                        HeroComponent->EmptyOverrideMaterials();
-                    }
-
-                    if (bForceMegaplantFoliageMaterialOverride)
-                    {
-                        ApplyFoliageMaterialOverrideToSkinnedComponent(
-                            HeroComponent,
-                            FoliageOverrideMaterial
-                        );
-                    }
-
-                    HeroComponent->SetRelativeTransform(LocalTransform);
-                    HeroComponent->SetVisibility(true, true);
-                    HeroComponent->SetHiddenInGame(false, true);
-                    ++ActiveHeroComponentCount;
-                    continue;
-                }
-            }
-
-            if (
-                bUseInstancedSkeletalFallbackBeyondHeroDistance &&
-                RemainingInstancedSkeletalFallbackBudget > 0
-            )
-            {
-                FallbackTransforms.Add(LocalTransform);
-                --RemainingInstancedSkeletalFallbackBudget;
-            }
-        }
-
-        if (bUseInstancedSkeletalFallbackBeyondHeroDistance)
-        {
-            if (!FallbackTransforms.IsEmpty())
-            {
-                TArray<int32> AnimationIndices;
-                AnimationIndices.Init(0, FallbackTransforms.Num());
-
-                Component->AddInstances(
-                    FallbackTransforms,
-                    AnimationIndices,
-                    false,
-                    false
-                );
-
-                if (!bAppendOnly)
-                {
-                    Component->OptimizeInstanceData(false);
-                }
-
-                SkeletalBatchTransformCount += FallbackTransforms.Num();
-                InstancedSkeletalFallbackCount += FallbackTransforms.Num();
-            }
-        }
+        InstancedSkeletalFallbackCount +=
+            HeroRenderResult.InstancedFallbackCount;
     }
 
     int32 SignatureLoadedChunkCount = 0;

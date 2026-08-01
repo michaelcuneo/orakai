@@ -13,6 +13,7 @@ class UMaterialInterface;
 class USkeletalMeshComponent;
 class UInstancedSkinnedMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
+class USkinnedMeshComponent;
 
 struct FCubusVegetationSpeciesCatalogEntry;
 
