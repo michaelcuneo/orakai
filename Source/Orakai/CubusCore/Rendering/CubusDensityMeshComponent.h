@@ -30,7 +30,9 @@ class ORAKAI_API UCubusDensityMeshComponent : public UProceduralMeshComponent
     GENERATED_BODY()
 
 public:
-    UCubusDensityMeshComponent();
+    UCubusDensityMeshComponent(
+        const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get()
+    );
 
     virtual void BeginPlay() override;
 
