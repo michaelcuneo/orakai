@@ -20,6 +20,7 @@ public:
         TArray<FCubusVegetationRepresentationCandidate>& Candidates,
         int32 HeroLimit,
         float HeroMaxDistance,
-        TMap<int64, TArray<FTransform>>& TransformsByBatchKey
+        TMap<int64, TArray<FTransform>>& RegularTransformsByBatchKey,
+        TMap<int64, TArray<FTransform>>& HeroTransformsByBatchKey
     );
 };
