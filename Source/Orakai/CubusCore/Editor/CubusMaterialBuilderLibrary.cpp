@@ -7,7 +7,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "Factories/MaterialFactoryNew.h"
-#include "Materials/MaterialExpressionAbs.h"
+#include "MaterialEditingLibrary.h"
 #include "Materials/MaterialExpressionAdd.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionConstant.h"
@@ -40,20 +40,16 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        check(Material != nullptr);
+        UMaterialExpression* Created =
+            UMaterialEditingLibrary::CreateMaterialExpression(
+                Material,
+                TExpression::StaticClass(),
+                X,
+                Y
+            );
 
-        TExpression* Expression =
-            NewObject<TExpression>(Material);
-
-        Expression->MaterialExpressionEditorX = X;
-        Expression->MaterialExpressionEditorY = Y;
-
-        Material
-            ->GetEditorOnlyData()
-            ->ExpressionCollection
-            .Expressions
-            .Add(Expression);
-
+        TExpression* Expression = Cast<TExpression>(Created);
+        check(Expression != nullptr);
         return Expression;
     }
 
@@ -67,25 +63,20 @@ namespace CubusMaterialBuilder
         Input.OutputIndex = OutputIndex;
     }
 
-    UMaterialExpressionConstant* AddConstant(
+    UMaterialExpressionConstant* Constant(
         UMaterial* Material,
         const float Value,
         const int32 X,
         const int32 Y
     )
     {
-        UMaterialExpressionConstant* Expression =
-            AddExpression<UMaterialExpressionConstant>(
-                Material,
-                X,
-                Y
-            );
-
-        Expression->R = Value;
-        return Expression;
+        UMaterialExpressionConstant* Node =
+            AddExpression<UMaterialExpressionConstant>(Material, X, Y);
+        Node->R = Value;
+        return Node;
     }
 
-    UMaterialExpressionScalarParameter* AddScalarParameter(
+    UMaterialExpressionScalarParameter* Scalar(
         UMaterial* Material,
         const FName Name,
         const float Value,
@@ -93,19 +84,14 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionScalarParameter* Expression =
-            AddExpression<UMaterialExpressionScalarParameter>(
-                Material,
-                X,
-                Y
-            );
-
-        Expression->ParameterName = Name;
-        Expression->DefaultValue = Value;
-        return Expression;
+        UMaterialExpressionScalarParameter* Node =
+            AddExpression<UMaterialExpressionScalarParameter>(Material, X, Y);
+        Node->ParameterName = Name;
+        Node->DefaultValue = Value;
+        return Node;
     }
 
-    UMaterialExpressionVectorParameter* AddVectorParameter(
+    UMaterialExpressionVectorParameter* Vector(
         UMaterial* Material,
         const FName Name,
         const FLinearColor& Value,
@@ -113,43 +99,33 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionVectorParameter* Expression =
-            AddExpression<UMaterialExpressionVectorParameter>(
-                Material,
-                X,
-                Y
-            );
-
-        Expression->ParameterName = Name;
-        Expression->DefaultValue = Value;
-        return Expression;
+        UMaterialExpressionVectorParameter* Node =
+            AddExpression<UMaterialExpressionVectorParameter>(Material, X, Y);
+        Node->ParameterName = Name;
+        Node->DefaultValue = Value;
+        return Node;
     }
 
-    UMaterialExpressionTextureSampleParameter2D* AddTextureParameter(
+    UMaterialExpressionTextureSampleParameter2D* Texture(
         UMaterial* Material,
         const FName Name,
         UTexture* DefaultTexture,
         const EMaterialSamplerType SamplerType,
-        UMaterialExpression* Coordinates,
+        UMaterialExpression* UV,
         const int32 X,
         const int32 Y
     )
     {
-        UMaterialExpressionTextureSampleParameter2D* Expression =
-            AddExpression<UMaterialExpressionTextureSampleParameter2D>(
-                Material,
-                X,
-                Y
-            );
-
-        Expression->ParameterName = Name;
-        Expression->Texture = DefaultTexture;
-        Expression->SamplerType = SamplerType;
-        Connect(Expression->Coordinates, Coordinates);
-        return Expression;
+        UMaterialExpressionTextureSampleParameter2D* Node =
+            AddExpression<UMaterialExpressionTextureSampleParameter2D>(Material, X, Y);
+        Node->ParameterName = Name;
+        Node->Texture = DefaultTexture;
+        Node->SamplerType = SamplerType;
+        Connect(Node->Coordinates, UV);
+        return Node;
     }
 
-    UMaterialExpressionMultiply* AddMultiply(
+    UMaterialExpressionMultiply* Multiply(
         UMaterial* Material,
         UMaterialExpression* A,
         UMaterialExpression* B,
@@ -159,19 +135,14 @@ namespace CubusMaterialBuilder
         const int32 BOutput = 0
     )
     {
-        UMaterialExpressionMultiply* Expression =
-            AddExpression<UMaterialExpressionMultiply>(
-                Material,
-                X,
-                Y
-            );
-
-        Connect(Expression->A, A, AOutput);
-        Connect(Expression->B, B, BOutput);
-        return Expression;
+        UMaterialExpressionMultiply* Node =
+            AddExpression<UMaterialExpressionMultiply>(Material, X, Y);
+        Connect(Node->A, A, AOutput);
+        Connect(Node->B, B, BOutput);
+        return Node;
     }
 
-    UMaterialExpressionAdd* AddAdd(
+    UMaterialExpressionAdd* Add(
         UMaterial* Material,
         UMaterialExpression* A,
         UMaterialExpression* B,
@@ -179,94 +150,55 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionAdd* Expression =
-            AddExpression<UMaterialExpressionAdd>(
-                Material,
-                X,
-                Y
-            );
-
-        Connect(Expression->A, A);
-        Connect(Expression->B, B);
-        return Expression;
+        UMaterialExpressionAdd* Node =
+            AddExpression<UMaterialExpressionAdd>(Material, X, Y);
+        Connect(Node->A, A);
+        Connect(Node->B, B);
+        return Node;
     }
 
-    UMaterialExpressionSubtract* AddSubtract(
+    UMaterialExpressionSubtract* Subtract(
         UMaterial* Material,
         UMaterialExpression* A,
         UMaterialExpression* B,
         const int32 X,
-        const int32 Y,
-        const int32 AOutput = 0
+        const int32 Y
     )
     {
-        UMaterialExpressionSubtract* Expression =
-            AddExpression<UMaterialExpressionSubtract>(
-                Material,
-                X,
-                Y
-            );
-
-        Connect(Expression->A, A, AOutput);
-        Connect(Expression->B, B);
-        return Expression;
+        UMaterialExpressionSubtract* Node =
+            AddExpression<UMaterialExpressionSubtract>(Material, X, Y);
+        Connect(Node->A, A);
+        Connect(Node->B, B);
+        return Node;
     }
 
-    UMaterialExpressionSaturate* AddSaturate(
+    UMaterialExpressionOneMinus* OneMinus(
         UMaterial* Material,
-        UMaterialExpression* Source,
+        UMaterialExpression* Input,
         const int32 X,
         const int32 Y
     )
     {
-        UMaterialExpressionSaturate* Expression =
-            AddExpression<UMaterialExpressionSaturate>(
-                Material,
-                X,
-                Y
-            );
-
-        Connect(Expression->Input, Source);
-        return Expression;
+        UMaterialExpressionOneMinus* Node =
+            AddExpression<UMaterialExpressionOneMinus>(Material, X, Y);
+        Connect(Node->Input, Input);
+        return Node;
     }
 
-    UMaterialExpressionOneMinus* AddOneMinus(
+    UMaterialExpressionSaturate* Saturate(
         UMaterial* Material,
-        UMaterialExpression* Source,
+        UMaterialExpression* Input,
         const int32 X,
         const int32 Y
     )
     {
-        UMaterialExpressionOneMinus* Expression =
-            AddExpression<UMaterialExpressionOneMinus>(
-                Material,
-                X,
-                Y
-            );
-
-        Connect(Expression->Input, Source);
-        return Expression;
+        UMaterialExpressionSaturate* Node =
+            AddExpression<UMaterialExpressionSaturate>(Material, X, Y);
+        Connect(Node->Input, Input);
+        return Node;
     }
 
-    UMaterialExpressionAbs* AddAbs(
-        UMaterial* Material,
-        UMaterialExpression* Source,
-        const int32 X,
-        const int32 Y
-    )
-    {
-        UMaterialExpressionAbs* Expression =
-            AddExpression<UMaterialExpressionAbs>(
-                Material,
-                X,
-                Y
-            );
-
-        Connect(Expression->Input, Source);
-        return Expression;
-    }
-
-    UMaterialExpressionLinearInterpolate* AddLerp(
+    UMaterialExpressionLinearInterpolate* Lerp(
         UMaterial* Material,
         UMaterialExpression* A,
         UMaterialExpression* B,
@@ -275,22 +207,17 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionLinearInterpolate* Expression =
-            AddExpression<UMaterialExpressionLinearInterpolate>(
-                Material,
-                X,
-                Y
-            );
-
-        Connect(Expression->A, A);
-        Connect(Expression->B, B);
-        Connect(Expression->Alpha, Alpha);
-        return Expression;
+        UMaterialExpressionLinearInterpolate* Node =
+            AddExpression<UMaterialExpressionLinearInterpolate>(Material, X, Y);
+        Connect(Node->A, A);
+        Connect(Node->B, B);
+        Connect(Node->Alpha, Alpha);
+        return Node;
     }
 
-    UMaterialExpressionComponentMask* AddMask(
+    UMaterialExpressionComponentMask* Mask(
         UMaterial* Material,
-        UMaterialExpression* Source,
+        UMaterialExpression* Input,
         const bool R,
         const bool G,
         const bool B,
@@ -299,139 +226,76 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionComponentMask* Expression =
-            AddExpression<UMaterialExpressionComponentMask>(
-                Material,
-                X,
-                Y
-            );
-
-        Expression->R = R;
-        Expression->G = G;
-        Expression->B = B;
-        Expression->A = A;
-        Connect(Expression->Input, Source);
-        return Expression;
+        UMaterialExpressionComponentMask* Node =
+            AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
+        Node->R = R;
+        Node->G = G;
+        Node->B = B;
+        Node->A = A;
+        Connect(Node->Input, Input);
+        return Node;
     }
 
-    struct FSurfaceExpressions
+    struct FSurface
     {
-        UMaterialExpressionTextureSampleParameter2D* BaseColor = nullptr;
+        UMaterialExpressionTextureSampleParameter2D* Base = nullptr;
         UMaterialExpressionTextureSampleParameter2D* Normal = nullptr;
         UMaterialExpressionTextureSampleParameter2D* ORM = nullptr;
         UMaterialExpressionTextureSampleParameter2D* Height = nullptr;
     };
 
-    FSurfaceExpressions AddSurface(
+    FSurface Surface(
         UMaterial* Material,
         const TCHAR* Prefix,
         UMaterialExpression* UV,
         UTexture* DefaultColor,
         UTexture* DefaultNormal,
-        const int32 X,
-        const int32 Y
+        const int32 X
     )
     {
-        const FString PrefixString(Prefix);
-
-        FSurfaceExpressions Surface;
-
-        Surface.BaseColor = AddTextureParameter(
-            Material,
-            FName(PrefixString + TEXT("BaseColor")),
-            DefaultColor,
-            SAMPLERTYPE_Color,
-            UV,
-            X,
-            Y
-        );
-
-        Surface.Normal = AddTextureParameter(
-            Material,
-            FName(PrefixString + TEXT("Normal")),
-            DefaultNormal,
-            SAMPLERTYPE_Normal,
-            UV,
-            X,
-            Y + 220
-        );
-
-        Surface.ORM = AddTextureParameter(
-            Material,
-            FName(PrefixString + TEXT("ORM")),
-            DefaultColor,
-            SAMPLERTYPE_LinearColor,
-            UV,
-            X,
-            Y + 440
-        );
-
-        Surface.Height = AddTextureParameter(
-            Material,
-            FName(PrefixString + TEXT("Height")),
-            DefaultColor,
-            SAMPLERTYPE_LinearGrayscale,
-            UV,
-            X,
-            Y + 660
-        );
-
-        return Surface;
+        const FString P(Prefix);
+        FSurface Result;
+        Result.Base = Texture(Material, FName(P + TEXT("BaseColor")), DefaultColor, SAMPLERTYPE_Color, UV, X, -900);
+        Result.Normal = Texture(Material, FName(P + TEXT("Normal")), DefaultNormal, SAMPLERTYPE_Normal, UV, X, -650);
+        Result.ORM = Texture(Material, FName(P + TEXT("ORM")), DefaultColor, SAMPLERTYPE_LinearColor, UV, X, -400);
+        Result.Height = Texture(Material, FName(P + TEXT("Height")), DefaultColor, SAMPLERTYPE_LinearGrayscale, UV, X, -150);
+        return Result;
     }
 
     UMaterial* FindOrCreateMaterial()
     {
-        UMaterial* Material =
-            LoadObject<UMaterial>(nullptr, PackagePath);
-
-        if (IsValid(Material))
+        if (UMaterial* Existing = LoadObject<UMaterial>(nullptr, PackagePath))
         {
-            return Material;
+            return Existing;
         }
 
-        UMaterialFactoryNew* Factory =
-            NewObject<UMaterialFactoryNew>();
-
-        UObject* CreatedAsset =
-            FAssetToolsModule::GetModule()
-                .Get()
-                .CreateAsset(
-                    AssetName,
-                    TEXT("/Game/Cubus/Materials"),
-                    UMaterial::StaticClass(),
-                    Factory
-                );
-
-        return Cast<UMaterial>(CreatedAsset);
+        UMaterialFactoryNew* Factory = NewObject<UMaterialFactoryNew>();
+        return Cast<UMaterial>(
+            FAssetToolsModule::GetModule().Get().CreateAsset(
+                AssetName,
+                TEXT("/Game/Cubus/Materials"),
+                UMaterial::StaticClass(),
+                Factory
+            )
+        );
     }
 
-    void SaveMaterial(UMaterial* Material)
+    void Save(UMaterial* Material)
     {
-        check(Material != nullptr);
-
-        Material->PreEditChange(nullptr);
+        UMaterialEditingLibrary::RecompileMaterial(Material);
         Material->PostEditChange();
         Material->MarkPackageDirty();
 
-        FAssetRegistryModule::AssetCreated(Material);
-
         UPackage* Package = Material->GetOutermost();
-        const FString Filename =
-            FPackageName::LongPackageNameToFilename(
-                Package->GetName(),
-                FPackageName::GetAssetPackageExtension()
-            );
-
-        FSavePackageArgs SaveArgs;
-        SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-        SaveArgs.SaveFlags = SAVE_NoError;
-
-        UPackage::SavePackage(
-            Package,
-            Material,
-            *Filename,
-            SaveArgs
+        const FString Filename = FPackageName::LongPackageNameToFilename(
+            Package->GetName(),
+            FPackageName::GetAssetPackageExtension()
         );
+
+        FSavePackageArgs Args;
+        Args.TopLevelFlags = RF_Public | RF_Standalone;
+        Args.SaveFlags = SAVE_NoError;
+        UPackage::SavePackage(Package, Material, *Filename, Args);
     }
 }
 
@@ -443,531 +307,115 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial()
     using namespace CubusMaterialBuilder;
 
     UMaterial* Material = FindOrCreateMaterial();
-
     if (!IsValid(Material))
     {
-        UE_LOG(
-            LogTemp,
-            Error,
-            TEXT("Unable to create M_CubusBlockPBR.")
-        );
         return nullptr;
     }
 
-    UMaterialEditorOnlyData* EditorData =
-        Material->GetEditorOnlyData();
-
-    EditorData->ExpressionCollection.Empty();
+    Material->Modify();
+    Material->PreEditChange(nullptr);
+    UMaterialEditingLibrary::DeleteAllMaterialExpressions(Material);
 
     Material->BlendMode = BLEND_Opaque;
     Material->SetShadingModel(MSM_DefaultLit);
     Material->TwoSided = false;
 
-    UTexture* DefaultColor =
-        LoadObject<UTexture>(
-            nullptr,
-            TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture")
-        );
-
-    UTexture* DefaultNormal =
-        LoadObject<UTexture>(
-            nullptr,
-            TEXT("/Engine/EngineResources/DefaultNormal.DefaultNormal")
-        );
+    UTexture* DefaultColor = LoadObject<UTexture>(
+        nullptr,
+        TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture")
+    );
+    UTexture* DefaultNormal = LoadObject<UTexture>(
+        nullptr,
+        TEXT("/Engine/EngineResources/DefaultNormal.DefaultNormal")
+    );
 
     if (!IsValid(DefaultColor) || !IsValid(DefaultNormal))
     {
-        UE_LOG(
-            LogTemp,
-            Error,
-            TEXT("Cubus material builder could not load engine default textures.")
-        );
         return nullptr;
     }
 
     UMaterialExpressionTextureCoordinate* TexCoord =
-        AddExpression<UMaterialExpressionTextureCoordinate>(
-            Material,
-            -2800,
-            -250
-        );
-
+        AddExpression<UMaterialExpressionTextureCoordinate>(Material, -2600, -700);
     UMaterialExpressionScalarParameter* TextureScale =
-        AddScalarParameter(
-            Material,
-            TEXT("TextureScale"),
-            1.0f,
-            -2800,
-            -50
-        );
-
+        Scalar(Material, TEXT("TextureScale"), 1.0f, -2600, -500);
     UMaterialExpressionMultiply* UV =
-        AddMultiply(
-            Material,
-            TexCoord,
-            TextureScale,
-            -2550,
-            -230
-        );
+        Multiply(Material, TexCoord, TextureScale, -2350, -650);
 
     UMaterialExpressionVertexColor* VertexColor =
-        AddExpression<UMaterialExpressionVertexColor>(
-            Material,
-            -2800,
-            500
-        );
-
+        AddExpression<UMaterialExpressionVertexColor>(Material, -2600, 300);
     UMaterialExpressionComponentMask* Selector =
-        AddMask(
-            Material,
-            VertexColor,
-            false,
-            false,
-            false,
-            true,
-            -2550,
-            500
-        );
+        Mask(Material, VertexColor, false, false, false, true, -2350, 300);
 
-    UMaterialExpressionConstant* Four =
-        AddConstant(Material, 4.0f, -2320, 760);
+    UMaterialExpressionConstant* Two = Constant(Material, 2.0f, -2350, 500);
+    UMaterialExpressionConstant* Half = Constant(Material, 0.5f, -2350, 650);
 
-    UMaterialExpressionConstant* Half =
-        AddConstant(Material, 0.5f, -2320, 900);
+    UMaterialExpressionSaturate* BottomMask = Saturate(
+        Material,
+        Multiply(Material, Subtract(Material, Selector, Half, -2100, 650), Two, -1850, 650),
+        -1600,
+        650
+    );
 
-    UMaterialExpressionConstant* ThreeQuarters =
-        AddConstant(Material, 0.75f, -2320, 1040);
+    UMaterialExpressionSaturate* TopMask = Saturate(
+        Material,
+        Multiply(Material, Selector, Two, -1850, 500),
+        -1600,
+        500
+    );
 
-    UMaterialExpressionSaturate* SideMask =
-        AddSaturate(
-            Material,
-            AddOneMinus(
-                Material,
-                AddMultiply(
-                    Material,
-                    Selector,
-                    Four,
-                    -2080,
-                    760
-                ),
-                -1840,
-                760
-            ),
-            -1600,
-            760
-        );
+    UMaterialExpressionSaturate* SideMask = Saturate(
+        Material,
+        OneMinus(Material, Add(Material, TopMask, BottomMask, -1350, 575), -1100, 575),
+        -850,
+        575
+    );
 
-    UMaterialExpressionSaturate* TopMask =
-        AddSaturate(
-            Material,
-            AddOneMinus(
-                Material,
-                AddMultiply(
-                    Material,
-                    AddAbs(
-                        Material,
-                        AddSubtract(
-                            Material,
-                            Selector,
-                            Half,
-                            -2080,
-                            900
-                        ),
-                        -1840,
-                        900
-                    ),
-                    Four,
-                    -1600,
-                    900
-                ),
-                -1360,
-                900
-            ),
-            -1120,
-            900
-        );
+    const FSurface Side = Surface(Material, TEXT("Side"), UV, DefaultColor, DefaultNormal, -1900);
+    const FSurface Top = Surface(Material, TEXT("Top"), UV, DefaultColor, DefaultNormal, -1450);
+    const FSurface Bottom = Surface(Material, TEXT("Bottom"), UV, DefaultColor, DefaultNormal, -1000);
 
-    UMaterialExpressionSaturate* BottomMask =
-        AddSaturate(
-            Material,
-            AddMultiply(
-                Material,
-                AddSubtract(
-                    Material,
-                    Selector,
-                    ThreeQuarters,
-                    -2080,
-                    1040
-                ),
-                Four,
-                -1840,
-                1040
-            ),
-            -1600,
-            1040
-        );
+    UMaterialExpressionLinearInterpolate* TopBottomBase =
+        Lerp(Material, Top.Base, Bottom.Base, BottomMask, -500, -800);
+    UMaterialExpressionLinearInterpolate* FinalBase =
+        Lerp(Material, Side.Base, TopBottomBase, Add(Material, TopMask, BottomMask, -500, -600), -200, -800);
 
-    const FSurfaceExpressions Side =
-        AddSurface(
-            Material,
-            TEXT("Side"),
-            UV,
-            DefaultColor,
-            DefaultNormal,
-            -1900,
-            -1050
-        );
+    UMaterialExpressionLinearInterpolate* TopBottomNormal =
+        Lerp(Material, Top.Normal, Bottom.Normal, BottomMask, -500, -500);
+    UMaterialExpressionLinearInterpolate* FinalNormal =
+        Lerp(Material, Side.Normal, TopBottomNormal, Add(Material, TopMask, BottomMask, -500, -300), -200, -500);
 
-    const FSurfaceExpressions Top =
-        AddSurface(
-            Material,
-            TEXT("Top"),
-            UV,
-            DefaultColor,
-            DefaultNormal,
-            -1500,
-            -1050
-        );
-
-    const FSurfaceExpressions Bottom =
-        AddSurface(
-            Material,
-            TEXT("Bottom"),
-            UV,
-            DefaultColor,
-            DefaultNormal,
-            -1100,
-            -1050
-        );
-
-    UMaterialExpressionComponentMask* UVY =
-        AddMask(
-            Material,
-            UV,
-            false,
-            true,
-            false,
-            false,
-            -1900,
-            1280
-        );
-
-    UMaterialExpressionScalarParameter* BlendStart =
-        AddScalarParameter(
-            Material,
-            TEXT("SideTopBlendStart"),
-            0.7f,
-            -1900,
-            1430
-        );
-
-    UMaterialExpressionScalarParameter* BlendSharpness =
-        AddScalarParameter(
-            Material,
-            TEXT("SideTopBlendSharpness"),
-            4.0f,
-            -1900,
-            1560
-        );
-
-    UMaterialExpressionSaturate* SideBand =
-        AddSaturate(
-            Material,
-            AddMultiply(
-                Material,
-                AddSubtract(
-                    Material,
-                    UVY,
-                    BlendStart,
-                    -1640,
-                    1320
-                ),
-                BlendSharpness,
-                -1400,
-                1320
-            ),
-            -1160,
-            1320
-        );
-
-    UMaterialExpressionScalarParameter* HeightStrength =
-        AddScalarParameter(
-            Material,
-            TEXT("HeightStrength"),
-            0.25f,
-            -1160,
-            1510
-        );
-
-    UMaterialExpressionMultiply* SideBandMasked =
-        AddMultiply(
-            Material,
-            SideBand,
-            SideMask,
-            -920,
-            1320
-        );
-
-    UMaterialExpressionMultiply* HeightBias =
-        AddMultiply(
-            Material,
-            AddSubtract(
-                Material,
-                Top.Height,
-                Side.Height,
-                -920,
-                1510,
-                1
-            ),
-            HeightStrength,
-            -680,
-            1510
-        );
-
-    UMaterialExpressionMultiply* FinalSideAlpha =
-        AddMultiply(
-            Material,
-            AddSaturate(
-                Material,
-                AddAdd(
-                    Material,
-                    SideBandMasked,
-                    HeightBias,
-                    -440,
-                    1370
-                ),
-                -200,
-                1370
-            ),
-            SideMask,
-            40,
-            1370
-        );
-
-    UMaterialExpressionLinearInterpolate* SideBase =
-        AddLerp(
-            Material,
-            Side.BaseColor,
-            Top.BaseColor,
-            FinalSideAlpha,
-            -650,
-            -770
-        );
-
-    UMaterialExpressionLinearInterpolate* SideNormal =
-        AddLerp(
-            Material,
-            Side.Normal,
-            Top.Normal,
-            FinalSideAlpha,
-            -650,
-            -470
-        );
-
-    UMaterialExpressionLinearInterpolate* SideOrm =
-        AddLerp(
-            Material,
-            Side.ORM,
-            Top.ORM,
-            FinalSideAlpha,
-            -650,
-            -170
-        );
-
-    UMaterialExpressionAdd* FinalBase =
-        AddAdd(
-            Material,
-            AddAdd(
-                Material,
-                AddMultiply(
-                    Material,
-                    Top.BaseColor,
-                    TopMask,
-                    -400,
-                    -970
-                ),
-                AddMultiply(
-                    Material,
-                    Bottom.BaseColor,
-                    BottomMask,
-                    -400,
-                    -830
-                ),
-                -140,
-                -900
-            ),
-            AddMultiply(
-                Material,
-                SideBase,
-                SideMask,
-                -400,
-                -690
-            ),
-            100,
-            -820
-        );
+    UMaterialExpressionLinearInterpolate* TopBottomORM =
+        Lerp(Material, Top.ORM, Bottom.ORM, BottomMask, -500, -200);
+    UMaterialExpressionLinearInterpolate* FinalORM =
+        Lerp(Material, Side.ORM, TopBottomORM, Add(Material, TopMask, BottomMask, -500, 0), -200, -200);
 
     UMaterialExpressionVectorParameter* Tint =
-        AddVectorParameter(
-            Material,
-            TEXT("Tint"),
-            FLinearColor::White,
-            100,
-            -650
-        );
-
+        Vector(Material, TEXT("Tint"), FLinearColor::White, -200, -1000);
     UMaterialExpressionMultiply* TintedBase =
-        AddMultiply(
-            Material,
-            FinalBase,
-            Tint,
-            350,
-            -820
-        );
-
-    UMaterialExpressionAdd* FinalNormal =
-        AddAdd(
-            Material,
-            AddAdd(
-                Material,
-                AddMultiply(
-                    Material,
-                    Top.Normal,
-                    TopMask,
-                    -400,
-                    -450
-                ),
-                AddMultiply(
-                    Material,
-                    Bottom.Normal,
-                    BottomMask,
-                    -400,
-                    -310
-                ),
-                -140,
-                -380
-            ),
-            AddMultiply(
-                Material,
-                SideNormal,
-                SideMask,
-                -400,
-                -170
-            ),
-            100,
-            -300
-        );
-
-    UMaterialExpressionAdd* FinalOrm =
-        AddAdd(
-            Material,
-            AddAdd(
-                Material,
-                AddMultiply(
-                    Material,
-                    Top.ORM,
-                    TopMask,
-                    -400,
-                    50
-                ),
-                AddMultiply(
-                    Material,
-                    Bottom.ORM,
-                    BottomMask,
-                    -400,
-                    190
-                ),
-                -140,
-                120
-            ),
-            AddMultiply(
-                Material,
-                SideOrm,
-                SideMask,
-                -400,
-                330
-            ),
-            100,
-            220
-        );
-
-    UMaterialExpressionComponentMask* AmbientOcclusion =
-        AddMask(
-            Material,
-            FinalOrm,
-            true,
-            false,
-            false,
-            false,
-            350,
-            40
-        );
-
-    UMaterialExpressionComponentMask* Roughness =
-        AddMask(
-            Material,
-            FinalOrm,
-            false,
-            true,
-            false,
-            false,
-            350,
-            170
-        );
-
-    UMaterialExpressionComponentMask* Metallic =
-        AddMask(
-            Material,
-            FinalOrm,
-            false,
-            false,
-            true,
-            false,
-            350,
-            300
-        );
+        Multiply(Material, FinalBase, Tint, 100, -800);
 
     UMaterialExpressionVectorParameter* EmissiveColor =
-        AddVectorParameter(
-            Material,
-            TEXT("EmissiveColor"),
-            FLinearColor::Black,
-            100,
-            500
-        );
-
+        Vector(Material, TEXT("EmissiveColor"), FLinearColor::Black, -200, 250);
     UMaterialExpressionScalarParameter* EmissiveStrength =
-        AddScalarParameter(
-            Material,
-            TEXT("EmissiveStrength"),
-            0.0f,
-            100,
-            630
-        );
-
+        Scalar(Material, TEXT("EmissiveStrength"), 0.0f, -200, 400);
     UMaterialExpressionMultiply* Emissive =
-        AddMultiply(
-            Material,
-            EmissiveColor,
-            EmissiveStrength,
-            350,
-            540
-        );
+        Multiply(Material, EmissiveColor, EmissiveStrength, 100, 300);
 
-    Connect(EditorData->BaseColor, TintedBase);
-    Connect(EditorData->Normal, FinalNormal);
-    Connect(EditorData->AmbientOcclusion, AmbientOcclusion);
-    Connect(EditorData->Roughness, Roughness);
-    Connect(EditorData->Metallic, Metallic);
-    Connect(EditorData->EmissiveColor, Emissive);
+    UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
+    Connect(Data->BaseColor, TintedBase);
+    Connect(Data->Normal, FinalNormal);
+    Connect(Data->AmbientOcclusion, FinalORM, 1);
+    Connect(Data->Roughness, FinalORM, 2);
+    Connect(Data->Metallic, FinalORM, 3);
+    Connect(Data->EmissiveColor, Emissive);
 
-    SaveMaterial(Material);
+    Save(Material);
 
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Built and saved %s using direct C++ expression inputs."),
-        PackagePath
+        TEXT("Built Cubus PBR material with %d registered expressions."),
+        Material->GetEditorOnlyData()->ExpressionCollection.Expressions.Num()
     );
 
     return Material;
