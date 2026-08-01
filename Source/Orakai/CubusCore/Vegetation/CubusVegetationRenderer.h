@@ -85,6 +85,11 @@ public:
         const TArray<TObjectPtr<USkeletalMeshComponent>>& HeroComponents
     ) const;
 
+    void ApplyFoliageMaterialOverride(
+        USkinnedMeshComponent* Component,
+        UMaterialInterface* OverrideMaterial
+    ) const;
+
     void ClearBatches(
         const TMap<
             int64,

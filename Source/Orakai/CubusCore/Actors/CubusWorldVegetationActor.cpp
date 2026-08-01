@@ -2,6 +2,7 @@
 #include "CubusCore/Vegetation/CubusVegetationAssetResolver.h"
 #include "CubusCore/Vegetation/CubusVegetationWindUtilities.h"
 #include "CubusCore/Vegetation/CubusVegetationChunkFilter.h"
+#include "CubusCore/Vegetation/CubusVegetationRepresentationSelector.h"
 
 #include "CubusCore/Actors/CubusBlockWorldActor.h"
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
@@ -890,17 +891,6 @@ void ACubusWorldVegetationActor::UpdateDynamicWindBridge()
 
 void ACubusWorldVegetationActor::RebuildWorldVegetation()
 {
-    struct FHeroTreeCandidate
-    {
-        int64 PrimaryBatchKey = 0;
-        int64 StaticFallbackBatchKey = 0;
-
-        FTransform LocalTransform;
-        float DistanceSquared = MAX_flt;
-
-        bool bHasStaticFallback = false;
-    };
-
     ResolveBlockWorld();
 
     const FCubusVegetationRandomizationSettings
@@ -1029,7 +1019,8 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         ClearWorldVegetation();
     }
 
-    TArray<FHeroTreeCandidate> HeroTreeCandidates;
+    TArray<FCubusVegetationRepresentationCandidate>
+        HeroTreeCandidates;
     TMap<int64, TArray<FTransform>> CatalogTransformsByBatchKey;
     int32 StaticBatchTransformCount = 0;
     int32 SkeletalBatchTransformCount = 0;
@@ -1293,7 +1284,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                         GrowthStage
                     );
 
-                FHeroTreeCandidate Candidate;
+                FCubusVegetationRepresentationCandidate Candidate;
                 Candidate.PrimaryBatchKey = PrimaryBatchKey;
                 Candidate.StaticFallbackBatchKey =
                     StaticFallbackBatchKey;
@@ -1336,17 +1327,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         }
     }
 
-    HeroTreeCandidates.Sort(
-        [](
-            const FHeroTreeCandidate& A,
-            const FHeroTreeCandidate& B
-        )
-        {
-            return A.DistanceSquared <
-                B.DistanceSquared;
-        }
-    );
-
     const int32 HeroComponentLimit =
         bEnableHeroSkeletalWindMode &&
         MaxHeroSkeletalWindComponents > 0
@@ -1357,62 +1337,12 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             )
             : 0;
 
-    const float HeroDistance =
-        FMath::Max(
-            0.0f,
-            HeroSkeletalWindMaxDistance
-        );
-
-    const float HeroDistanceSquared =
-        HeroDistance * HeroDistance;
-
-    int32 SelectedHeroCount = 0;
-
-    for (
-        const FHeroTreeCandidate& Candidate :
-        HeroTreeCandidates
-    )
-    {
-        const bool bCanUseHero =
-            SelectedHeroCount < HeroComponentLimit &&
-            Candidate.DistanceSquared <=
-                HeroDistanceSquared;
-
-        if (bCanUseHero)
-        {
-            CatalogTransformsByBatchKey
-                .FindOrAdd(
-                    Candidate.PrimaryBatchKey
-                )
-                .Add(
-                    Candidate.LocalTransform
-                );
-
-            ++SelectedHeroCount;
-            continue;
-        }
-
-        if (Candidate.bHasStaticFallback)
-        {
-            CatalogTransformsByBatchKey
-                .FindOrAdd(
-                    Candidate.StaticFallbackBatchKey
-                )
-                .Add(
-                    Candidate.LocalTransform
-                );
-
-            continue;
-        }
-
+    FCubusVegetationRepresentationSelector::RouteCandidates(
+        HeroTreeCandidates,
+        HeroComponentLimit,
+        HeroSkeletalWindMaxDistance,
         CatalogTransformsByBatchKey
-            .FindOrAdd(
-                Candidate.PrimaryBatchKey
-            )
-            .Add(
-                Candidate.LocalTransform
-            );
-    }
+    );
 
     for (const TPair<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& Pair
          : CatalogStaticBatchComponents)

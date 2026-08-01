@@ -263,11 +263,6 @@ void FCubusVegetationRenderer::ApplyShadowSettings(
     }
 }
 
-void ApplyFoliageMaterialOverride(
-    USkinnedMeshComponent* Component,
-    UMaterialInterface* OverrideMaterial
-) const;
-
 void FCubusVegetationRenderer::ClearBatches(
     const TMap<
         int64,
