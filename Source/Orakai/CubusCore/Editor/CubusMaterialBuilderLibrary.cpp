@@ -9,7 +9,6 @@
 #include "Factories/MaterialFactoryNew.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialExpressionAdd.h"
-#include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionMultiply.h"
@@ -190,26 +189,6 @@ namespace CubusMaterialBuilder
         return Node;
     }
 
-    UMaterialExpressionComponentMask* Mask(
-        UMaterial* Material,
-        UMaterialExpression* Input,
-        const bool R,
-        const bool G,
-        const bool B,
-        const bool A,
-        const int32 X,
-        const int32 Y
-    )
-    {
-        UMaterialExpressionComponentMask* Node = AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
-        Node->R = R;
-        Node->G = G;
-        Node->B = B;
-        Node->A = A;
-        Connect(Node->Input, Input);
-        return Node;
-    }
-
     struct FSurface
     {
         UMaterialExpressionTextureSampleParameter2D* Base = nullptr;
@@ -231,8 +210,8 @@ namespace CubusMaterialBuilder
         FSurface Result;
         Result.Base = Texture(Material, FName(P + TEXT("BaseColor")), DefaultColor, SAMPLERTYPE_Color, UV, X, -900);
         Result.Normal = Texture(Material, FName(P + TEXT("Normal")), DefaultNormal, SAMPLERTYPE_Normal, UV, X, -650);
-        Result.ORM = Texture(Material, FName(P + TEXT("ORM")), DefaultColor, SAMPLERTYPE_LinearColor, UV, X, -400);
-        Result.Height = Texture(Material, FName(P + TEXT("Height")), DefaultColor, SAMPLERTYPE_LinearGrayscale, UV, X, -150);
+        Result.ORM = Texture(Material, FName(P + TEXT("ORM")), DefaultColor, SAMPLERTYPE_Color, UV, X, -400);
+        Result.Height = Texture(Material, FName(P + TEXT("Height")), DefaultColor, SAMPLERTYPE_Color, UV, X, -150);
         return Result;
     }
 
@@ -330,30 +309,31 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial()
 
     UMaterialExpressionVertexColor* VertexColor =
         AddExpression<UMaterialExpressionVertexColor>(Material, -2600, 300);
-    UMaterialExpressionComponentMask* Selector =
-        Mask(Material, VertexColor, false, false, false, true, -2350, 300);
+    UMaterialExpressionConstant* One = Constant(Material, 1.0f, -2350, 300);
+    UMaterialExpressionMultiply* Selector =
+        Multiply(Material, VertexColor, One, -2100, 300, 4, 0);
 
     UMaterialExpressionConstant* Two = Constant(Material, 2.0f, -2350, 500);
     UMaterialExpressionConstant* Half = Constant(Material, 0.5f, -2350, 650);
 
     UMaterialExpressionSaturate* BottomMask = Saturate(
         Material,
-        Multiply(Material, Subtract(Material, Selector, Half, -2100, 650), Two, -1850, 650),
-        -1600,
+        Multiply(Material, Subtract(Material, Selector, Half, -1850, 650), Two, -1600, 650),
+        -1350,
         650
     );
 
     UMaterialExpressionSaturate* TopMask = Saturate(
         Material,
-        Multiply(Material, Selector, Two, -1850, 500),
-        -1600,
+        Multiply(Material, Selector, Two, -1600, 500),
+        -1350,
         500
     );
 
     UMaterialExpressionSaturate* SideMask = Saturate(
         Material,
-        OneMinus(Material, Add(Material, TopMask, BottomMask, -1350, 575), -1100, 575),
-        -850,
+        OneMinus(Material, Add(Material, TopMask, BottomMask, -1100, 575), -850, 575),
+        -600,
         575
     );
 
