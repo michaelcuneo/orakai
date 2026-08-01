@@ -35,7 +35,10 @@ public class Orakai : ModuleRules
 
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.Add("UnrealEd");
+			PrivateDependencyModuleNames.AddRange(new string[] {
+				"UnrealEd",
+				"AssetTools"
+			});
 		}
 
 		// Uncomment if you are using Slate UI
