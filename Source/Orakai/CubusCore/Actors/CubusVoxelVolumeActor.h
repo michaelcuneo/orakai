@@ -4,9 +4,11 @@
 #include "GameFramework/Actor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
+#include "CubusCore/Rendering/CubusVoxelRenderMode.h"
 #include "CubusVoxelVolumeActor.generated.h"
 
 class ACubusBlockWorldActor;
+class UCubusDensityMeshComponent;
 class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
 class UProceduralMeshComponent;
@@ -31,6 +33,9 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Rendering")
     void RebuildVolume();
 
+    UFUNCTION(BlueprintPure, Category = "Cubus|Rendering")
+    ECubusVoxelRenderMode GetEffectiveRenderMode() const;
+
     const FIntVector& GetChunkCoordinate() const
     {
         return ChunkCoordinate;
@@ -49,6 +54,11 @@ public:
     FCubusBlockChunkData* GetMutableChunkData()
     {
         return ChunkData.Get();
+    }
+
+    UCubusDensityMeshComponent* GetDensityMeshComponent() const
+    {
+        return DensityMesh.Get();
     }
 
     bool TryLoadCachedChunk();
@@ -132,6 +142,9 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<UProceduralMeshComponent> ProceduralMesh;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
+    TObjectPtr<UCubusDensityMeshComponent> DensityMesh;
+
     UPROPERTY(
         VisibleInstanceOnly,
         BlueprintReadOnly,
@@ -153,6 +166,15 @@ protected:
         meta = (Units = "cm")
     )
     float VoxelSize = 100.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Rendering",
+        meta = (ToolTip = "Used only when this chunk has no owning Cubus Block World.")
+    )
+    ECubusVoxelRenderMode StandaloneRenderMode =
+        ECubusVoxelRenderMode::Blocks;
 
     bool bUseHeightTerrain = true;
 
@@ -295,6 +317,7 @@ private:
 
     void EnsureChunkData();
     void SynchronizeChunkState();
+    void RebuildBlockMesh(bool bGenerateBlockCollision);
 
     const FCubusBlockChunkData* FindNeighbourChunkData(
         const FIntVector& CoordinateOffset
