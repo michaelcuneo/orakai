@@ -797,32 +797,7 @@ FCubusVegetationRenderer::RenderSkeletalBatch(
 
     for (const FTransform& LocalTransform : Transforms)
     {
-        bool bUseHero =
-            HeroLimit > 0 &&
-            InOutActiveHeroComponentCount <
-                HeroLimit;
-
-        if (
-            bUseHero &&
-            Settings.bHasCamera
-        )
-        {
-            const FVector WorldLocation =
-                Owner->GetActorTransform()
-                    .TransformPosition(
-                        LocalTransform.GetLocation()
-                    );
-
-            if (
-                FVector::DistSquared(
-                    WorldLocation,
-                    Settings.CameraLocation
-                ) > MaxHeroDistanceSquared
-            )
-            {
-                bUseHero = false;
-            }
-        }
+        const bool bUseHero = true;
 
         if (bUseHero)
         {
