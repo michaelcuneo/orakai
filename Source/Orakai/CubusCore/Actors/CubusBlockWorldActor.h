@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
+#include "CubusCore/Rendering/CubusVoxelRenderMode.h"
 
 #include "CubusBlockWorldActor.generated.h"
 
@@ -31,6 +32,12 @@ public:
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
+
+#if WITH_EDITOR
+    virtual void PostEditChangeProperty(
+        FPropertyChangedEvent& PropertyChangedEvent
+    ) override;
+#endif
 
     void RegisterChunk(ACubusVoxelVolumeActor* ChunkActor);
     void UnregisterChunk(ACubusVoxelVolumeActor* ChunkActor);
@@ -102,6 +109,18 @@ public:
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
     void RebuildAllChunks();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Rendering")
+    void SetVoxelRenderMode(
+        ECubusVoxelRenderMode InRenderMode,
+        bool bRebuildChunks = true
+    );
+
+    UFUNCTION(BlueprintPure, Category = "Cubus|Rendering")
+    ECubusVoxelRenderMode GetVoxelRenderMode() const
+    {
+        return VoxelRenderMode;
+    }
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Terrain")
     void RegenerateTerrain();
@@ -260,6 +279,9 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "0.001", ClampMax = "1.0"))
     float TerrainMountainBlend = 0.20f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
+    ECubusVoxelRenderMode VoxelRenderMode = ECubusVoxelRenderMode::Blocks;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
     TObjectPtr<UCubusMaterialRegistry> MaterialRegistry = nullptr;
