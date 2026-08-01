@@ -14,22 +14,41 @@ the scalar-field source separate from the mesher.
 - `FCubusDensityMesher` extracts per-material mesh sections with interpolated
   vertices, gradient normals, world-stable planar UVs, tangents, and Cubus face
   selectors in vertex alpha.
-- `UCubusDensityMeshComponent` is a Blueprint-spawnable procedural mesh
-  component that renders density geometry for an `ACubusVoxelVolumeActor`.
+- `UCubusDensityMeshComponent` is the procedural mesh component used by every
+  `ACubusVoxelVolumeActor` for density geometry.
 
-## Using it on a chunk
+## Selecting the world render mode
 
-1. Create a Blueprint subclass of `ACubusVoxelVolumeActor`.
-2. Add a `Cubus Density Mesh Component` and attach it to the chunk root at a
-   zero relative transform.
-3. Assign the same `UCubusMaterialRegistry` used by the block world.
-4. Set the block world's `ChunkActorClass` to the Blueprint subclass.
-5. Leave the original block mesh visible to compare both renderers, or hide the
-   root block mesh when testing density-only rendering.
+Select the `ACubusBlockWorldActor` in the level and use:
 
-At runtime the density component defers its automatic build by one tick. This
-allows the block world to finish configuring and generating the chunk after
-`SpawnActor` returns.
+`Cubus > Rendering > Voxel Render Mode`
+
+The available modes are:
+
+- `Blocks` builds only the existing hard-edged block mesh.
+- `Density` builds only the Marching Cubes density mesh.
+- `Hybrid (Blocks + Density)` builds both representations for comparison and
+  future mixed-terrain work.
+
+Changing the dropdown in the editor rebuilds the registered chunks. New
+streamed chunks read the setting from their owning world whenever they build,
+so no special chunk Blueprint or manually added density component is required.
+
+At runtime the same switch is available through:
+
+```cpp
+BlockWorld->SetVoxelRenderMode(
+    ECubusVoxelRenderMode::Density,
+    true
+);
+```
+
+The second argument controls whether currently registered chunks rebuild
+immediately.
+
+In `Hybrid` mode the block mesh currently owns collision to avoid submitting
+the same transitional surface twice. In `Density` mode collision is generated
+from the density mesh.
 
 ## Coordinate convention
 
@@ -42,7 +61,8 @@ A density chunk owns Marching Cubes cells with lower sample coordinates
 need a one-sample halo, producing the buffered local range `-1..33`.
 
 All lookups use global voxel coordinates. Adjacent chunks therefore calculate
-identical positions on their shared boundary.
+identical positions on their shared boundary when the required source chunks
+are loaded.
 
 ## Current scope
 
