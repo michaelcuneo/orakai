@@ -793,24 +793,6 @@ FCubusVegetationRenderer::RenderSkeletalBatch(
         return Result;
     }
 
-    const int32 HeroLimit =
-        Settings.MaxHeroComponents > 0
-            ? FMath::Clamp(
-                Settings.MaxHeroComponents,
-                0,
-                64
-            )
-            : 0;
-
-    const float MaxHeroDistance =
-        FMath::Max(
-            0.0f,
-            Settings.MaxHeroDistance
-        );
-
-    const float MaxHeroDistanceSquared =
-        MaxHeroDistance * MaxHeroDistance;
-
     TArray<FTransform> FallbackTransforms;
 
     for (const FTransform& LocalTransform : Transforms)
