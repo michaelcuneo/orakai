@@ -7,6 +7,7 @@
 #include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "CubusCore/Generation/CubusBlockDensityField.h"
+#include "CubusCore/Generation/CubusTerrainDensityField.h"
 #include "CubusCore/Meshing/CubusDensityMesher.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
 
@@ -70,28 +71,43 @@ bool UCubusDensityMeshComponent::RebuildDensityMesh()
         return false;
     }
 
-    FCubusBlockVoxelSampler VoxelSampler =
-        [this, OwnerChunk](
-            const FIntVector& GlobalSampleCoordinate
-        )
-        {
-            return SampleVoxelAtWorldCoordinate(
-                *OwnerChunk,
-                GlobalSampleCoordinate
-            );
-        };
-
-    const FCubusBlockDensityField DensityField(
-        MoveTemp(VoxelSampler),
-        bTreatWaterAsEmpty,
-        DensityMagnitude
-    );
-
     FCubusDensitySamplingBuffer DensityBuffer;
-    DensityBuffer.Build(
-        OwnerChunk->GetChunkCoordinate(),
-        DensityField
-    );
+
+    if (bUseNativeTerrainDensity)
+    {
+        const FCubusTerrainDensityField DensityField(
+            TerrainDensitySettings
+        );
+
+        DensityBuffer.Build(
+            OwnerChunk->GetChunkCoordinate(),
+            DensityField
+        );
+    }
+    else
+    {
+        FCubusBlockVoxelSampler VoxelSampler =
+            [this, OwnerChunk](
+                const FIntVector& GlobalSampleCoordinate
+            )
+            {
+                return SampleVoxelAtWorldCoordinate(
+                    *OwnerChunk,
+                    GlobalSampleCoordinate
+                );
+            };
+
+        const FCubusBlockDensityField DensityField(
+            MoveTemp(VoxelSampler),
+            bTreatWaterAsEmpty,
+            DensityMagnitude
+        );
+
+        DensityBuffer.Build(
+            OwnerChunk->GetChunkCoordinate(),
+            DensityField
+        );
+    }
 
     TMap<int32, FCubusMeshData> MaterialMeshes;
     int32 MesherTriangleCount = 0;
