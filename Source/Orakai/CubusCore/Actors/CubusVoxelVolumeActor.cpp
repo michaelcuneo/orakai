@@ -8,6 +8,7 @@
 #include "CubusCore/Meshing/CubusBlockMesher.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
 #include "CubusCore/Generation/CubusBlockTerrainGenerator.h"
+#include "CubusCore/Generation/CubusTerrainDensityField.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Rendering/CubusDensityMeshComponent.h"
 
@@ -363,6 +364,48 @@ void ACubusVoxelVolumeActor::ConfigureTerrain(
     bGenerateWater = bInGenerateWater;
     TerrainWaterLevel = InTerrainWaterLevel;
     TerrainWaterMaterialId = FMath::Max(1, InTerrainWaterMaterialId);
+
+    if (IsValid(DensityMesh))
+    {
+        FCubusTerrainDensitySettings DensitySettings;
+        DensitySettings.bUseHeightTerrain = bUseHeightTerrain;
+        DensitySettings.FlatSurfaceWorldZ =
+            static_cast<float>(TerrainSurfaceWorldZ);
+        DensitySettings.BaseHeight =
+            static_cast<float>(TerrainBaseHeight);
+
+        DensitySettings.ContinentAmplitude = TerrainContinentAmplitude;
+        DensitySettings.ContinentFrequency = TerrainContinentFrequency;
+        DensitySettings.HillAmplitude = TerrainHillAmplitude;
+        DensitySettings.HillFrequency = TerrainHillFrequency;
+        DensitySettings.DetailAmplitude = TerrainDetailAmplitude;
+        DensitySettings.DetailFrequency = TerrainDetailFrequency;
+        DensitySettings.RidgeAmplitude = TerrainRidgeAmplitude;
+        DensitySettings.RidgeFrequency = TerrainRidgeFrequency;
+
+        DensitySettings.ValleyDepth = TerrainValleyDepth;
+        DensitySettings.ValleyFrequency = TerrainValleyFrequency;
+        DensitySettings.ValleyWidth = TerrainValleyWidth;
+        DensitySettings.ValleyFalloff = TerrainValleyFalloff;
+        DensitySettings.ValleyWarpAmplitude = TerrainValleyWarpAmplitude;
+        DensitySettings.ValleyWarpFrequency = TerrainValleyWarpFrequency;
+
+        DensitySettings.RegionFrequency = TerrainRegionFrequency;
+        DensitySettings.PlainsThreshold = TerrainPlainsThreshold;
+        DensitySettings.PlainsBlend = TerrainPlainsBlend;
+        DensitySettings.MountainThreshold = TerrainMountainThreshold;
+        DensitySettings.MountainBlend = TerrainMountainBlend;
+
+        DensitySettings.SurfaceMaterialId = TerrainSurfaceMaterialId;
+        DensitySettings.SubsurfaceMaterialId = TerrainSubsurfaceMaterialId;
+        DensitySettings.RockMaterialId = TerrainRockMaterialId;
+        DensitySettings.SnowMaterialId = TerrainSnowMaterialId;
+        DensitySettings.RockSlopeThreshold = TerrainRockSlopeThreshold;
+        DensitySettings.SnowMinimumHeight =
+            static_cast<float>(TerrainSnowMinimumHeight);
+
+        DensityMesh->ConfigureTerrainDensity(DensitySettings);
+    }
 }
 
 const FCubusBlockChunkData* ACubusVoxelVolumeActor::FindNeighbourChunkData(
