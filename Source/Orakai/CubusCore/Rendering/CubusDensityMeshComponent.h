@@ -4,6 +4,7 @@
 #include "ProceduralMeshComponent.h"
 
 #include "CubusCore/Data/CubusBlockVoxel.h"
+#include "CubusCore/Generation/CubusTerrainDensityField.h"
 
 #include "CubusDensityMeshComponent.generated.h"
 
@@ -14,10 +15,9 @@ class UMaterialInterface;
 /**
  * Parallel smooth-mesh renderer for an existing Cubus voxel chunk.
  *
- * Add this component to a Cubus chunk Blueprint to render the same voxel data
- * through Marching Cubes without replacing the existing block mesher. This
- * keeps block and density rendering independently selectable during the
- * hybrid-engine transition.
+ * The default path samples the configured terrain function directly as a
+ * continuous scalar field. The older block-backed field remains available as
+ * a diagnostic fallback while the hybrid data model is being completed.
  */
 UCLASS(
     BlueprintType,
@@ -50,12 +50,30 @@ public:
     )
     void ClearDensityMesh();
 
+    void ConfigureTerrainDensity(
+        const FCubusTerrainDensitySettings& InSettings
+    )
+    {
+        TerrainDensitySettings = InSettings;
+    }
+
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
         Category = "Cubus|Density"
     )
     bool bAutoRebuildOnBeginPlay = true;
+
+    /**
+     * Uses fractional terrain height directly. Disable only when comparing
+     * against the transitional block-occupancy density adapter.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Density"
+    )
+    bool bUseNativeTerrainDensity = true;
 
     UPROPERTY(
         EditAnywhere,
@@ -135,6 +153,8 @@ public:
     float LastDensityBuildTimeMilliseconds = 0.0f;
 
 private:
+    FCubusTerrainDensitySettings TerrainDensitySettings;
+
     FCubusBlockVoxel SampleVoxelAtWorldCoordinate(
         const ACubusVoxelVolumeActor& OwnerChunk,
         const FIntVector& WorldVoxelCoordinate
