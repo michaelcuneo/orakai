@@ -797,222 +797,218 @@ FCubusVegetationRenderer::RenderSkeletalBatch(
 
     for (const FTransform& LocalTransform : Transforms)
     {
-        const bool bUseHero = true;
+        const int32 HeroIndex =
+            InOutActiveHeroComponentCount;
 
-        if (bUseHero)
+        if (
+            Settings.bUsePveActors &&
+            HeroPveActorClass != nullptr
+        )
         {
-            const int32 HeroIndex =
-                InOutActiveHeroComponentCount;
+            AActor* HeroActor = nullptr;
 
-            if (
-                Settings.bUsePveActors &&
-                HeroPveActorClass != nullptr
-            )
+            if (HeroPveActors.IsValidIndex(HeroIndex))
             {
-                AActor* HeroActor = nullptr;
+                HeroActor =
+                    HeroPveActors[HeroIndex];
 
-                if (HeroPveActors.IsValidIndex(HeroIndex))
+                if (
+                    IsValid(HeroActor) &&
+                    HeroActor->GetClass() !=
+                        HeroPveActorClass
+                )
                 {
-                    HeroActor =
-                        HeroPveActors[HeroIndex];
-
-                    if (
-                        IsValid(HeroActor) &&
-                        HeroActor->GetClass() !=
-                            HeroPveActorClass
-                    )
-                    {
-                        HeroActor->Destroy();
-                        HeroActor = nullptr;
-                    }
-                }
-
-                if (!IsValid(HeroActor))
-                {
-                    const FName ActorName(
-                        *FString::Printf(
-                            TEXT(
-                                "CubusWorldHeroPveWind_%d"
-                            ),
-                            HeroIndex
-                        )
-                    );
-
-                    FActorSpawnParameters Params;
-                    Params.Owner = Owner;
-                    Params.Name = ActorName;
-                    Params.SpawnCollisionHandlingOverride =
-                        ESpawnActorCollisionHandlingMethod::
-                            AlwaysSpawn;
-
-                    HeroActor =
-                        World->SpawnActor<AActor>(
-                            HeroPveActorClass,
-                            FTransform::Identity,
-                            Params
-                        );
-
-                    if (IsValid(HeroActor))
-                    {
-                        HeroActor->AttachToComponent(
-                            Root,
-                            FAttachmentTransformRules::
-                                KeepRelativeTransform
-                        );
-
-                        if (
-                            !HeroPveActors.IsValidIndex(
-                                HeroIndex
-                            )
-                        )
-                        {
-                            HeroPveActors.SetNum(
-                                HeroIndex + 1
-                            );
-                        }
-
-                        HeroPveActors[HeroIndex] =
-                            HeroActor;
-                    }
-                }
-
-                if (IsValid(HeroActor))
-                {
-                    HeroActor->SetActorRelativeTransform(
-                        LocalTransform,
-                        false,
-                        nullptr,
-                        ETeleportType::None
-                    );
-
-                    HeroActor->SetActorHiddenInGame(
-                        false
-                    );
-
-                    FCubusVegetationWindUtilities::
-                        AssignLikelyWindProviderActor(
-                            HeroActor,
-                            WindProviderActor
-                        );
-
-                    TInlineComponentArray<
-                        UActorComponent*
-                    > Components(HeroActor);
-
-                    for (
-                        UActorComponent* Component :
-                        Components
-                    )
-                    {
-                        FCubusVegetationWindUtilities::
-                            AssignLikelyWindProviderActor(
-                                Component,
-                                WindProviderActor
-                            );
-                    }
-
-                    ++InOutActiveHeroComponentCount;
-                    ++InOutActiveHeroPveActorCount;
-
-                    Result.ActiveHeroComponentCount++;
-                    Result.ActiveHeroPveActorCount++;
-                    continue;
+                    HeroActor->Destroy();
+                    HeroActor = nullptr;
                 }
             }
 
-            USkeletalMeshComponent* HeroComponent =
-                nullptr;
-
-            if (HeroComponents.IsValidIndex(HeroIndex))
+            if (!IsValid(HeroActor))
             {
-                HeroComponent =
-                    HeroComponents[HeroIndex];
-            }
-
-            if (!IsValid(HeroComponent))
-            {
-                const FName ComponentName(
+                const FName ActorName(
                     *FString::Printf(
                         TEXT(
-                            "CubusWorldHeroSkeletalWind_%d"
+                            "CubusWorldHeroPveWind_%d"
                         ),
                         HeroIndex
                     )
                 );
 
-                HeroComponent =
-                    CreateHeroSkeletalComponent(
-                        Owner,
-                        Root,
-                        ComponentName,
-                        Settings.bCastShadow
+                FActorSpawnParameters Params;
+                Params.Owner = Owner;
+                Params.Name = ActorName;
+                Params.SpawnCollisionHandlingOverride =
+                    ESpawnActorCollisionHandlingMethod::
+                        AlwaysSpawn;
+
+                HeroActor =
+                    World->SpawnActor<AActor>(
+                        HeroPveActorClass,
+                        FTransform::Identity,
+                        Params
                     );
 
-                if (
-                    !HeroComponents.IsValidIndex(
-                        HeroIndex
-                    )
-                )
+                if (IsValid(HeroActor))
                 {
-                    HeroComponents.SetNum(
-                        HeroIndex + 1
+                    HeroActor->AttachToComponent(
+                        Root,
+                        FAttachmentTransformRules::
+                            KeepRelativeTransform
                     );
-                }
 
-                HeroComponents[HeroIndex] =
-                    HeroComponent;
+                    if (
+                        !HeroPveActors.IsValidIndex(
+                            HeroIndex
+                        )
+                    )
+                    {
+                        HeroPveActors.SetNum(
+                            HeroIndex + 1
+                        );
+                    }
+
+                    HeroPveActors[HeroIndex] =
+                        HeroActor;
+                }
             }
 
-            if (IsValid(HeroComponent))
+            if (IsValid(HeroActor))
             {
-                if (
-                    HeroComponent
-                        ->GetSkeletalMeshAsset() !=
-                    SkeletalMesh
-                )
-                {
-                    HeroComponent->SetSkeletalMesh(
-                        const_cast<USkeletalMesh*>(
-                            SkeletalMesh
-                        )
-                    );
-                }
-
-                if (
-                    !Settings
-                        .bForceFoliageMaterialOverride
-                )
-                {
-                    HeroComponent
-                        ->EmptyOverrideMaterials();
-                }
-                else
-                {
-                    ApplyFoliageMaterialOverride(
-                        HeroComponent,
-                        FoliageOverrideMaterial
-                    );
-                }
-                
-                HeroComponent->SetRelativeTransform(
-                    LocalTransform
-                );
-
-                HeroComponent->SetVisibility(
-                    true,
-                    true
-                );
-
-                HeroComponent->SetHiddenInGame(
+                HeroActor->SetActorRelativeTransform(
+                    LocalTransform,
                     false,
-                    true
+                    nullptr,
+                    ETeleportType::None
                 );
+
+                HeroActor->SetActorHiddenInGame(
+                    false
+                );
+
+                FCubusVegetationWindUtilities::
+                    AssignLikelyWindProviderActor(
+                        HeroActor,
+                        WindProviderActor
+                    );
+
+                TInlineComponentArray<
+                    UActorComponent*
+                > Components(HeroActor);
+
+                for (
+                    UActorComponent* Component :
+                    Components
+                )
+                {
+                    FCubusVegetationWindUtilities::
+                        AssignLikelyWindProviderActor(
+                            Component,
+                            WindProviderActor
+                        );
+                }
 
                 ++InOutActiveHeroComponentCount;
-                ++Result.ActiveHeroComponentCount;
+                ++InOutActiveHeroPveActorCount;
+
+                Result.ActiveHeroComponentCount++;
+                Result.ActiveHeroPveActorCount++;
                 continue;
             }
         }
+
+        USkeletalMeshComponent* HeroComponent =
+            nullptr;
+
+        if (HeroComponents.IsValidIndex(HeroIndex))
+        {
+            HeroComponent =
+                HeroComponents[HeroIndex];
+        }
+
+        if (!IsValid(HeroComponent))
+        {
+            const FName ComponentName(
+                *FString::Printf(
+                    TEXT(
+                        "CubusWorldHeroSkeletalWind_%d"
+                    ),
+                    HeroIndex
+                )
+            );
+
+            HeroComponent =
+                CreateHeroSkeletalComponent(
+                    Owner,
+                    Root,
+                    ComponentName,
+                    Settings.bCastShadow
+                );
+
+            if (
+                !HeroComponents.IsValidIndex(
+                    HeroIndex
+                )
+            )
+            {
+                HeroComponents.SetNum(
+                    HeroIndex + 1
+                );
+            }
+
+            HeroComponents[HeroIndex] =
+                HeroComponent;
+        }
+
+        if (IsValid(HeroComponent))
+        {
+            if (
+                HeroComponent
+                    ->GetSkeletalMeshAsset() !=
+                SkeletalMesh
+            )
+            {
+                HeroComponent->SetSkeletalMesh(
+                    const_cast<USkeletalMesh*>(
+                        SkeletalMesh
+                    )
+                );
+            }
+
+            if (
+                !Settings
+                    .bForceFoliageMaterialOverride
+            )
+            {
+                HeroComponent
+                    ->EmptyOverrideMaterials();
+            }
+            else
+            {
+                ApplyFoliageMaterialOverride(
+                    HeroComponent,
+                    FoliageOverrideMaterial
+                );
+            }
+            
+            HeroComponent->SetRelativeTransform(
+                LocalTransform
+            );
+
+            HeroComponent->SetVisibility(
+                true,
+                true
+            );
+
+            HeroComponent->SetHiddenInGame(
+                false,
+                true
+            );
+
+            ++InOutActiveHeroComponentCount;
+            ++Result.ActiveHeroComponentCount;
+            continue;
+        }
+    
 
         if (
             Settings.bUseInstancedSkeletalFallback &&
