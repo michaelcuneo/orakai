@@ -8,6 +8,7 @@
 #include "CubusMaterialRegistry.generated.h"
 
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 
 /**
  * Editor-authored collection of every voxel material available to Cubus.
@@ -51,6 +52,10 @@ public:
         int32 MaterialId
     ) const;
 
+    UMaterialInterface* ResolveRuntimeMaterial(
+        int32 MaterialId
+    ) const;
+
     bool IsRenderableSolid(
         int32 MaterialId
     ) const;
@@ -59,9 +64,6 @@ public:
         int32 MaterialId
     ) const;
 
-    /**
-     * Checks for duplicate IDs and verifies that ID 0 is empty.
-     */
     UFUNCTION(
         BlueprintCallable,
         CallInEditor,
@@ -81,8 +83,10 @@ private:
     void RebuildLookupCache() const;
 
     mutable TMap<int32, int32> MaterialIndexById;
+    mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>>
+        RuntimeMaterialById;
 
     mutable bool bLookupCacheDirty = true;
-    
+
     static const FCubusMaterialDefinition InvalidDefinition;
 };
