@@ -1,0 +1,126 @@
+name: Finish Cubus PBR runtime wiring
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/finish-cubus-pbr-runtime.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply runtime and face selector wiring
+        shell: python
+        run: |
+          from pathlib import Path
+
+          actor = Path('Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.cpp')
+          text = actor.read_text()
+          old = '''ResolvedMaterial =
+                MaterialRegistry->ResolveMaterial(
+                    MaterialId
+                );'''
+          new = '''ResolvedMaterial =
+                MaterialRegistry->ResolveRuntimeMaterial(
+                    MaterialId
+                );'''
+          if old not in text:
+              raise SystemExit('Actor ResolveMaterial anchor not found')
+          actor.write_text(text.replace(old, new, 1))
+
+          header = Path('Source/Orakai/CubusCore/Meshing/CubusBlockMesher.h')
+          text = header.read_text()
+          old = '''        const FVector& Vertex3,
+        const FVector& Normal
+    );'''
+          new = '''        const FVector& Vertex3,
+        const FVector& Normal,
+        float SurfaceSelector
+    );'''
+          if old not in text:
+              raise SystemExit('Mesher header AddFace anchor not found')
+          header.write_text(text.replace(old, new, 1))
+
+          cpp = Path('Source/Orakai/CubusCore/Meshing/CubusBlockMesher.cpp')
+          text = cpp.read_text()
+
+          old = '''    AddFace(
+        MeshData,
+        Vertices[0],
+        Vertices[1],
+        Vertices[2],
+        Vertices[3],
+        FaceNormals[FaceIndex]
+    );'''
+          new = '''    float SurfaceSelector = 0.0f;
+
+    if (FaceIndex == CubusBlockMesher::PositiveZ)
+    {
+        SurfaceSelector = 0.5f;
+    }
+    else if (FaceIndex == CubusBlockMesher::NegativeZ)
+    {
+        SurfaceSelector = 1.0f;
+    }
+
+    AddFace(
+        MeshData,
+        Vertices[0],
+        Vertices[1],
+        Vertices[2],
+        Vertices[3],
+        FaceNormals[FaceIndex],
+        SurfaceSelector
+    );'''
+          if old not in text:
+              raise SystemExit('Mesher AddVoxelFace anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    const FVector& Vertex3,
+    const FVector& Normal
+)'''
+          new = '''    const FVector& Vertex3,
+    const FVector& Normal,
+    const float SurfaceSelector
+)'''
+          if old not in text:
+              raise SystemExit('Mesher AddFace signature anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    MeshData.VertexColors.Add(FLinearColor::White);
+    MeshData.VertexColors.Add(FLinearColor::White);
+    MeshData.VertexColors.Add(FLinearColor::White);
+    MeshData.VertexColors.Add(FLinearColor::White);'''
+          new = '''    const FLinearColor FaceSelectorColor(
+        1.0f,
+        1.0f,
+        1.0f,
+        SurfaceSelector
+    );
+
+    MeshData.VertexColors.Add(FaceSelectorColor);
+    MeshData.VertexColors.Add(FaceSelectorColor);
+    MeshData.VertexColors.Add(FaceSelectorColor);
+    MeshData.VertexColors.Add(FaceSelectorColor);'''
+          if old not in text:
+              raise SystemExit('Mesher vertex colour anchor not found')
+          text = text.replace(old, new, 1)
+          cpp.write_text(text)
+
+          Path('.github/workflows/finish-cubus-pbr-runtime.yml').unlink()
+
+      - name: Commit runtime wiring
+        run: |
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Finish Cubus PBR runtime wiring"
+          git push
