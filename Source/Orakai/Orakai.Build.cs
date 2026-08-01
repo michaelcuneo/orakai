@@ -37,7 +37,8 @@ public class Orakai : ModuleRules
 		{
 			PrivateDependencyModuleNames.AddRange(new string[] {
 				"UnrealEd",
-				"AssetTools"
+				"AssetTools",
+				"MaterialEditor"
 			});
 		}
 
