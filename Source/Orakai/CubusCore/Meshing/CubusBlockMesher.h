@@ -36,7 +36,8 @@ private:
         const FVector& Vertex1,
         const FVector& Vertex2,
         const FVector& Vertex3,
-        const FVector& Normal
+        const FVector& Normal,
+        float MaterialSelector
     );
 
     static void AddVoxelFace(
