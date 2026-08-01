@@ -25,6 +25,21 @@ namespace CubusBlockMesher
         FIntVector(0, 0, 1),
         FIntVector(0, 0, -1)
     };
+
+    float GetMaterialSelector(const int32 FaceIndex)
+    {
+        if (FaceIndex == PositiveZ)
+        {
+            return 0.5f;
+        }
+
+        if (FaceIndex == NegativeZ)
+        {
+            return 1.0f;
+        }
+
+        return 0.0f;
+    }
 }
 
 void FCubusBlockMesher::BuildChunk(
@@ -53,15 +68,12 @@ void FCubusBlockMesher::BuildChunk(
         return;
     }
 
-    const FCubusBlockChunkData& Chunk =
-        *Neighborhood.Centre;
+    const FCubusBlockChunkData& Chunk = *Neighborhood.Centre;
 
-    const float HalfVoxelSize =
-        VoxelSize * 0.5f;
+    const float HalfVoxelSize = VoxelSize * 0.5f;
 
     const float ChunkWorldSize =
-        static_cast<float>(Cubus::ChunkSize) *
-        VoxelSize;
+        static_cast<float>(Cubus::ChunkSize) * VoxelSize;
 
     const FVector ChunkMinimum(
         ChunkWorldSize * -0.5f,
@@ -75,30 +87,21 @@ void FCubusBlockMesher::BuildChunk(
         {
             for (int32 X = 0; X < Cubus::ChunkSize; ++X)
             {
-                const FCubusBlockVoxel* CurrentVoxel =
-                    Chunk.GetVoxel(X, Y, Z);
+                const FCubusBlockVoxel* CurrentVoxel = Chunk.GetVoxel(X, Y, Z);
 
-                if (
-                    CurrentVoxel == nullptr ||
-                    CurrentVoxel->IsEmpty()
-                )
+                if (CurrentVoxel == nullptr || CurrentVoxel->IsEmpty())
                 {
                     continue;
                 }
 
-                const int32 CurrentMaterialId =
-                    CurrentVoxel->MaterialId;
-
-                const bool bCurrentIsWater =
-                    CurrentVoxel->IsWater();
+                const int32 CurrentMaterialId = CurrentVoxel->MaterialId;
+                const bool bCurrentIsWater = CurrentVoxel->IsWater();
 
                 const bool bCurrentIsRenderable =
                     bCurrentIsWater ||
                     (
                         MaterialRegistry != nullptr
-                            ? MaterialRegistry->IsRenderableSolid(
-                                CurrentMaterialId
-                            )
+                            ? MaterialRegistry->IsRenderableSolid(CurrentMaterialId)
                             : true
                     );
 
@@ -108,38 +111,20 @@ void FCubusBlockMesher::BuildChunk(
                 }
 
                 FCubusMeshData& MaterialMesh =
-                    OutMaterialMeshes.FindOrAdd(
-                        CurrentMaterialId
-                    );
+                    OutMaterialMeshes.FindOrAdd(CurrentMaterialId);
 
                 const FVector VoxelCentre =
                     ChunkMinimum +
                     FVector(
-                        (
-                            static_cast<float>(X) +
-                            0.5f
-                        ) * VoxelSize,
-                        (
-                            static_cast<float>(Y) +
-                            0.5f
-                        ) * VoxelSize,
-                        (
-                            static_cast<float>(Z) +
-                            0.5f
-                        ) * VoxelSize
+                        (static_cast<float>(X) + 0.5f) * VoxelSize,
+                        (static_cast<float>(Y) + 0.5f) * VoxelSize,
+                        (static_cast<float>(Z) + 0.5f) * VoxelSize
                     );
 
-                for (
-                    int32 FaceIndex = 0;
-                    FaceIndex < CubusBlockMesher::FaceCount;
-                    ++FaceIndex
-                )
+                for (int32 FaceIndex = 0; FaceIndex < CubusBlockMesher::FaceCount; ++FaceIndex)
                 {
                     const FIntVector NeighbourPosition =
-                        FIntVector(X, Y, Z) +
-                        CubusBlockMesher::NeighbourOffsets[
-                            FaceIndex
-                        ];
+                        FIntVector(X, Y, Z) + CubusBlockMesher::NeighbourOffsets[FaceIndex];
 
                     const FCubusBlockVoxel* NeighbourVoxel =
                         Neighborhood.GetVoxel(
@@ -150,53 +135,26 @@ void FCubusBlockMesher::BuildChunk(
 
                     bool bRenderFace = true;
 
-                    if (
-                        NeighbourVoxel != nullptr &&
-                        !NeighbourVoxel->IsEmpty()
-                    )
+                    if (NeighbourVoxel != nullptr && !NeighbourVoxel->IsEmpty())
                     {
-                        const bool bNeighbourIsWater =
-                            NeighbourVoxel->IsWater();
+                        const bool bNeighbourIsWater = NeighbourVoxel->IsWater();
 
                         if (bCurrentIsWater)
                         {
-                            /*
-                            * Water faces are hidden against both water and solid terrain.
-                            *
-                            * This removes:
-                            * - internal water-to-water faces;
-                            * - water faces buried against terrain.
-                            *
-                            * The terrain voxel on the opposite side will render its own face.
-                            */
                             bRenderFace = false;
                         }
                         else if (bNeighbourIsWater)
                         {
-                            /*
-                            * Water does not occlude solid terrain.
-                            *
-                            * This keeps shoreline walls, lake beds and underwater terrain
-                            * visible through a translucent water material.
-                            */
                             bRenderFace = true;
                         }
                         else
                         {
-                            /*
-                            * Ordinary solid-to-solid behaviour remains controlled by the
-                            * material registry.
-                            */
                             const bool bNeighbourOccludesFace =
                                 MaterialRegistry != nullptr
-                                    ? MaterialRegistry
-                                        ->OccludesBlockFaces(
-                                            NeighbourVoxel->MaterialId
-                                        )
+                                    ? MaterialRegistry->OccludesBlockFaces(NeighbourVoxel->MaterialId)
                                     : true;
 
-                            bRenderFace =
-                                !bNeighbourOccludesFace;
+                            bRenderFace = !bNeighbourOccludesFace;
                         }
                     }
 
@@ -204,7 +162,7 @@ void FCubusBlockMesher::BuildChunk(
                     {
                         continue;
                     }
-                    
+
                     AddVoxelFace(
                         MaterialMesh,
                         VoxelCentre,
@@ -238,47 +196,36 @@ void FCubusBlockMesher::AddVoxelFace(
 
     static const FVector FaceVertices[6][4] =
     {
-        // Positive X
         {
             FVector(1.0f, -1.0f, -1.0f),
             FVector(1.0f, -1.0f, 1.0f),
             FVector(1.0f, 1.0f, 1.0f),
             FVector(1.0f, 1.0f, -1.0f)
         },
-
-        // Negative X
         {
             FVector(-1.0f, 1.0f, -1.0f),
             FVector(-1.0f, 1.0f, 1.0f),
             FVector(-1.0f, -1.0f, 1.0f),
             FVector(-1.0f, -1.0f, -1.0f)
         },
-
-        // Positive Y
         {
             FVector(1.0f, 1.0f, -1.0f),
             FVector(1.0f, 1.0f, 1.0f),
             FVector(-1.0f, 1.0f, 1.0f),
             FVector(-1.0f, 1.0f, -1.0f)
         },
-
-        // Negative Y
         {
             FVector(-1.0f, -1.0f, -1.0f),
             FVector(-1.0f, -1.0f, 1.0f),
             FVector(1.0f, -1.0f, 1.0f),
             FVector(1.0f, -1.0f, -1.0f)
         },
-
-        // Positive Z
         {
             FVector(-1.0f, -1.0f, 1.0f),
             FVector(-1.0f, 1.0f, 1.0f),
             FVector(1.0f, 1.0f, 1.0f),
             FVector(1.0f, -1.0f, 1.0f)
         },
-
-        // Negative Z
         {
             FVector(-1.0f, 1.0f, -1.0f),
             FVector(-1.0f, -1.0f, -1.0f),
@@ -287,19 +234,14 @@ void FCubusBlockMesher::AddVoxelFace(
         }
     };
 
-    check(
-        FaceIndex >= 0 &&
-        FaceIndex < CubusBlockMesher::FaceCount
-    );
+    check(FaceIndex >= 0 && FaceIndex < CubusBlockMesher::FaceCount);
 
     FVector Vertices[4];
 
     for (int32 VertexIndex = 0; VertexIndex < 4; ++VertexIndex)
     {
         Vertices[VertexIndex] =
-            VoxelCentre +
-            FaceVertices[FaceIndex][VertexIndex] *
-            HalfVoxelSize;
+            VoxelCentre + FaceVertices[FaceIndex][VertexIndex] * HalfVoxelSize;
     }
 
     AddFace(
@@ -308,7 +250,8 @@ void FCubusBlockMesher::AddVoxelFace(
         Vertices[1],
         Vertices[2],
         Vertices[3],
-        FaceNormals[FaceIndex]
+        FaceNormals[FaceIndex],
+        CubusBlockMesher::GetMaterialSelector(FaceIndex)
     );
 }
 
@@ -318,24 +261,22 @@ void FCubusBlockMesher::AddFace(
     const FVector& Vertex1,
     const FVector& Vertex2,
     const FVector& Vertex3,
-    const FVector& Normal
+    const FVector& Normal,
+    const float MaterialSelector
 )
 {
-    const int32 FirstVertexIndex =
-        MeshData.Vertices.Num();
+    const int32 FirstVertexIndex = MeshData.Vertices.Num();
 
     MeshData.Vertices.Add(Vertex0);
     MeshData.Vertices.Add(Vertex1);
     MeshData.Vertices.Add(Vertex2);
     MeshData.Vertices.Add(Vertex3);
 
-    // Unreal clockwise front-facing winding.
     MeshData.Triangles.Append(
     {
         FirstVertexIndex + 0,
         FirstVertexIndex + 1,
         FirstVertexIndex + 2,
-
         FirstVertexIndex + 0,
         FirstVertexIndex + 2,
         FirstVertexIndex + 3
@@ -351,18 +292,14 @@ void FCubusBlockMesher::AddFace(
     MeshData.UV0.Add(FVector2D(1.0f, 1.0f));
     MeshData.UV0.Add(FVector2D(0.0f, 1.0f));
 
-    MeshData.VertexColors.Add(FLinearColor::White);
-    MeshData.VertexColors.Add(FLinearColor::White);
-    MeshData.VertexColors.Add(FLinearColor::White);
-    MeshData.VertexColors.Add(FLinearColor::White);
+    const FLinearColor FaceColor(1.0f, 1.0f, 1.0f, MaterialSelector);
+    MeshData.VertexColors.Add(FaceColor);
+    MeshData.VertexColors.Add(FaceColor);
+    MeshData.VertexColors.Add(FaceColor);
+    MeshData.VertexColors.Add(FaceColor);
 
-    const FVector TangentDirection =
-        (Vertex1 - Vertex0).GetSafeNormal();
-
-    const FProcMeshTangent Tangent(
-        TangentDirection,
-        false
-    );
+    const FVector TangentDirection = (Vertex1 - Vertex0).GetSafeNormal();
+    const FProcMeshTangent Tangent(TangentDirection, false);
 
     MeshData.Tangents.Add(Tangent);
     MeshData.Tangents.Add(Tangent);
