@@ -27,51 +27,33 @@
 
 namespace CubusMaterialBuilder
 {
-    constexpr const TCHAR* PackagePath =
-        TEXT("/Game/Cubus/Materials/M_CubusBlockPBR");
-
-    constexpr const TCHAR* AssetName =
-        TEXT("M_CubusBlockPBR");
+    constexpr const TCHAR* PackagePath = TEXT("/Game/Cubus/Materials/M_CubusBlockPBR");
+    constexpr const TCHAR* AssetName = TEXT("M_CubusBlockPBR");
 
     template <typename TExpression>
-    TExpression* AddExpression(
-        UMaterial* Material,
-        const int32 X,
-        const int32 Y
-    )
+    TExpression* AddExpression(UMaterial* Material, const int32 X, const int32 Y)
     {
-        UMaterialExpression* Created =
-            UMaterialEditingLibrary::CreateMaterialExpression(
-                Material,
-                TExpression::StaticClass(),
-                X,
-                Y
-            );
+        UMaterialExpression* Created = UMaterialEditingLibrary::CreateMaterialExpression(
+            Material,
+            TExpression::StaticClass(),
+            X,
+            Y
+        );
 
         TExpression* Expression = Cast<TExpression>(Created);
         check(Expression != nullptr);
         return Expression;
     }
 
-    void Connect(
-        FExpressionInput& Input,
-        UMaterialExpression* Expression,
-        const int32 OutputIndex = 0
-    )
+    void Connect(FExpressionInput& Input, UMaterialExpression* Expression, const int32 OutputIndex = 0)
     {
         Input.Expression = Expression;
         Input.OutputIndex = OutputIndex;
     }
 
-    UMaterialExpressionConstant* Constant(
-        UMaterial* Material,
-        const float Value,
-        const int32 X,
-        const int32 Y
-    )
+    UMaterialExpressionConstant* Constant(UMaterial* Material, const float Value, const int32 X, const int32 Y)
     {
-        UMaterialExpressionConstant* Node =
-            AddExpression<UMaterialExpressionConstant>(Material, X, Y);
+        UMaterialExpressionConstant* Node = AddExpression<UMaterialExpressionConstant>(Material, X, Y);
         Node->R = Value;
         return Node;
     }
@@ -84,8 +66,7 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionScalarParameter* Node =
-            AddExpression<UMaterialExpressionScalarParameter>(Material, X, Y);
+        UMaterialExpressionScalarParameter* Node = AddExpression<UMaterialExpressionScalarParameter>(Material, X, Y);
         Node->ParameterName = Name;
         Node->DefaultValue = Value;
         return Node;
@@ -99,8 +80,7 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionVectorParameter* Node =
-            AddExpression<UMaterialExpressionVectorParameter>(Material, X, Y);
+        UMaterialExpressionVectorParameter* Node = AddExpression<UMaterialExpressionVectorParameter>(Material, X, Y);
         Node->ParameterName = Name;
         Node->DefaultValue = Value;
         return Node;
@@ -135,8 +115,7 @@ namespace CubusMaterialBuilder
         const int32 BOutput = 0
     )
     {
-        UMaterialExpressionMultiply* Node =
-            AddExpression<UMaterialExpressionMultiply>(Material, X, Y);
+        UMaterialExpressionMultiply* Node = AddExpression<UMaterialExpressionMultiply>(Material, X, Y);
         Connect(Node->A, A, AOutput);
         Connect(Node->B, B, BOutput);
         return Node;
@@ -150,8 +129,7 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionAdd* Node =
-            AddExpression<UMaterialExpressionAdd>(Material, X, Y);
+        UMaterialExpressionAdd* Node = AddExpression<UMaterialExpressionAdd>(Material, X, Y);
         Connect(Node->A, A);
         Connect(Node->B, B);
         return Node;
@@ -165,8 +143,7 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionSubtract* Node =
-            AddExpression<UMaterialExpressionSubtract>(Material, X, Y);
+        UMaterialExpressionSubtract* Node = AddExpression<UMaterialExpressionSubtract>(Material, X, Y);
         Connect(Node->A, A);
         Connect(Node->B, B);
         return Node;
@@ -179,8 +156,7 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionOneMinus* Node =
-            AddExpression<UMaterialExpressionOneMinus>(Material, X, Y);
+        UMaterialExpressionOneMinus* Node = AddExpression<UMaterialExpressionOneMinus>(Material, X, Y);
         Connect(Node->Input, Input);
         return Node;
     }
@@ -192,8 +168,7 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionSaturate* Node =
-            AddExpression<UMaterialExpressionSaturate>(Material, X, Y);
+        UMaterialExpressionSaturate* Node = AddExpression<UMaterialExpressionSaturate>(Material, X, Y);
         Connect(Node->Input, Input);
         return Node;
     }
@@ -226,8 +201,7 @@ namespace CubusMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionComponentMask* Node =
-            AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
+        UMaterialExpressionComponentMask* Node = AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
         Node->R = R;
         Node->G = G;
         Node->B = B;
@@ -306,9 +280,12 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial()
 #if WITH_EDITOR
     using namespace CubusMaterialBuilder;
 
+    UE_LOG(LogTemp, Display, TEXT("Cubus material builder: starting."));
+
     UMaterial* Material = FindOrCreateMaterial();
     if (!IsValid(Material))
     {
+        UE_LOG(LogTemp, Error, TEXT("Cubus material builder: failed to load or create material."));
         return nullptr;
     }
 
@@ -324,13 +301,23 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial()
         nullptr,
         TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture")
     );
+
     UTexture* DefaultNormal = LoadObject<UTexture>(
         nullptr,
-        TEXT("/Engine/EngineResources/DefaultNormal.DefaultNormal")
+        TEXT("/Engine/EngineMaterials/DefaultNormal.DefaultNormal")
+    );
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("Cubus material builder defaults: Color=%s Normal=%s"),
+        IsValid(DefaultColor) ? TEXT("valid") : TEXT("missing"),
+        IsValid(DefaultNormal) ? TEXT("valid") : TEXT("missing")
     );
 
     if (!IsValid(DefaultColor) || !IsValid(DefaultNormal))
     {
+        UE_LOG(LogTemp, Error, TEXT("Cubus material builder: required default texture missing."));
         return nullptr;
     }
 
@@ -411,11 +398,14 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial()
 
     Save(Material);
 
+    const int32 ExpressionCount =
+        Material->GetEditorOnlyData()->ExpressionCollection.Expressions.Num();
+
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Built Cubus PBR material with %d registered expressions."),
-        Material->GetEditorOnlyData()->ExpressionCollection.Expressions.Num()
+        TEXT("Cubus material builder: built and saved %d registered expressions."),
+        ExpressionCount
     );
 
     return Material;
