@@ -1,0 +1,196 @@
+name: Cache chunk vegetation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/cache-chunk-vegetation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add vegetation to chunk cache
+        shell: python
+        run: |
+          from pathlib import Path
+
+          header = Path('Source/Orakai/CubusCore/Storage/CubusChunkStore.h')
+          text = header.read_text()
+          old = '    static constexpr uint32 CurrentFormatVersion = 1;'
+          new = '    static constexpr uint32 CurrentFormatVersion = 2;'
+          if old not in text:
+              raise RuntimeError('Chunk store format version anchor not found')
+          header.write_text(text.replace(old, new, 1))
+
+          path = Path('Source/Orakai/CubusCore/Storage/CubusChunkStore.cpp')
+          text = path.read_text()
+
+          include_anchor = '#include "CubusCore/Data/CubusBlockVoxel.h"\n'
+          include_insert = include_anchor + '#include "CubusCore/Data/CubusVegetationInstance.h"\n'
+          if include_insert not in text:
+              if include_anchor not in text:
+                  raise RuntimeError('Vegetation include anchor not found')
+              text = text.replace(include_anchor, include_insert, 1)
+
+          constant_anchor = '    constexpr int32 BytesPerVoxel = sizeof(uint16) + sizeof(uint8);\n'
+          constant_insert = constant_anchor + '''    constexpr int32 BytesPerVegetationInstance =
+        sizeof(int32) * 5 +
+        sizeof(float) * 2;
+'''
+          if 'BytesPerVegetationInstance' not in text:
+              if constant_anchor not in text:
+                  raise RuntimeError('Chunk store constants anchor not found')
+              text = text.replace(constant_anchor, constant_insert, 1)
+
+          save_anchor = '''    PayloadWriter.Close();
+
+    uint32 HeaderMagic = CubusChunkStore::Magic;
+'''
+          save_block = '''    const TConstArrayView<FCubusVegetationInstance> VegetationInstances =
+        Chunk.GetVegetationInstances();
+
+    int32 VegetationInstanceCount = VegetationInstances.Num();
+    PayloadWriter << VegetationInstanceCount;
+
+    for (const FCubusVegetationInstance& Instance : VegetationInstances)
+    {
+        int32 WorldVoxelX = Instance.WorldVoxel.X;
+        int32 WorldVoxelY = Instance.WorldVoxel.Y;
+        int32 WorldVoxelZ = Instance.WorldVoxel.Z;
+        float RotationYaw = Instance.RotationYaw;
+        float Scale = Instance.Scale;
+        int32 TypeId = Instance.TypeId;
+        int32 BiomeMask = Instance.BiomeMask;
+
+        PayloadWriter << WorldVoxelX;
+        PayloadWriter << WorldVoxelY;
+        PayloadWriter << WorldVoxelZ;
+        PayloadWriter << RotationYaw;
+        PayloadWriter << Scale;
+        PayloadWriter << TypeId;
+        PayloadWriter << BiomeMask;
+    }
+
+    PayloadWriter.Close();
+
+    uint32 HeaderMagic = CubusChunkStore::Magic;
+'''
+          if save_block not in text:
+              if save_anchor not in text:
+                  raise RuntimeError('Chunk save payload anchor not found')
+              text = text.replace(save_anchor, save_block, 1)
+
+          validation_old = '''        !CubusChunkStore::ValidateVoxelCount(VoxelCount) ||
+        PayloadSize != VoxelCount * CubusChunkStore::BytesPerVoxel ||
+        RemainingBytes != PayloadSize
+'''
+          validation_new = '''        !CubusChunkStore::ValidateVoxelCount(VoxelCount) ||
+        PayloadSize <
+            VoxelCount * CubusChunkStore::BytesPerVoxel +
+            static_cast<int32>(sizeof(int32)) ||
+        RemainingBytes != PayloadSize
+'''
+          if validation_old not in text:
+              raise RuntimeError('Chunk load validation block not found')
+          text = text.replace(validation_old, validation_new, 1)
+
+          load_anchor = '''    Reader.Close();
+    Chunk.ClearVegetationInstances();
+
+    UE_LOG(
+'''
+          load_block = '''    int32 VegetationInstanceCount = 0;
+    Reader << VegetationInstanceCount;
+
+    const int64 VegetationBytesRemaining =
+        Reader.TotalSize() - Reader.Tell();
+
+    const int64 ExpectedVegetationBytes =
+        static_cast<int64>(VegetationInstanceCount) *
+        CubusChunkStore::BytesPerVegetationInstance;
+
+    if (
+        Reader.IsError() ||
+        VegetationInstanceCount < 0 ||
+        ExpectedVegetationBytes != VegetationBytesRemaining
+    )
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("Cubus chunk store rejected invalid vegetation cache: %s"),
+            *ChunkPath
+        );
+        return false;
+    }
+
+    TArray<FCubusVegetationInstance> VegetationInstances;
+    VegetationInstances.Reserve(VegetationInstanceCount);
+
+    for (int32 Index = 0; Index < VegetationInstanceCount; ++Index)
+    {
+        int32 WorldVoxelX = 0;
+        int32 WorldVoxelY = 0;
+        int32 WorldVoxelZ = 0;
+        float RotationYaw = 0.0f;
+        float Scale = 1.0f;
+        int32 TypeId = 0;
+        int32 BiomeMask = CubusVegetationBiome::All;
+
+        Reader << WorldVoxelX;
+        Reader << WorldVoxelY;
+        Reader << WorldVoxelZ;
+        Reader << RotationYaw;
+        Reader << Scale;
+        Reader << TypeId;
+        Reader << BiomeMask;
+
+        if (Reader.IsError())
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("Cubus chunk store failed reading vegetation cache: %s"),
+                *ChunkPath
+            );
+            return false;
+        }
+
+        FCubusVegetationInstance Instance;
+        Instance.WorldVoxel =
+            FIntVector(WorldVoxelX, WorldVoxelY, WorldVoxelZ);
+        Instance.RotationYaw = RotationYaw;
+        Instance.Scale = Scale;
+        Instance.TypeId = TypeId;
+        Instance.BiomeMask = BiomeMask;
+
+        VegetationInstances.Add(MoveTemp(Instance));
+    }
+
+    Reader.Close();
+    Chunk.SetVegetationInstances(MoveTemp(VegetationInstances));
+
+    UE_LOG(
+'''
+          if load_anchor not in text:
+              raise RuntimeError('Chunk vegetation load anchor not found')
+          text = text.replace(load_anchor, load_block, 1)
+
+          path.write_text(text)
+          Path('.github/workflows/cache-chunk-vegetation.yml').unlink()
+
+      - name: Commit vegetation cache support
+        run: |
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Cache vegetation with chunk data"
+          git push
