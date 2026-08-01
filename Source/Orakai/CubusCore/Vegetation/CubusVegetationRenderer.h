@@ -3,15 +3,43 @@
 #include "CoreMinimal.h"
 
 class AActor;
+class UClass;
 class UObject;
+class UWorld;
 class UStaticMesh;
 class USkeletalMesh;
 class USceneComponent;
+class UMaterialInterface;
 class USkeletalMeshComponent;
 class UInstancedSkinnedMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 
 struct FCubusVegetationSpeciesCatalogEntry;
+
+struct FCubusHeroVegetationRenderSettings
+{
+    bool bEnabled = false;
+    bool bUsePveActors = false;
+    bool bUseInstancedSkeletalFallback = false;
+    bool bForceFoliageMaterialOverride = false;
+    bool bCastShadow = true;
+    bool bHasCamera = false;
+    bool bAppendOnly = false;
+
+    int32 MaxHeroComponents = 0;
+
+    float MaxHeroDistance = 0.0f;
+
+    FVector CameraLocation = FVector::ZeroVector;
+};
+
+struct FCubusHeroVegetationRenderResult
+{
+    int32 ActiveHeroComponentCount = 0;
+    int32 ActiveHeroPveActorCount = 0;
+    int32 InstancedFallbackCount = 0;
+    int32 SkeletalInstanceCount = 0;
+};
 
 class ORAKAI_API FCubusVegetationRenderer
 {
@@ -44,28 +72,28 @@ public:
     ) const;
 
     void ApplyShadowSettings(
-      bool bCastShadow,
-      const TMap<
-          int64,
-          TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
-      >& StaticBatchComponents,
-      const TMap<
-          int64,
-          TObjectPtr<UInstancedSkinnedMeshComponent>
-      >& SkeletalBatchComponents,
-      const TArray<TObjectPtr<USkeletalMeshComponent>>& HeroComponents
-  ) const;
+        bool bCastShadow,
+        const TMap<
+            int64,
+            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+        >& StaticBatchComponents,
+        const TMap<
+            int64,
+            TObjectPtr<UInstancedSkinnedMeshComponent>
+        >& SkeletalBatchComponents,
+        const TArray<TObjectPtr<USkeletalMeshComponent>>& HeroComponents
+    ) const;
 
-  void ClearBatches(
-      const TMap<
-          int64,
-          TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
-      >& StaticBatchComponents,
-      const TMap<
-          int64,
-          TObjectPtr<UInstancedSkinnedMeshComponent>
-      >& SkeletalBatchComponents
-  ) const;
+    void ClearBatches(
+        const TMap<
+            int64,
+            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+        >& StaticBatchComponents,
+        const TMap<
+            int64,
+            TObjectPtr<UInstancedSkinnedMeshComponent>
+        >& SkeletalBatchComponents
+    ) const;
 
     UHierarchicalInstancedStaticMeshComponent* CreateStaticBatch(
         AActor* Owner,
@@ -90,5 +118,22 @@ public:
         USceneComponent* Root,
         FName ComponentName,
         bool bCastShadow
+    ) const;
+
+    FCubusHeroVegetationRenderResult RenderSkeletalBatch(
+        AActor* Owner,
+        UWorld* World,
+        USceneComponent* Root,
+        UInstancedSkinnedMeshComponent* BatchComponent,
+        const TArray<FTransform>& Transforms,
+        UClass* HeroPveActorClass,
+        UMaterialInterface* FoliageOverrideMaterial,
+        AActor* WindProviderActor,
+        const FCubusHeroVegetationRenderSettings& Settings,
+        int32& InOutActiveHeroComponentCount,
+        int32& InOutActiveHeroPveActorCount,
+        int32& InOutRemainingFallbackBudget,
+        TArray<TObjectPtr<USkeletalMeshComponent>>& HeroComponents,
+        TArray<TObjectPtr<AActor>>& HeroPveActors
     ) const;
 };

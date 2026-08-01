@@ -2,6 +2,7 @@
 #include "CubusCore/Vegetation/CubusVegetationTypes.h"
 #include "CubusCore/Vegetation/CubusVegetationWindUtilities.h"
 
+#include "Components/ActorComponent.h"
 #include "Components/SkinnedMeshComponent.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
@@ -16,53 +17,6 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "DynamicWindData.h"
 #include "GameFramework/Actor.h"
-
-class UClass;
-class UMaterialInterface;
-class UTransformProviderData;
-class UWorld;
-
-struct FCubusHeroVegetationRenderSettings
-{
-    bool bEnabled = false;
-    bool bUsePveActors = false;
-    bool bUseInstancedSkeletalFallback = false;
-    bool bForceFoliageMaterialOverride = false;
-    bool bCastShadow = true;
-
-    int32 MaxHeroComponents = 0;
-    int32 MaxInstancedFallbackInstances = 0;
-
-    float MaxHeroDistance = 0.0f;
-
-    FVector CameraLocation = FVector::ZeroVector;
-    bool bHasCamera = false;
-};
-
-struct FCubusHeroVegetationRenderResult
-{
-    int32 ActiveHeroComponentCount = 0;
-    int32 ActiveHeroPveActorCount = 0;
-    int32 InstancedFallbackCount = 0;
-    int32 SkeletalInstanceCount = 0;
-};
-
-FCubusHeroVegetationRenderResult RenderSkeletalBatch(
-    AActor* Owner,
-    UWorld* World,
-    USceneComponent* Root,
-    UInstancedSkinnedMeshComponent* BatchComponent,
-    const TArray<FTransform>& Transforms,
-    UClass* HeroPveActorClass,
-    UMaterialInterface* FoliageOverrideMaterial,
-    AActor* WindProviderActor,
-    const FCubusHeroVegetationRenderSettings& Settings,
-    int32& InOutActiveHeroComponentCount,
-    int32& InOutActiveHeroPveActorCount,
-    int32& InOutRemainingFallbackBudget,
-    TArray<TObjectPtr<USkeletalMeshComponent>>& HeroComponents,
-    TArray<TObjectPtr<AActor>>& HeroPveActors
-) const;
 
 int64 FCubusVegetationRenderer::MakePrimaryBatchKey(
     const int32 SpeciesIndex,
@@ -737,6 +691,11 @@ FCubusVegetationRenderer::RenderSkeletalBatch(
             false
         );
 
+        if (!Settings.bAppendOnly)
+        {
+            BatchComponent->OptimizeInstanceData(false);
+        }
+
         Result.SkeletalInstanceCount =
             Transforms.Num();
 
@@ -1058,6 +1017,11 @@ FCubusVegetationRenderer::RenderSkeletalBatch(
             false,
             false
         );
+
+        if (!Settings.bAppendOnly)
+        {
+            BatchComponent->OptimizeInstanceData(false);
+        }
 
         Result.InstancedFallbackCount =
             FallbackTransforms.Num();
