@@ -1,0 +1,116 @@
+name: Finish Cubus PBR wiring
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/finish-cubus-pbr-wiring.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Wire runtime materials and face selectors
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise RuntimeError(f'{label} anchor not found')
+              return text.replace(old, new, 1)
+
+          path = Path('Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.cpp')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '''                MaterialRegistry->ResolveMaterial(
+                    MaterialId
+                );''',
+              '''                MaterialRegistry->ResolveRuntimeMaterial(
+                    MaterialId
+                );''',
+              'runtime material call'
+          )
+          path.write_text(text)
+
+          path = Path('Source/Orakai/CubusCore/Meshing/CubusBlockMesher.h')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '''        const FVector& Vertex3,
+        const FVector& Normal
+    );''',
+              '''        const FVector& Vertex3,
+        const FVector& Normal,
+        float SurfaceSelector
+    );''',
+              'header selector parameter'
+          )
+          path.write_text(text)
+
+          path = Path('Source/Orakai/CubusCore/Meshing/CubusBlockMesher.cpp')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '''        Vertices[3],
+        FaceNormals[FaceIndex]
+    );''',
+              '''        Vertices[3],
+        FaceNormals[FaceIndex],
+        FaceIndex == CubusBlockMesher::PositiveZ
+            ? 0.5f
+            : FaceIndex == CubusBlockMesher::NegativeZ
+                ? 1.0f
+                : 0.0f
+    );''',
+              'selector call'
+          )
+          text = replace_once(
+              text,
+              '''    const FVector& Vertex3,
+    const FVector& Normal
+)''',
+              '''    const FVector& Vertex3,
+    const FVector& Normal,
+    const float SurfaceSelector
+)''',
+              'selector definition'
+          )
+          text = replace_once(
+              text,
+              '''    MeshData.VertexColors.Add(FLinearColor::White);
+    MeshData.VertexColors.Add(FLinearColor::White);
+    MeshData.VertexColors.Add(FLinearColor::White);
+    MeshData.VertexColors.Add(FLinearColor::White);''',
+              '''    const FLinearColor SurfaceData(
+        1.0f,
+        1.0f,
+        1.0f,
+        SurfaceSelector
+    );
+
+    MeshData.VertexColors.Add(SurfaceData);
+    MeshData.VertexColors.Add(SurfaceData);
+    MeshData.VertexColors.Add(SurfaceData);
+    MeshData.VertexColors.Add(SurfaceData);''',
+              'vertex alpha selector'
+          )
+          path.write_text(text)
+
+          Path('.github/workflows/finish-cubus-pbr-wiring.yml').unlink()
+
+      - name: Commit final wiring
+        run: |
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Finish Cubus PBR material wiring"
+          git push
