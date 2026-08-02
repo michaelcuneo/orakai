@@ -1,12 +1,12 @@
 #include "CubusCore/Actors/CubusBlockWorldActor.h"
 
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
-#include "CubusCore/Rendering/CubusDensityMeshComponent.h"
 
 #include "Containers/Ticker.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "ProceduralMeshComponent.h"
 
 #if WITH_EDITOR
 #include "UObject/UnrealType.h"
@@ -73,11 +73,9 @@ namespace CubusBlockWorldDensityRendering
 
                 SynchronizedWorldActors.Add(Key);
 
-                // A saved level can already contain generated chunks before
-                // any editor property changes occur. Reapplying the current
-                // mode once after the world is initialized guarantees those
-                // chunks receive the current terrain, material, seed and
-                // density configuration instead of stale constructor values.
+                // Level-authored chunks can exist before the transient runtime
+                // arrays are reconstructed. Synchronize them once through the
+                // same path used by an explicit render-mode change.
                 BlockWorld->SetVoxelRenderMode(
                     BlockWorld->GetVoxelRenderMode(),
                     true
@@ -144,7 +142,8 @@ void ACubusBlockWorldActor::SetVoxelRenderMode(
 
     for (const auto& Entry : ChunksByCoordinate)
     {
-        ACubusVoxelVolumeActor* ChunkActor = Entry.Value.Get();
+        ACubusVoxelVolumeActor* ChunkActor =
+            Entry.Value.Get();
 
         if (IsValid(ChunkActor))
         {
@@ -152,13 +151,13 @@ void ACubusBlockWorldActor::SetVoxelRenderMode(
         }
     }
 
-    // GeneratedChunks is transient and can be empty after reloading an editor
-    // level even though owned chunk actors still exist. Reconstruct it from the
-    // authoritative coordinate registry before any Clear/Generate operation.
+    // This array is transient, while editor-authored chunk actors are not.
+    // Reconstruct it from the coordinate registry so later Clear/Generate
+    // operations act on the chunks that are actually in the world.
     GeneratedChunks.Reset();
 
-    int32 DensityComponentCount = 0;
-    int32 MissingDensityComponentCount = 0;
+    int32 RootMeshCount = 0;
+    int32 RootSectionCount = 0;
 
     for (ACubusVoxelVolumeActor* ChunkActor : ChunksToRebuild)
     {
@@ -170,9 +169,15 @@ void ACubusBlockWorldActor::SetVoxelRenderMode(
         GeneratedChunks.AddUnique(ChunkActor);
 
         ChunkActor->SetOwningBlockWorld(this);
-        ChunkActor->ConfigureGenerationSeeds(GetGenerationSeeds());
-        ChunkActor->ConfigureRendering(MaterialRegistry);
-        ChunkActor->ConfigureGeology(GeologyProfile);
+        ChunkActor->ConfigureGenerationSeeds(
+            GetGenerationSeeds()
+        );
+        ChunkActor->ConfigureRendering(
+            MaterialRegistry
+        );
+        ChunkActor->ConfigureGeology(
+            GeologyProfile
+        );
         ChunkActor->ConfigureTerrain(
             bUseHeightTerrain,
             TerrainSurfaceWorldZ,
@@ -207,29 +212,30 @@ void ACubusBlockWorldActor::SetVoxelRenderMode(
             TerrainWaterMaterialId
         );
 
-        if (IsValid(ChunkActor->GetDensityMeshComponent()))
-        {
-            ++DensityComponentCount;
-        }
-        else
-        {
-            ++MissingDensityComponentCount;
-        }
-
         ChunkActor->RebuildVolume();
+
+        if (UProceduralMeshComponent* TerrainMesh =
+                ChunkActor->GetTerrainMeshComponent())
+        {
+            ++RootMeshCount;
+            RootSectionCount +=
+                TerrainMesh->GetNumSections();
+        }
     }
 
-    RegisteredChunkCount = ChunksByCoordinate.Num();
-    GeneratedChunkCount = GeneratedChunks.Num();
+    RegisteredChunkCount =
+        ChunksByCoordinate.Num();
+    GeneratedChunkCount =
+        GeneratedChunks.Num();
 
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus render mode %d synchronized %d chunks; density components=%d missing=%d."),
+        TEXT("Cubus render mode %d synchronized %d chunks on %d root meshes with %d total sections."),
         static_cast<int32>(VoxelRenderMode),
         ChunksToRebuild.Num(),
-        DensityComponentCount,
-        MissingDensityComponentCount
+        RootMeshCount,
+        RootSectionCount
     );
 }
 
@@ -238,7 +244,9 @@ void ACubusBlockWorldActor::PostEditChangeProperty(
     FPropertyChangedEvent& PropertyChangedEvent
 )
 {
-    Super::PostEditChangeProperty(PropertyChangedEvent);
+    Super::PostEditChangeProperty(
+        PropertyChangedEvent
+    );
 
     if (
         PropertyChangedEvent.GetPropertyName() ==
