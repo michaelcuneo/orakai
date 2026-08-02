@@ -30,12 +30,12 @@
 
 namespace
 {
-    constexpr int32 GrassType = 1;
-    constexpr int32 ShrubType = 2;
-    constexpr int32 BroadleafType = 3;
-    constexpr int32 ReedsType = 4;
-    constexpr int32 AlpineType = 5;
-    constexpr int32 ConiferType = 6;
+    constexpr int32 WorldGrassType = 1;
+    constexpr int32 WorldShrubType = 2;
+    constexpr int32 WorldBroadleafType = 3;
+    constexpr int32 WorldReedsType = 4;
+    constexpr int32 WorldAlpineType = 5;
+    constexpr int32 WorldConiferType = 6;
 
     float ResolveTypeScaleMultiplier(
         const int32 TypeId,
@@ -55,17 +55,17 @@ namespace
 
         switch (TypeId)
         {
-            case BroadleafType:
+            case WorldBroadleafType:
                 return BroadleafScaleMultiplier;
-            case ConiferType:
+            case WorldConiferType:
                 return ConiferScaleMultiplier;
-            case ShrubType:
+            case WorldShrubType:
                 return ShrubScaleMultiplier;
-            case GrassType:
+            case WorldGrassType:
                 return GrassScaleMultiplier;
-            case ReedsType:
+            case WorldReedsType:
                 return ReedsScaleMultiplier;
-            case AlpineType:
+            case WorldAlpineType:
                 return AlpineScaleMultiplier;
             default:
                 return 1.0f;
@@ -1019,6 +1019,11 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         ClearWorldVegetation();
     }
 
+    if (bEnableHeroSkeletalWindMode)
+    {
+        bAppendOnly = false;
+    }
+
     TArray<FCubusVegetationRepresentationCandidate>
         HeroTreeCandidates;
     TMap<int64, TArray<FTransform>> CatalogTransformsByBatchKey;
@@ -1264,8 +1269,8 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 );
 
             const bool bTreeType =
-                Instance.TypeId == BroadleafType ||
-                Instance.TypeId == ConiferType;
+                Instance.TypeId == WorldBroadleafType ||
+                Instance.TypeId == WorldConiferType;
 
             int64 TargetBatchKey = PrimaryBatchKey;
 
