@@ -15,9 +15,7 @@ ACubusBlockWorldActor::GetVoxelRenderMode() const
     }
 
     const ACubusVoxelVolumeActor* ChunkDefault =
-        ResolvedChunkClass->GetDefaultObject<
-            ACubusVoxelVolumeActor
-        >();
+        ResolvedChunkClass.GetDefaultObject();
 
     return IsValid(ChunkDefault)
         ? ChunkDefault->GetEffectiveRenderMode()
