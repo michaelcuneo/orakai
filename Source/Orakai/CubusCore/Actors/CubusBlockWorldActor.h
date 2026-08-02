@@ -33,12 +33,6 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
 
-#if WITH_EDITOR
-    virtual void PostEditChangeProperty(
-        FPropertyChangedEvent& PropertyChangedEvent
-    ) override;
-#endif
-
     void RegisterChunk(ACubusVoxelVolumeActor* ChunkActor);
     void UnregisterChunk(ACubusVoxelVolumeActor* ChunkActor);
 
@@ -110,17 +104,16 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
     void RebuildAllChunks();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Rendering")
-    void SetVoxelRenderMode(
-        ECubusVoxelRenderMode InRenderMode,
-        bool bRebuildChunks = true
-    );
-
+    /**
+     * Returns the render-mode default authored on ChunkActorClass.
+     *
+     * Runtime chunks are spawned from BP_CubusVoxelPCGChunk (or another
+     * configured chunk class), so the chunk Blueprint is the authoritative
+     * Blocks / Density / Hybrid selector. The world actor deliberately owns no
+     * separate render-mode property.
+     */
     UFUNCTION(BlueprintPure, Category = "Cubus|Rendering")
-    ECubusVoxelRenderMode GetVoxelRenderMode() const
-    {
-        return VoxelRenderMode;
-    }
+    ECubusVoxelRenderMode GetVoxelRenderMode() const;
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Terrain")
     void RegenerateTerrain();
@@ -279,9 +272,6 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "0.001", ClampMax = "1.0"))
     float TerrainMountainBlend = 0.20f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
-    ECubusVoxelRenderMode VoxelRenderMode = ECubusVoxelRenderMode::Blocks;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
     TObjectPtr<UCubusMaterialRegistry> MaterialRegistry = nullptr;
