@@ -42,10 +42,6 @@
 		{
 			"Name": "DynamicWind",
 			"Enabled": true
-		},
-		{
-			"Name": "ProceduralVegetationEditor",
-			"Enabled": true
 		}
 	]
 }
