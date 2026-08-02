@@ -1,47 +1,89 @@
 # Cubus density meshing
 
-Cubus has a smooth density-rendering path that runs beside the existing block
-mesher. It uses classic Marching Cubes and keeps the scalar-field source
-separate from geometry extraction.
+Cubus supports block, density and hybrid rendering from one voxel world. The
+density path uses classic Marching Cubes over a continuous scalar field.
 
-## Components
+## Authoritative render component
+
+Every `ACubusVoxelVolumeActor` has one authoritative
+`UProceduralMeshComponent`: its root `ProceduralMesh`.
+
+All render modes submit sections to that same component:
+
+- `Blocks` submits block-mesher sections.
+- `Density` submits Marching Cubes sections.
+- `Hybrid` submits block sections followed by density sections.
+
+This is intentional. Existing Cubus systems already treat the root procedural
+mesh as terrain:
+
+- collision and visibility traces,
+- voxel hit resolution,
+- player spawn placement,
+- streamed chunk mobility and teardown,
+- material assignment,
+- and near-field ray-tracing proxy generation.
+
+Density is therefore not a child component, separate actor, or Blueprint-added
+component.
+
+## Scalar-field pipeline
 
 - `ICubusDensityField` is the read-only scalar-field interface.
-- `FCubusTerrainDensityField` evaluates the configured terrain function as a
-  continuous scalar field. It preserves fractional height instead of rounding
-  terrain into occupied block cells before meshing.
-- `FCubusBlockDensityField` remains as a diagnostic and future hybrid adapter
-  over the current block voxel store.
-- `FCubusDensitySamplingBuffer` caches the 35 x 35 x 35 sample region required
-  to mesh a 32 x 32 x 32 chunk with central-difference normals.
-- `FCubusDensityMesher` extracts per-material mesh sections with interpolated
-  vertices, gradient normals, world-stable planar UVs, tangents, and Cubus face
-  selectors in vertex alpha.
-- `UCubusDensityMeshComponent` is the procedural mesh component used by every
-  `ACubusVoxelVolumeActor` for density geometry.
+- `FCubusTerrainDensityField` evaluates seeded terrain directly as continuous
+  density.
+- `FCubusBlockDensityField` is retained as a future block/density transition
+  adapter, but is not used for ordinary density terrain.
+- `FCubusDensitySamplingBuffer` caches the `35 x 35 x 35` sample region required
+  for one `32 x 32 x 32` mesh-cell chunk and central-difference normals.
+- `FCubusDensityMesher` extracts per-material Marching Cubes sections with
+  interpolated positions, gradient normals, stable UV projection, tangents and
+  Cubus face selectors.
+
+The native terrain field uses:
+
+```text
+terrain density = continuous surface sample Z - global sample Z
+```
+
+The height remains fractional, so the zero crossing can occur anywhere along a
+voxel edge instead of being locked to a block staircase.
+
+Where geology enables caves, the field combines terrain and cave density:
+
+```text
+final density = min(terrain density, cave density)
+```
+
+The field also applies the same deterministic terrain-domain offset used by the
+block generator and continuous river lowering using the geology profile's river
+seed and parameters.
 
 ## Selecting the world render mode
 
-Select the `ACubusBlockWorldActor` in the level and use:
+Select `ACubusBlockWorldActor` and use:
 
-`Cubus > Rendering > Voxel Render Mode`
+```text
+Cubus > Rendering > Voxel Render Mode
+```
 
-The available modes are:
+The choices are:
 
-- `Blocks` builds only the existing hard-edged block mesh.
-- `Density` builds only the Marching Cubes density mesh.
-- `Hybrid (Blocks + Density)` builds both representations for comparison and
-  future mixed-terrain work.
+- `Blocks`
+- `Density`
+- `Hybrid (Blocks + Density)`
 
-Changing the dropdown in the editor rebuilds the registered chunks. New
-streamed chunks read the setting from their owning world whenever they build,
-so no special chunk Blueprint or manually added density component is required.
+Changing the property synchronizes registered chunks with the world's current:
 
-After updating an existing level to the native terrain-density implementation,
-run `Regenerate Terrain` once so every existing chunk receives the current
-world terrain settings before it rebuilds.
+- generation seed,
+- terrain settings,
+- geology profile,
+- material registry,
+- and render mode,
 
-At runtime the same switch is available through:
+then rebuilds their root terrain meshes.
+
+At runtime:
 
 ```cpp
 BlockWorld->SetVoxelRenderMode(
@@ -50,68 +92,85 @@ BlockWorld->SetVoxelRenderMode(
 );
 ```
 
-The second argument controls whether currently registered chunks rebuild
-immediately.
-
-In `Hybrid` mode the block mesh currently owns collision to avoid submitting
-the same surface twice. In `Density` mode collision is generated from the
-density mesh.
-
-## Why the first density pass still looked blocky
-
-The first pass used `FCubusBlockDensityField`, which converted each generated
-block into one of two scalar values:
-
-```text
-solid block = +1
-empty block = -1
-```
-
-Marching Cubes interpolated between those values and produced smooth normals,
-but the underlying surface was still the already-quantized block staircase.
-It could round block corners, but it could not recover the fractional terrain
-height that had already been discarded.
-
-The native path now samples:
-
-```text
-Density = ContinuousSurfaceSampleZ - GlobalSampleZ
-```
-
-The terrain noise result remains a float. The isosurface can therefore cross an
-edge at any fractional position rather than only halfway between an occupied
-block and an empty block.
+The second argument determines whether loaded chunks rebuild immediately.
 
 ## Coordinate convention
 
-Generated block terrain describes the top occupied cell by integer height `H`.
-That cell ends at density sample plane `H + 1`. The native field keeps this
-`+1` alignment but leaves `H` fractional, so changing between Blocks and
-Density does not vertically shift the terrain.
+A chunk owns voxel coordinates `0..31` on each axis. Geometry is centred around
+the chunk actor, so density sample `0` is placed at the local chunk minimum and
+sample `32` at the local chunk maximum.
+
+A block surface whose top occupied voxel has integer height `H` ends at sample
+plane `H + 1`. Density preserves that vertical alignment while retaining the
+fractional terrain height.
 
 A density chunk owns Marching Cubes cells with lower sample coordinates
-`0..31`. Those cells need corner samples `0..32`. Smooth normals additionally
-need a one-sample halo, producing the buffered local range `-1..33`.
+`0..31`. Cell corners require samples `0..32`, while central-difference normals
+require the halo `-1..33`.
 
-All native terrain lookups use global voxel coordinates. Adjacent chunks
-therefore calculate identical density values and surface positions along their
-shared boundary without depending on neighbouring chunk data being loaded.
+All field samples use global voxel coordinates. Shared chunk boundaries
+therefore receive the same scalar values without requiring neighbouring chunks
+to be loaded.
 
-## Current scope
+## Diagnostics
 
-This remains an early density milestone rather than the final hybrid data
-model.
+Each chunk records:
 
-- Meshing is synchronous.
-- Vertices are emitted per triangle and are not yet edge-cached across cells.
-- Material selection is currently one dominant material per triangle.
-- Native terrain density currently represents the continuous height terrain.
-  Caves, overhangs, sparse sculpting edits, and blocks embedded in density still
-  need the composite three-dimensional field.
-- The block-backed density adapter is still available by disabling
-  `bUseNativeTerrainDensity` on the density mesh component for diagnostics.
-- Liquid density remains a separate surface path.
+- `Last Built Render Mode`
+- `Generated Block Section Count`
+- `Generated Density Section Count`
+- `Generated Density Triangle Count`
+- total root-mesh sections, vertices and triangles
+- build time
 
-Automation coverage includes a full-chunk horizontal plane, a sphere crossing a
-chunk boundary, and a fractional-height plane that verifies Marching Cubes does
-not snap the native surface back onto a block boundary.
+A completed build also logs one line in this form:
+
+```text
+Cubus chunk (X, Y, Z) built mode=1 rootSections=3 blockSections=0 densitySections=3 ...
+```
+
+Render-mode values are:
+
+```text
+0 = Blocks
+1 = Density
+2 = Hybrid
+```
+
+A density chunk can legitimately have zero sections when the entire chunk is
+inside or outside the field. A world needs vertically adjacent chunks around
+the terrain surface; runtime streaming already loads a vertical range, while a
+manually generated editor grid must use suitable `Grid Origin` and
+`Grid Dimensions Z` values.
+
+## Audited limitations
+
+The following are not yet represented by the native density field:
+
+- sparse player density edits,
+- SpaceTimeDB density deltas,
+- discrete blocks embedded in or replacing density,
+- liquid surfaces,
+- biome-specific surface-material overrides,
+- strata and ore material layers,
+- and a dedicated block/density transition mesher.
+
+Block voxel edits currently modify `FCubusBlockChunkData`; Density mode does not
+yet translate those edits into scalar-field changes. Vegetation and some spawn
+fallback logic also still derive from block chunk data, so they approximate the
+continuous surface until those systems are moved to world density queries.
+
+Meshing is synchronous, vertices are emitted per triangle rather than through a
+chunk-wide edge cache, and material selection is one dominant material per
+triangle.
+
+## Regression coverage
+
+Automation tests cover:
+
+- a full-chunk horizontal plane,
+- a sphere crossing a chunk boundary,
+- fractional surface placement,
+- deterministic seeded terrain domains,
+- continuous river lowering,
+- and three-dimensional cave carving with surface clearance.
