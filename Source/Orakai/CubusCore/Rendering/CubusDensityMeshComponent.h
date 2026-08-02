@@ -18,11 +18,7 @@ UCLASS(
     BlueprintType,
     Blueprintable,
     ClassGroup = "Cubus",
-    meta = (
-        BlueprintSpawnableComponent,
-        DeprecatedNode,
-        DeprecationMessage = "Legacy compatibility component. Density now renders through the chunk root ProceduralMesh."
-    )
+    meta = (BlueprintSpawnableComponent)
 )
 class ORAKAI_API UCubusDensityMeshComponent : public UProceduralMeshComponent
 {
