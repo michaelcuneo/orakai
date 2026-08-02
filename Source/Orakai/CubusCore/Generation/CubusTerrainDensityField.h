@@ -5,11 +5,9 @@
 #include "CubusCore/Generation/CubusDensityField.h"
 
 /**
- * Terrain settings copied from a Cubus chunk before a density build.
- *
- * The density path deliberately keeps these values in a plain structure so
- * meshing does not depend on an Actor or UObject and can later move safely to
- * background jobs.
+ * Plain, immutable-at-build-time settings for the native terrain density
+ * field. Keeping this independent of Actors and UObjects allows density
+ * sampling and meshing to move to worker threads later.
  */
 struct ORAKAI_API FCubusTerrainDensitySettings
 {
@@ -43,6 +41,33 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float MountainThreshold = 0.30f;
     float MountainBlend = 0.20f;
 
+    /** Same whole-chunk terrain-domain offset used by block generation. */
+    int32 TerrainOffsetX = 0;
+    int32 TerrainOffsetY = 0;
+
+    bool bGenerateRivers = false;
+    float RiverFrequency = 0.0025f;
+    float RiverChannelWidth = 0.055f;
+    float RiverValleyWidth = 0.22f;
+    float RiverValleyDepth = 7.0f;
+    float RiverChannelDepth = 4.0f;
+    float RiverWarpAmplitude = 48.0f;
+    float RiverWarpFrequency = 0.006f;
+    int32 RiverOffsetX = 0;
+    int32 RiverOffsetY = 0;
+
+    bool bGenerateCaves = false;
+    int32 CaveMinimumWorldZ = -256;
+    int32 CaveMaximumWorldZ = 24;
+    int32 CaveSurfaceClearance = 5;
+    float CavePrimaryFrequency = 0.035f;
+    float CaveSecondaryFrequency = 0.07f;
+    float CaveThreshold = 0.16f;
+    float CaveSurfaceSharpness = 8.0f;
+    int32 CaveOffsetX = 0;
+    int32 CaveOffsetY = 0;
+    int32 CaveOffsetZ = 0;
+
     int32 SurfaceMaterialId = 1;
     int32 SubsurfaceMaterialId = 2;
     int32 RockMaterialId = 3;
@@ -54,16 +79,12 @@ struct ORAKAI_API FCubusTerrainDensitySettings
 };
 
 /**
- * Continuous terrain scalar field used by the native density renderer.
+ * Continuous scalar field for Cubus terrain.
  *
- * Unlike FCubusBlockDensityField, this field never converts generated block
- * occupancy into +1/-1 samples. It evaluates the terrain function directly,
- * preserves the fractional height, and returns:
- *
- *     Density = ContinuousSurfaceSampleZ - GlobalSampleZ
- *
- * The zero crossing therefore moves continuously between lattice samples
- * instead of remaining locked to the block staircase.
+ * The field evaluates the same seeded two-dimensional terrain domain as the
+ * block generator, applies continuous river lowering, and intersects the
+ * result with a smooth three-dimensional cave field. Its zero crossing is not
+ * quantized to block occupancy.
  */
 class ORAKAI_API FCubusTerrainDensityField final : public ICubusDensityField
 {
@@ -117,9 +138,16 @@ private:
         float WorldY
     ) const;
 
-    float SampleNoise(
+    float SampleNoise2D(
         float WorldX,
         float WorldY,
+        float Frequency
+    ) const;
+
+    float SampleNoise3D(
+        float WorldX,
+        float WorldY,
+        float WorldZ,
         float Frequency
     ) const;
 
@@ -132,6 +160,22 @@ private:
     float SampleValleyMask(
         float WorldX,
         float WorldY
+    ) const;
+
+    float SampleRiverDistance(
+        float WorldX,
+        float WorldY
+    ) const;
+
+    float ApplyRiverLowering(
+        float SurfaceHeight,
+        float WorldX,
+        float WorldY
+    ) const;
+
+    float SampleCaveDensity(
+        const FIntVector& GlobalSampleCoordinate,
+        float SurfaceVoxelHeight
     ) const;
 
     static float SmoothStep(
