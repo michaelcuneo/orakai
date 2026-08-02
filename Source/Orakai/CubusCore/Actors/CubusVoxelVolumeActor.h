@@ -8,7 +8,6 @@
 #include "CubusVoxelVolumeActor.generated.h"
 
 class ACubusBlockWorldActor;
-class UCubusDensityMeshComponent;
 class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
 class UProceduralMeshComponent;
@@ -18,7 +17,7 @@ UCLASS(
     BlueprintType,
     Blueprintable,
     ClassGroup = "Cubus",
-    meta = (DisplayName = "Cubus Block Chunk")
+    meta = (DisplayName = "Cubus Voxel Chunk")
 )
 class ORAKAI_API ACubusVoxelVolumeActor : public AActor
 {
@@ -56,9 +55,9 @@ public:
         return ChunkData.Get();
     }
 
-    UCubusDensityMeshComponent* GetDensityMeshComponent() const
+    UProceduralMeshComponent* GetTerrainMeshComponent() const
     {
-        return DensityMesh.Get();
+        return ProceduralMesh.Get();
     }
 
     bool TryLoadCachedChunk();
@@ -80,7 +79,7 @@ public:
     {
         return OwningBlockWorld;
     }
-    
+
     void SetGenerateCollision(const bool bEnabled)
     {
         bGenerateCollision = bEnabled;
@@ -139,11 +138,15 @@ public:
     );
 
 protected:
+    /**
+     * The single authoritative terrain render component for every mode.
+     *
+     * Block, density and hybrid sections are all submitted here so collision,
+     * hit resolution, streaming, ray tracing and teardown operate on the same
+     * component.
+     */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<UProceduralMeshComponent> ProceduralMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
-    TObjectPtr<UCubusDensityMeshComponent> DensityMesh;
 
     UPROPERTY(
         VisibleInstanceOnly,
@@ -305,6 +308,19 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
     int32 GeneratedMaterialSectionCount = 0;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+    int32 GeneratedBlockSectionCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+    int32 GeneratedDensitySectionCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+    int32 GeneratedDensityTriangleCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+    ECubusVoxelRenderMode LastBuiltRenderMode =
+        ECubusVoxelRenderMode::Blocks;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics", meta = (Units = "ms"))
     float LastBuildTimeMilliseconds = 0.0f;
 
@@ -317,7 +333,16 @@ private:
 
     void EnsureChunkData();
     void SynchronizeChunkState();
-    void RebuildBlockMesh(bool bGenerateBlockCollision);
+
+    void RebuildBlockMesh(
+        bool bGenerateBlockCollision,
+        int32& InOutMeshSectionIndex
+    );
+
+    void RebuildDensityMesh(
+        bool bGenerateDensityCollision,
+        int32& InOutMeshSectionIndex
+    );
 
     const FCubusBlockChunkData* FindNeighbourChunkData(
         const FIntVector& CoordinateOffset
