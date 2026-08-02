@@ -6,13 +6,13 @@
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
-#include "CubusCore/Generation/CubusBlockDensityField.h"
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
 #include "CubusCore/Meshing/CubusDensityMesher.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
 
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
 
@@ -24,12 +24,31 @@ UCubusDensityMeshComponent::UCubusDensityMeshComponent(
     PrimaryComponentTick.bCanEverTick = false;
     bUseAsyncCooking = true;
     SetCastShadow(true);
+    SetRenderInMainPass(true);
+    SetRenderInDepthPass(true);
     SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void UCubusDensityMeshComponent::BeginPlay()
 {
     Super::BeginPlay();
+
+    const ACubusVoxelVolumeActor* OwnerChunk =
+        Cast<ACubusVoxelVolumeActor>(GetOwner());
+
+    // Older setup instructions temporarily required a Blueprint-added density
+    // component. Chunks now own a native density component, so prevent an old
+    // manually-added component from rebuilding a second, stale surface over it.
+    if (
+        IsValid(OwnerChunk) &&
+        OwnerChunk->GetDensityMeshComponent() != this
+    )
+    {
+        ClearDensityMesh();
+        SetVisibility(false);
+        SetHiddenInGame(true);
+        return;
+    }
 
     if (!bAutoRebuildOnBeginPlay)
     {
@@ -58,56 +77,64 @@ bool UCubusDensityMeshComponent::RebuildDensityMesh()
     const ACubusVoxelVolumeActor* OwnerChunk =
         Cast<ACubusVoxelVolumeActor>(GetOwner());
 
-    if (
-        !IsValid(OwnerChunk) ||
-        OwnerChunk->GetChunkData() == nullptr
-    )
+    if (!IsValid(OwnerChunk))
     {
         UE_LOG(
             LogTemp,
             Warning,
-            TEXT("Cubus density mesh component requires an owning Cubus voxel chunk with generated data.")
+            TEXT("Cubus density mesh component requires an owning Cubus voxel chunk.")
         );
         return false;
     }
 
+    // Only the C++-owned density renderer may build automatically. This also
+    // neutralises Blueprint components created while density was experimental.
+    if (OwnerChunk->GetDensityMeshComponent() != this)
+    {
+        SetVisibility(false);
+        SetHiddenInGame(true);
+
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("Cubus ignored legacy duplicate density component %s on chunk %s."),
+            *GetName(),
+            *OwnerChunk->GetName()
+        );
+
+        return false;
+    }
+
+    // The original block mesh is the actor root in the current chunk class.
+    // Density used to be its child, which meant hiding the block renderer also
+    // hid the density renderer. Detach while preserving the chunk transform so
+    // the two representations are genuinely independent.
+    if (GetAttachParent() == OwnerChunk->GetRootComponent())
+    {
+        DetachFromComponent(
+            FDetachmentTransformRules::KeepWorldTransform
+        );
+    }
+
+    SetWorldTransform(OwnerChunk->GetActorTransform());
+    SetVisibility(true);
+    SetHiddenInGame(false);
+    SetRenderInMainPass(true);
+    SetRenderInDepthPass(true);
+
+    // Density mode now always evaluates the continuous terrain scalar field.
+    // The old +1/-1 block-occupancy adapter remains in the codebase for future
+    // block/density transition work, but is no longer an automatic terrain
+    // source and cannot silently turn Density mode back into rounded blocks.
+    const FCubusTerrainDensityField DensityField(
+        TerrainDensitySettings
+    );
+
     FCubusDensitySamplingBuffer DensityBuffer;
-
-    if (bUseNativeTerrainDensity)
-    {
-        const FCubusTerrainDensityField DensityField(
-            TerrainDensitySettings
-        );
-
-        DensityBuffer.Build(
-            OwnerChunk->GetChunkCoordinate(),
-            DensityField
-        );
-    }
-    else
-    {
-        FCubusBlockVoxelSampler VoxelSampler =
-            [this, OwnerChunk](
-                const FIntVector& GlobalSampleCoordinate
-            )
-            {
-                return SampleVoxelAtWorldCoordinate(
-                    *OwnerChunk,
-                    GlobalSampleCoordinate
-                );
-            };
-
-        const FCubusBlockDensityField DensityField(
-            MoveTemp(VoxelSampler),
-            bTreatWaterAsEmpty,
-            DensityMagnitude
-        );
-
-        DensityBuffer.Build(
-            OwnerChunk->GetChunkCoordinate(),
-            DensityField
-        );
-    }
+    DensityBuffer.Build(
+        OwnerChunk->GetChunkCoordinate(),
+        DensityField
+    );
 
     TMap<int32, FCubusMeshData> MaterialMeshes;
     int32 MesherTriangleCount = 0;
@@ -155,10 +182,17 @@ bool UCubusDensityMeshComponent::RebuildDensityMesh()
 
         if (IsValid(MaterialRegistry.Get()))
         {
+            if (UMaterialInterface* RegistryMaterial =
+                    MaterialRegistry->ResolveRuntimeMaterial(MaterialId))
+            {
+                ResolvedMaterial = RegistryMaterial;
+            }
+        }
+
+        if (!IsValid(ResolvedMaterial))
+        {
             ResolvedMaterial =
-                MaterialRegistry->ResolveRuntimeMaterial(
-                    MaterialId
-                );
+                UMaterial::GetDefaultMaterial(MD_Surface);
         }
 
         SetMaterial(
@@ -200,7 +234,36 @@ bool UCubusDensityMeshComponent::RebuildDensityMesh()
             1000.0
         );
 
-    return MeshSectionIndex > 0;
+    MarkRenderStateDirty();
+
+    if (MeshSectionIndex <= 0)
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("Cubus native density produced no surface for chunk (%d, %d, %d)."),
+            OwnerChunk->GetChunkCoordinate().X,
+            OwnerChunk->GetChunkCoordinate().Y,
+            OwnerChunk->GetChunkCoordinate().Z
+        );
+
+        return false;
+    }
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("Cubus native density built chunk (%d, %d, %d): %d sections, %d vertices, %d triangles in %.2f ms."),
+        OwnerChunk->GetChunkCoordinate().X,
+        OwnerChunk->GetChunkCoordinate().Y,
+        OwnerChunk->GetChunkCoordinate().Z,
+        GeneratedDensitySectionCount,
+        GeneratedDensityVertexCount,
+        GeneratedDensityTriangleCount,
+        LastDensityBuildTimeMilliseconds
+    );
+
+    return true;
 }
 
 void UCubusDensityMeshComponent::ClearDensityMesh()
