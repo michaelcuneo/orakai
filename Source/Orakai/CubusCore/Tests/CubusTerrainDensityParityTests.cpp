@@ -122,7 +122,8 @@ bool FCubusTerrainDensityBlockParityTest::RunTest(
         1000,
         false,
         0,
-        5
+        5,
+        nullptr
     );
 
     FCubusTerrainDensitySettings DensitySettings;
