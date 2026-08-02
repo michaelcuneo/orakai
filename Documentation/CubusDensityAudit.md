@@ -1,183 +1,225 @@
 # Cubus density implementation audit
 
-## Scope
+## Runtime architecture confirmed
 
-The density audit traced the complete terrain path through:
+Orakai does not author terrain chunks in the editor. The runtime path is:
 
-- `ACubusBlockWorldActor` construction, editor properties and streaming,
-- chunk registration, generation, removal and transient state,
-- `ACubusVoxelVolumeActor` data and render rebuilds,
-- `ACubusPCGVoxelVolumeActor` cache loading,
-- deterministic generation seeds,
+```text
+ACubusBlockWorldActor
+    |
+    | ChunkActorClass = BP_CubusVoxelPCGChunk
+    v
+SpawnChunkAtCoordinate()
+    |
+    v
+ACubusPCGVoxelVolumeActor instance
+    |
+    | inherited Voxel Render Mode authored on the Blueprint CDO
+    v
+GenerateTerrainData()
+    |
+    v
+RebuildVolume()
+    |
+    +-- Blocks  -> FCubusBlockMesher
+    +-- Density -> FCubusTerrainDensityField -> FCubusDensityMesher
+    +-- Hybrid  -> both
+    |
+    v
+root UProceduralMeshComponent
+```
+
+`BP_CubusVoxelPCGChunk` is the render-mode authority. The world actor owns no
+separate Blocks / Density / Hybrid property. Its `GetVoxelRenderMode()` helper
+only reads the configured `ChunkActorClass` default object so streamed chunks
+resolve the Blueprint-authored value consistently.
+
+## Scope audited
+
+The audit followed every Orakai path that creates, modifies, renders or consumes
+runtime chunk terrain:
+
+- world startup and runtime streaming,
+- `ChunkActorClass` resolution and `SpawnActor`,
+- `BP_CubusVoxelPCGChunk`'s native parent path,
+- chunk ownership, registration and removal,
+- generation seed initialization,
+- local block-cache lookup and regeneration,
 - base terrain, regions, valleys and mountains,
-- geology, rivers, caves, strata, ores and biomes,
-- block and density meshers,
-- procedural-mesh section and material submission,
-- collision setup and asynchronous cooking,
-- voxel hit resolution and edits,
-- spawn placement,
-- vegetation dependencies,
+- geology, rivers and caves,
+- block and density field construction,
+- `35 x 35 x 35` density halo sampling,
+- Marching Cubes extraction,
+- root procedural-mesh section submission,
+- material assignment and collision cooking,
+- voxel hit resolution,
+- player spawn placement,
+- vegetation's block-data dependencies,
 - ray-tracing proxy generation,
-- local chunk cache metadata,
 - persistence value types,
-- project/plugin configuration,
-- and automation coverage.
+- project plugin configuration,
+- and density automation coverage.
 
-Third-party plugin internals were not modified; the audit followed every Orakai
-system that consumes or produces terrain state.
+Third-party plugin implementation internals were not changed.
 
-## Critical faults corrected
+## Root causes found
 
-### 1. Density used a separate child terrain mesh
+### 1. The chunk Blueprint mode was ignored
 
-The initial implementation rendered density through a second child
-`UProceduralMeshComponent`. Existing Orakai systems use the chunk root
-procedural mesh as terrain, including collision, hit resolution, mobility,
-teardown and ray-tracing proxies.
+The earlier implementation added a second render-mode property to
+`ACubusBlockWorldActor`. Runtime chunks then asked the world for the mode, which
+meant the value selected on `BP_CubusVoxelPCGChunk` was not authoritative.
+
+**Correction:** the world-level property and setter were removed. The world's
+read-only resolver obtains the mode from the `ChunkActorClass` CDO, which is
+`BP_CubusVoxelPCGChunk` in the runtime setup.
+
+### 2. `BP_CubusVoxelPCGChunk` could not load cleanly
+
+An earlier density implementation added a native default subobject named
+`DensityMesh`, derived from `UCubusDensityMeshComponent`. The Blueprint saved an
+inner `BodySetup_0` export whose Outer was that component. Removing the class and
+subobject later produced:
+
+```text
+CreateExport: Failed to load Outer for resource 'BodySetup_0'
+```
+
+When the chunk Blueprint cannot load correctly, `ChunkActorClass` cannot reliably
+supply its Density default and runtime spawning can fall back to the native block
+chunk class.
+
+**Correction:** an inert serialization-compatibility
+`UCubusDensityMeshComponent` class has been restored. The PCG chunk constructor
+also recreates a hidden default subobject with the exact historical name
+`DensityMesh`. It never renders or collides; all real terrain still uses the root
+`ProceduralMesh`.
+
+### 3. Density originally used the wrong render component
+
+The first implementation rendered density through a second child procedural
+mesh. Orakai's existing systems treat the chunk root procedural mesh as terrain:
+
+- collision and visibility traces,
+- voxel hit resolution,
+- runtime mobility,
+- teardown,
+- and ray-tracing proxy generation.
 
 **Correction:** Blocks, Density and Hybrid now submit sections to the existing
 root `ProceduralMesh`.
 
-### 2. Render-mode changes rebuilt stale chunk configuration
+### 4. The first scalar field was still block occupancy
 
-Changing `VoxelRenderMode` previously called `RebuildAllChunks()` without first
-reapplying the world's seed, terrain settings, geology profile or material
-registry. Level-authored chunks could therefore rebuild with constructor
-defaults.
+The first pass converted each block to `+1` or `-1`. Marching Cubes could round
+that staircase but could not recover continuous terrain.
 
-**Correction:** `SetVoxelRenderMode` refreshes the registry, reconstructs the
-transient generated-chunk array, reapplies all world configuration and rebuilds
-each root terrain mesh.
-
-### 3. Native density ignored the world seed
-
-Block terrain moves its sampling domain using the deterministic terrain seed.
-The first native density field sampled unshifted coordinates, so Density and
-Blocks represented different worlds.
-
-**Correction:** Native density uses the same whole-chunk terrain-domain offset
-calculated from `FCubusGenerationSeeds`.
-
-### 4. Native density ignored geology shape operations
-
-The first native field represented only the base height function. River
-lowering and caves remained block-only operations.
-
-**Correction:** Native density applies continuous seeded river lowering and a
-three-dimensional cave scalar field with the geology profile's bounds,
-frequencies, threshold and surface clearance.
-
-### 5. Chunk occupancy caching could remain permanently stale
-
-Terrain generators mutate voxels through mutable pointers after `Chunk.Clear()`.
-The occupancy cache remained marked as known-empty, causing populated chunks to
-be treated as empty by spawn, vegetation and ray-tracing systems.
-
-**Correction:** Mutable voxel access invalidates the cached occupancy state.
-
-### 6. Editor-reloaded chunks were absent from `GeneratedChunks`
-
-`GeneratedChunks` is transient. A saved level could contain owned chunks while
-the array used by clear/regenerate operations was empty.
-
-**Correction:** Render-mode synchronization reconstructs the array from the
-coordinate registry.
-
-## Verified architecture after correction
+**Correction:** ordinary Density mode evaluates a native field directly:
 
 ```text
-ACubusBlockWorldActor.VoxelRenderMode
-        |
-        v
-world configuration synchronization
-        |
-        v
-ACubusVoxelVolumeActor.RebuildVolume
-        |
-        +-- Blocks  --> FCubusBlockMesher -----------+
-        |                                             |
-        +-- Density --> FCubusTerrainDensityField     |
-        |              -> sampling buffer             |
-        |              -> FCubusDensityMesher --------+--> root ProceduralMesh
-        |                                             |
-        +-- Hybrid --> both section groups -----------+
+terrain density = continuous surface sample Z - global sample Z
 ```
 
-The root component remains authoritative for rendering, material slots,
-collision and downstream terrain consumers.
+### 5. Native density initially ignored deterministic seed domains
 
-## Remaining high-priority gaps
+The block generator shifts its terrain sampling domain with the world's derived
+terrain seed. The initial native field did not.
 
-### Density edits are not implemented
+**Correction:** density uses the same whole-chunk terrain offset as block
+generation. The streamed PCG chunk now also applies the owning world's generation
+seeds explicitly before cache lookup or generation, rather than relying only on
+a global actor-spawn delegate.
 
-Block edits mutate `FCubusBlockChunkData`. The native field does not yet consume
-sparse scalar-density edits, so adding or removing a block does not sculpt
-Density mode.
+### 6. Native density initially ignored geology shape changes
 
-Required next layer:
+The initial continuous field omitted river lowering and caves.
+
+**Correction:** it now applies the geology profile's seeded river field and 3D
+cave field. Cave subtraction uses:
 
 ```text
-procedural terrain density
-+ procedural cave density
-+ sparse SpaceTimeDB density edits
-+ discrete block occupancy/overrides
+final density = min(terrain density, cave density)
 ```
 
-### Liquid surfaces are absent
+### 7. Mutable voxel access left occupancy state stale
 
-The density mesher currently produces solid terrain only. Ocean, lake and river
-water require a separate liquid field/section path.
+Block generation writes through mutable voxel pointers after `Chunk.Clear()`.
+The cached occupied/empty state was not invalidated, so systems could treat a
+populated chunk as empty.
 
-### Material parity is incomplete
+**Correction:** mutable voxel access invalidates the occupancy cache.
 
-The density field selects surface, rock, snow and subsurface materials. Biome
-surface overrides, strata and ores are still generated in block data rather
-than continuous material fields.
+## Current runtime diagnostics
 
-### Vegetation and spawn fallback use block data
+Each streamed PCG chunk logs its actual class and selected mode before generation:
 
-Vegetation placement and one spawn fallback calculate the surface from
-`FCubusBlockChunkData`. They remain close to, but not exactly on, the continuous
-surface.
+```text
+Cubus streamed chunk class=BP_CubusVoxelPCGChunk_C ... renderMode=1
+```
 
-### Cache identity is incomplete
+Render-mode values are:
 
-The local block cache is keyed by world seed and generation version, not a hash
-of all terrain/geology parameters. Changing amplitudes or geology settings can
-reuse stale block-derived data until the generation version or cache is reset.
-Native density geometry itself is evaluated directly and does not use that
-cache.
+```text
+0 = Blocks
+1 = Density
+2 = Hybrid
+```
 
-### Terrain-shape code is duplicated
+After rebuilding, the chunk logs:
 
-The continuous density field currently mirrors the block terrain formula. A
-shared deterministic terrain sampler should become the single source of truth
-for both block occupancy and density sampling.
+```text
+Cubus chunk (...) built mode=1 rootSections=...
+blockSections=0 densitySections=... densityTriangles=...
+```
 
-### Meshing remains synchronous
+For a chunk intersecting the terrain surface, Density mode must report:
 
-A density chunk samples `35^3` values and builds geometry on the calling thread.
-Runtime streaming needs revisioned asynchronous jobs before increasing view
-distance or density complexity.
+```text
+mode=1
+blockSections=0
+densitySections>0
+densityTriangles>0
+```
 
-### Vertex reuse and LOD are not implemented
+A completely solid or completely empty vertical chunk can legitimately produce
+zero density sections.
 
-Marching Cubes currently emits triangle-local vertices. Chunk-wide edge caches,
-LOD meshes and transition cells are future performance work.
+## Separate editor-load warning
 
-## Test coverage added
+`Orakai.uproject` currently enables the experimental
+`ProceduralVegetationEditor` plugin. Its sample material
+`MA_UI_Element_Inst` references a package under `/Quixel_Utilities`, but that
+mount point is unavailable in the current engine installation.
 
-- classic horizontal plane extraction,
-- sphere seam across a chunk boundary,
-- fractional native terrain surface,
-- deterministic seeded-domain displacement,
-- continuous river lowering,
-- three-dimensional cave carving and surface clearance,
-- and mutable chunk occupancy-cache invalidation.
+That warning is unrelated to voxel density. Resolve it independently by either:
+
+- installing/enabling the Quixel content/plugin that provides the
+  `/Quixel_Utilities` mount, or
+- disabling `ProceduralVegetationEditor` when its editor and sample assets are
+  not required.
+
+No Orakai C++ source currently references that editor plugin directly.
+
+## Remaining density work
+
+The following are not yet part of the native scalar field:
+
+- sparse player density edits,
+- SpaceTimeDB density deltas,
+- discrete blocks embedded in density,
+- liquid surfaces,
+- complete biome/strata/ore material parity,
+- density-native vegetation queries,
+- revisioned asynchronous meshing,
+- shared edge vertices,
+- LOD and transition cells.
+
+Block edits still mutate `FCubusBlockChunkData`; they do not yet sculpt the
+native density field.
 
 ## Validation boundary
 
-The code has been statically audited against the Orakai source and Unreal Engine
-5.8 API documentation. A full UnrealBuildTool compile, editor load, PIE run and
-automation-test pass must still be performed in the actual Orakai workspace.
-That build is the authoritative validation for engine integration.
+The branch has source-level tests for plane extraction, cross-chunk seams,
+fractional surfaces, seeded-domain parity, rivers, caves and occupancy-cache
+invalidation. The authoritative integration test remains an UnrealBuildTool
+compile followed by PIE with streamed `BP_CubusVoxelPCGChunk` instances.
