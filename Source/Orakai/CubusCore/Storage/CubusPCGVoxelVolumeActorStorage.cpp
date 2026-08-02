@@ -14,12 +14,23 @@ void ACubusPCGVoxelVolumeActor::GenerateTerrainData()
         );
     }
 
+    const FIntVector Coordinate = GetChunkCoordinate();
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("Cubus streamed chunk class=%s coordinate=(%d, %d, %d) renderMode=%d"),
+        *GetClass()->GetName(),
+        Coordinate.X,
+        Coordinate.Y,
+        Coordinate.Z,
+        static_cast<int32>(GetEffectiveRenderMode())
+    );
+
     // The procedural mesh is about to be replaced. Remove it from the ray
     // tracing scene first; the near-field manager will restore it after the
     // world actor has rebuilt the completed mesh.
     SetTerrainRayTracingEnabled(false);
-
-    const FIntVector Coordinate = GetChunkCoordinate();
 
     if (TryLoadCachedChunk())
     {
