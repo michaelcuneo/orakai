@@ -5,8 +5,9 @@
 #include "CubusVoxelRenderMode.generated.h"
 
 /**
- * Selects which geometry representation a Cubus world asks each chunk to
- * build. The underlying voxel data remains shared in every mode.
+ * Selects the geometry representation built by a streamed Cubus voxel chunk.
+ * The mode is authored on the configured chunk Blueprint class defaults; the
+ * underlying world and voxel coordinate space remain shared in every mode.
  */
 UENUM(BlueprintType)
 enum class ECubusVoxelRenderMode : uint8
