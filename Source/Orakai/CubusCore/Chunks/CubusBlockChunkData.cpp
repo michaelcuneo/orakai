@@ -87,6 +87,11 @@ FCubusBlockVoxel* FCubusBlockChunkData::GetVoxel(
         return nullptr;
     }
 
+    // Mutable access can change occupancy without going through SetVoxel.
+    // Invalidate before returning so terrain generators, geology, rivers and
+    // edit systems cannot leave HasAnyOccupiedVoxel() with stale cached state.
+    InvalidateOccupiedState();
+
     return &Voxels[
         Cubus::FlattenLocalCoordinate(X, Y, Z)
     ];
@@ -140,6 +145,8 @@ FCubusBlockChunkData::GetVoxelChecked(
 )
 {
     check(Cubus::IsValidLocalCoordinate(X, Y, Z));
+
+    InvalidateOccupiedState();
 
     return Voxels[
         Cubus::FlattenLocalCoordinate(X, Y, Z)
