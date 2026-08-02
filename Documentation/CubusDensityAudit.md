@@ -85,9 +85,8 @@ subobject later produced:
 CreateExport: Failed to load Outer for resource 'BodySetup_0'
 ```
 
-When the chunk Blueprint cannot load correctly, `ChunkActorClass` cannot reliably
-supply its Density default and runtime spawning can fall back to the native block
-chunk class.
+When the chunk Blueprint cannot load correctly, `ChunkActorClass` cannot
+reliably provide its Density class default during streaming.
 
 **Correction:** an inert serialization-compatibility
 `UCubusDensityMeshComponent` class has been restored. The PCG chunk constructor
@@ -186,19 +185,17 @@ zero density sections.
 
 ## Separate editor-load warning
 
-`Orakai.uproject` currently enables the experimental
-`ProceduralVegetationEditor` plugin. Its sample material
-`MA_UI_Element_Inst` references a package under `/Quixel_Utilities`, but that
-mount point is unavailable in the current engine installation.
+The project previously enabled the experimental `ProceduralVegetationEditor`
+plugin. Its sample material `MA_UI_Element_Inst` references a package under
+`/Quixel_Utilities`, but that mount point is unavailable in the current engine
+installation.
 
-That warning is unrelated to voxel density. Resolve it independently by either:
+No Orakai C++ source references that editor plugin, and Orakai already owns its
+runtime vegetation path. The branch therefore removes
+`ProceduralVegetationEditor` from `Orakai.uproject`, preventing the unrelated
+sample asset and missing Quixel package from loading.
 
-- installing/enabling the Quixel content/plugin that provides the
-  `/Quixel_Utilities` mount, or
-- disabling `ProceduralVegetationEditor` when its editor and sample assets are
-  not required.
-
-No Orakai C++ source currently references that editor plugin directly.
+This change is independent of voxel density.
 
 ## Remaining density work
 
