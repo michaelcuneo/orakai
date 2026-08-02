@@ -59,16 +59,17 @@ namespace CubusVoxelChunkMobility
             return false;
         }
 
-        if (!BlockWorld->IsInitialSpawnAreaReady())
-        {
-            return false;
-        }
-
         const FVector PawnLocation = PlayerPawn->GetActorLocation();
-        bool bHasGeneratedChunk = false;
         bool bFoundSurface = false;
         double HighestSurfaceZ = -DBL_MAX;
 
+        /*
+         * Density chunks take longer to mesh than block chunks. Waiting for
+         * every coordinate in the complete initial horizontal/vertical volume
+         * kept the pawn frozen even after the terrain below the spawn point was
+         * already generated and rebuilt. Release as soon as that supporting
+         * column exists; this does not alter vegetation generation or wind.
+         */
         for (
             TActorIterator<ACubusVoxelVolumeActor> Iterator(World);
             Iterator;
@@ -82,7 +83,16 @@ namespace CubusVoxelChunkMobility
                 continue;
             }
 
-            bHasGeneratedChunk = true;
+            ACubusBlockWorldActor* OwningWorld =
+                ChunkActor->GetOwningBlockWorld();
+
+            if (
+                OwningWorld != BlockWorld &&
+                ChunkActor->GetOwner() != BlockWorld
+            )
+            {
+                continue;
+            }
 
             const FCubusBlockChunkData* ChunkData =
                 ChunkActor->GetChunkData();
@@ -96,20 +106,36 @@ namespace CubusVoxelChunkMobility
             }
 
             const double VoxelSize =
-                static_cast<double>(FMath::Max(1.0f, ChunkActor->GetVoxelSize()));
+                static_cast<double>(
+                    FMath::Max(
+                        1.0f,
+                        ChunkActor->GetVoxelSize()
+                    )
+                );
 
             const double HalfChunkWorldSize =
-                static_cast<double>(Cubus::ChunkSize) * VoxelSize * 0.5;
+                static_cast<double>(Cubus::ChunkSize) *
+                VoxelSize *
+                0.5;
 
-            const FVector ChunkLocation = ChunkActor->GetActorLocation();
+            const FVector ChunkLocation =
+                ChunkActor->GetActorLocation();
 
             const int32 LocalX = FMath::FloorToInt(
-                (PawnLocation.X - ChunkLocation.X + HalfChunkWorldSize) /
+                (
+                    PawnLocation.X -
+                    ChunkLocation.X +
+                    HalfChunkWorldSize
+                ) /
                 VoxelSize
             );
 
             const int32 LocalY = FMath::FloorToInt(
-                (PawnLocation.Y - ChunkLocation.Y + HalfChunkWorldSize) /
+                (
+                    PawnLocation.Y -
+                    ChunkLocation.Y +
+                    HalfChunkWorldSize
+                ) /
                 VoxelSize
             );
 
@@ -121,19 +147,43 @@ namespace CubusVoxelChunkMobility
                 continue;
             }
 
-            for (int32 LocalZ = Cubus::ChunkSize - 1; LocalZ >= 0; --LocalZ)
+            for (
+                int32 LocalZ = Cubus::ChunkSize - 1;
+                LocalZ >= 0;
+                --LocalZ
+            )
             {
-                if (ChunkData->IsEmpty(LocalX, LocalY, LocalZ))
+                const FCubusBlockVoxel* Voxel =
+                    ChunkData->GetVoxel(
+                        LocalX,
+                        LocalY,
+                        LocalZ
+                    );
+
+                // Density currently has no liquid surface path, so water must
+                // not be treated as a valid player-supporting surface.
+                if (
+                    Voxel == nullptr ||
+                    Voxel->IsEmpty() ||
+                    Voxel->IsWater()
+                )
                 {
                     continue;
                 }
 
                 const double SurfaceZ =
                     ChunkLocation.Z +
-                    ((static_cast<double>(LocalZ) + 1.0) * VoxelSize) -
+                    (
+                        static_cast<double>(LocalZ) +
+                        1.0
+                    ) *
+                    VoxelSize -
                     HalfChunkWorldSize;
 
-                if (!bFoundSurface || SurfaceZ > HighestSurfaceZ)
+                if (
+                    !bFoundSurface ||
+                    SurfaceZ > HighestSurfaceZ
+                )
                 {
                     HighestSurfaceZ = SurfaceZ;
                     bFoundSurface = true;
@@ -143,37 +193,28 @@ namespace CubusVoxelChunkMobility
             }
         }
 
-        if (!bHasGeneratedChunk)
+        if (!bFoundSurface)
         {
             return false;
         }
 
-        const FVector ReleaseLocation = bFoundSurface
-            ? FVector(
-                PawnLocation.X,
-                PawnLocation.Y,
-                HighestSurfaceZ + 150.0
-            )
-            : FVector(
-                PawnLocation.X,
-                PawnLocation.Y,
-                PawnLocation.Z + 200.0
-            );
+        const FVector ReleaseLocation(
+            PawnLocation.X,
+            PawnLocation.Y,
+            HighestSurfaceZ + 150.0
+        );
 
         BlockWorld->ReleaseHeldPawnAtLocation(
             PlayerPawn,
             ReleaseLocation
         );
 
-        if (!bFoundSurface)
-        {
-            UE_LOG(
-                LogTemp,
-                Warning,
-                TEXT("Cubus released player without an exact voxel surface; gravity fallback used at Z=%.2f"),
-                ReleaseLocation.Z
-            );
-        }
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT("Cubus released held player from streamed terrain data at Z=%.2f before full initial-volume completion."),
+            ReleaseLocation.Z
+        );
 
         return true;
     }
