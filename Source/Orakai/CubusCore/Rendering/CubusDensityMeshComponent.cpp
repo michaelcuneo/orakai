@@ -26,9 +26,9 @@ void UCubusDensityMeshComponent::OnRegister()
 
 void UCubusDensityMeshComponent::DisableLegacyRenderer()
 {
-    ClearAllMeshSections();
-    ClearCollisionConvexMeshes();
-
+    // Do not mutate serialized mesh or BodySetup data while a Blueprint CDO is
+    // loading. This object exists solely so the old DensityMesh outer can be
+    // resolved. Disabling every render and collision path is sufficient.
     SetCollisionEnabled(ECollisionEnabled::NoCollision);
     SetGenerateOverlapEvents(false);
     SetCastShadow(false);
