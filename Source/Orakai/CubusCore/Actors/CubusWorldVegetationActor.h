@@ -50,6 +50,14 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation")
     void ClearWorldVegetation();
 
+    /**
+     * Invalidates only the cached wind/weather targets and last published
+     * values. The next ordinary actor tick reapplies the existing bridge to
+     * every currently available foliage component, material collection and
+     * Global Foliage Actor without changing any authored vegetation settings.
+     */
+    void InvalidateDynamicWindBridgeTargets();
+
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<USceneComponent> Root;
@@ -137,7 +145,7 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Families", meta = (EditCondition = "bClusterTreeFamilies", ClampMin = "0.0", ClampMax = "0.4"))
     float TreeFamilyCenterJitterFraction = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Families", meta = (EditCondition = "bClusterTreeFamilies", ClampMin = "0.02", ClampMax = "0.4"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Families", meta = (EditCondition = "bClusterTreeFamilies", ClampMin = "0.02", UIMin = "0.02", UIMax = "0.4"))
     float MatureTreeCoreRadius = 0.16f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Families", meta = (EditCondition = "bClusterTreeFamilies", ClampMin = "0.1", ClampMax = "0.8"))
@@ -234,7 +242,6 @@ protected:
     int64 PublishedPlacementHash = 0;
 
 private:
-
     UPROPERTY(Transient)
     TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> CatalogStaticBatchComponents;
 
@@ -263,7 +270,7 @@ private:
     uint32 PublishedVegetationSettingsHash = 0;
 
     float TimeUntilRefresh = 0.0f;
-    
+
     FCubusVegetationCatalog VegetationCatalog;
     FCubusVegetationRenderer VegetationRenderer;
     FCubusVegetationPlacement VegetationPlacement;
