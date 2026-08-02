@@ -234,7 +234,7 @@ namespace CubusDensityMesher
         FInterpolatedVertex VertexC
     )
     {
-        FVector FaceNormal =
+        FVector WindingCrossNormal =
             FVector::CrossProduct(
                 VertexB.LocalPosition -
                     VertexA.LocalPosition,
@@ -242,12 +242,12 @@ namespace CubusDensityMesher
                     VertexA.LocalPosition
             );
 
-        if (FaceNormal.SizeSquared() <= SMALL_NUMBER)
+        if (WindingCrossNormal.SizeSquared() <= SMALL_NUMBER)
         {
             return false;
         }
 
-        FaceNormal.Normalize();
+        WindingCrossNormal.Normalize();
 
         const FVector AverageNormal =
             (
@@ -256,16 +256,23 @@ namespace CubusDensityMesher
                 VertexC.Normal
             ).GetSafeNormal();
 
+        /*
+         * Unreal's renderer uses clockwise front faces. Viewed along the
+         * outward stored normal, a clockwise triangle has a vertex cross
+         * product that points opposite that normal. The previous condition
+         * enforced the OpenGL/Maya CCW convention, so every density triangle
+         * was rendered and queried from its inside face.
+         */
         if (
             !AverageNormal.IsNearlyZero() &&
             FVector::DotProduct(
-                FaceNormal,
+                WindingCrossNormal,
                 AverageNormal
-            ) < 0.0
+            ) > 0.0
         )
         {
             Swap(VertexB, VertexC);
-            FaceNormal *= -1.0;
+            WindingCrossNormal *= -1.0;
         }
 
         const int32 FirstVertexIndex =
@@ -295,7 +302,7 @@ namespace CubusDensityMesher
             FVector TangentBasis;
 
             ResolveProjection(
-                FaceNormal,
+                WindingCrossNormal,
                 Vertex.GlobalSamplePosition,
                 UV,
                 TangentBasis
