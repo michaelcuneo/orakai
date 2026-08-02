@@ -5,7 +5,7 @@
 namespace CubusMarchingCubesTables
 {
     /**
-     * Classic 256-case Marching Cubes triangulation table.
+     * Canonical classic 256-case Marching Cubes triangulation table.
      *
      * Each edge index occupies one hexadecimal nibble. The value `f` is the
      * row terminator, while `0` through `b` identify the twelve cube edges.
@@ -34,7 +34,7 @@ namespace CubusMarchingCubesTables
         "23ba68a89867ffff20727b09767a9a7f1801781a767a23bfb21b17a61671ffff896867916b63136f091b67ffffffffff"
         "7807063b0b60ffff7b6fffffffffffff76bfffffffffffff308b76ffffffffff019b76ffffffffff819831b76fffffff"
         "a126b7ffffffffff12a3086b7fffffff2902a96b7fffffff6b72a3a83a98ffff723627ffffffffff708760620fffffff"
-        "276237019fffffff162186198876ffffa76a17137fffffffa7617a87108ffff03707a0a96a7ffff76a7a88a9ffffffff"
+        "276237019fffffff162186198876ffffa76a17137fffffffa7617a187108ffff03707a0a96a7ffff76a7a88a9fffffff"
         "684b86ffffffffff36b306046fffffff86b846901fffffff946963931b36ffff6846b82a1fffffff12a30b06b046ffff"
         "4b846b0292a9ffffa93a32943b36463f823842462fffffff042462ffffffffff190234246438ffff194142246fffffff"
         "8138618466a1ffffa10a06604fffffff4634386a3039a93fa946a4ffffffffff49576bffffffffff083495b76fffffff"
@@ -49,16 +49,89 @@ namespace CubusMarchingCubesTables
         "01984a8aba45ffffab4a45b34941314f2512852b8458ffff04b0b345b2b151bf0250592b5458b85f9452b3ffffffffff"
         "25a352345384ffff5a2524420fffffff3a235a385458019f5a2524192942ffff845853351fffffff045105ffffffffff"
         "845853905035ffff945fffffffffffff4b749b9abfffffff0834979b79abffff1ab1b414074bffff3143481a474bab4f"
-        "4b79b492b912ffff9749b791b2b1083fb74b42240fffffffb74b42834324ffff29a279237794ffff9a7974a27870207f"
+        "4b79b492b912ffff9749b791b2b1083fb74b42240fffffffb74b42834324ffff29a279237749ffff9a7974a27870207f"
         "37a3a274a1a040af1a2874ffffffffff491417713fffffff491417081871ffff403743ffffffffff487fffffffffffff"
         "9a8ab8ffffffffff30939bb9afffffff01a0a88abfffffff31ab3affffffffff12b1b99b8fffffff30939b1292b9ffff"
         "02b80bffffffffff32bfffffffffffff23828aa89fffffff9a2092ffffffffff23828a0181a8ffff1a2fffffffffffff"
-        "138918ffffffffff091fffffffffffff038fffffffffffffffffffffffffffff"
-        ;
+        "138918ffffffffff091fffffffffffff038fffffffffffffffffffffffffffff";
 
     static_assert(
         UE_ARRAY_COUNT(EncodedTriangleTable) - 1 == 256 * 16,
         "The Cubus Marching Cubes table must contain 256 rows of 16 entries."
+    );
+
+    constexpr bool IsEncodedEdge(const ANSICHAR Value)
+    {
+        return
+            (Value >= '0' && Value <= '9') ||
+            (Value >= 'a' && Value <= 'b');
+    }
+
+    constexpr bool ValidateTriangleTable()
+    {
+        for (int CaseIndex = 0; CaseIndex < 256; ++CaseIndex)
+        {
+            bool bReachedTerminator = false;
+            int EdgeCount = 0;
+
+            for (int EntryIndex = 0; EntryIndex < 16; ++EntryIndex)
+            {
+                const ANSICHAR Value =
+                    EncodedTriangleTable[
+                        CaseIndex * 16 +
+                        EntryIndex
+                    ];
+
+                if (Value == 'f')
+                {
+                    bReachedTerminator = true;
+                    continue;
+                }
+
+                if (
+                    bReachedTerminator ||
+                    !IsEncodedEdge(Value)
+                )
+                {
+                    return false;
+                }
+
+                ++EdgeCount;
+            }
+
+            if ((EdgeCount % 3) != 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    constexpr uint64 HashTriangleTable()
+    {
+        uint64 Hash = 14695981039346656037ull;
+
+        for (int Index = 0; Index < 256 * 16; ++Index)
+        {
+            Hash ^=
+                static_cast<uint8>(
+                    EncodedTriangleTable[Index]
+                );
+            Hash *= 1099511628211ull;
+        }
+
+        return Hash;
+    }
+
+    static_assert(
+        ValidateTriangleTable(),
+        "Every Marching Cubes row must contain complete edge triplets followed only by terminators."
+    );
+
+    static_assert(
+        HashTriangleTable() == 0xc11773bd50433487ull,
+        "The Cubus Marching Cubes table no longer matches the canonical classic 256-case table."
     );
 
     FORCEINLINE int8 GetTriangleEdge(
@@ -80,7 +153,15 @@ namespace CubusMarchingCubesTables
             return -1;
         }
 
-        if (EncodedValue >= 'a')
+        if (EncodedValue >= '0' && EncodedValue <= '9')
+        {
+            return static_cast<int8>(
+                EncodedValue -
+                '0'
+            );
+        }
+
+        if (EncodedValue >= 'a' && EncodedValue <= 'b')
         {
             return static_cast<int8>(
                 10 +
@@ -89,9 +170,7 @@ namespace CubusMarchingCubesTables
             );
         }
 
-        return static_cast<int8>(
-            EncodedValue -
-            '0'
-        );
+        checkNoEntry();
+        return -1;
     }
 }
