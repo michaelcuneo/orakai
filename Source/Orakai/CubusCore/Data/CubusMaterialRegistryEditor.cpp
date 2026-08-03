@@ -113,7 +113,7 @@ namespace CubusMaterialRegistryEditor
             1,
             1,
             TSF_BGRA8,
-            SourceData
+            SourceData.GetData()
         );
         Texture->SRGB = bSrgb;
         Texture->CompressionSettings = CompressionSettings;
