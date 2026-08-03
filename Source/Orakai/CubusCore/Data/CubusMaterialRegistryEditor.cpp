@@ -3,6 +3,7 @@
 #include "CubusCore/Editor/CubusMaterialBuilderLibrary.h"
 #include "CubusCore/Meshing/CubusDensityMesher.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Texture2D.h"
 #include "Engine/Texture2DArray.h"
 #include "Materials/Material.h"
@@ -33,11 +34,13 @@ namespace CubusMaterialRegistryEditor
         }
 
         bOutCreated = true;
-        return NewObject<UTexture2DArray>(
+        UTexture2DArray* Created = NewObject<UTexture2DArray>(
             Package,
             FName(AssetName),
             RF_Public | RF_Standalone | RF_Transactional
         );
+        FAssetRegistryModule::AssetCreated(Created);
+        return Created;
     }
 
     bool SaveAsset(UObject* Asset)
@@ -59,6 +62,75 @@ namespace CubusMaterialRegistryEditor
         Args.TopLevelFlags = RF_Public | RF_Standalone;
         Args.SaveFlags = SAVE_NoError;
         return UPackage::SavePackage(Package, Asset, *Filename, Args);
+    }
+
+    UTexture2D* FindOrCreateSolidTexture(
+        const TCHAR* PackagePath,
+        const TCHAR* AssetName,
+        const FColor Pixel,
+        const TextureCompressionSettings CompressionSettings,
+        const bool bSrgb
+    )
+    {
+        UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, PackagePath);
+        bool bCreated = false;
+
+        if (!IsValid(Texture))
+        {
+            UPackage* Package = CreatePackage(PackagePath);
+            if (!IsValid(Package))
+            {
+                return nullptr;
+            }
+
+            Texture = NewObject<UTexture2D>(
+                Package,
+                FName(AssetName),
+                RF_Public | RF_Standalone | RF_Transactional
+            );
+            bCreated = true;
+        }
+
+        if (!IsValid(Texture))
+        {
+            return nullptr;
+        }
+
+        Texture->Modify();
+
+        TArray64<uint8> SourceData;
+        SourceData.Append(
+        {
+            Pixel.B,
+            Pixel.G,
+            Pixel.R,
+            Pixel.A
+        });
+
+        Texture->Source.Init(
+            1,
+            1,
+            1,
+            1,
+            TSF_BGRA8,
+            SourceData
+        );
+        Texture->SRGB = bSrgb;
+        Texture->CompressionSettings = CompressionSettings;
+        Texture->MipGenSettings = TMGS_NoMipmaps;
+        Texture->AddressX = TA_Wrap;
+        Texture->AddressY = TA_Wrap;
+        Texture->NeverStream = true;
+        Texture->PostEditChange();
+        Texture->UpdateResource();
+
+        if (bCreated)
+        {
+            FAssetRegistryModule::AssetCreated(Texture);
+        }
+
+        SaveAsset(Texture);
+        return Texture;
     }
 
     template <typename TSelector>
@@ -171,14 +243,43 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
 #if WITH_EDITOR
     using namespace CubusMaterialRegistryEditor;
 
-    UTexture2D* DefaultColor = LoadObject<UTexture2D>(
-        nullptr,
-        TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture")
+    UTexture2D* NeutralBaseColor = FindOrCreateSolidTexture(
+        TEXT("/Game/Cubus/Materials/Arrays/T_CubusDensityNeutralBaseColor"),
+        TEXT("T_CubusDensityNeutralBaseColor"),
+        FColor(255, 255, 255, 255),
+        TC_Default,
+        true
     );
-    UTexture2D* DefaultNormal = LoadObject<UTexture2D>(
-        nullptr,
-        TEXT("/Engine/EngineMaterials/DefaultNormal.DefaultNormal")
+    UTexture2D* NeutralNormal = FindOrCreateSolidTexture(
+        TEXT("/Game/Cubus/Materials/Arrays/T_CubusDensityNeutralNormal"),
+        TEXT("T_CubusDensityNeutralNormal"),
+        FColor(128, 128, 255, 255),
+        TC_Normalmap,
+        false
     );
+    UTexture2D* NeutralOrm = FindOrCreateSolidTexture(
+        TEXT("/Game/Cubus/Materials/Arrays/T_CubusDensityNeutralORM"),
+        TEXT("T_CubusDensityNeutralORM"),
+        FColor(255, 128, 0, 255),
+        TC_Masks,
+        false
+    );
+    UTexture2D* NeutralHeight = FindOrCreateSolidTexture(
+        TEXT("/Game/Cubus/Materials/Arrays/T_CubusDensityNeutralHeight"),
+        TEXT("T_CubusDensityNeutralHeight"),
+        FColor(128, 128, 128, 255),
+        TC_Grayscale,
+        false
+    );
+
+    if (!IsValid(NeutralBaseColor) ||
+        !IsValid(NeutralNormal) ||
+        !IsValid(NeutralOrm) ||
+        !IsValid(NeutralHeight))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cubus could not create neutral density fallback textures."));
+        return;
+    }
 
     Modify();
 
@@ -187,7 +288,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityBaseColor"),
         TEXT("TA_CubusDensityBaseColor"),
         [](const FCubusDensitySurfaceTextures& Surface) { return Surface.BaseColor.Get(); },
-        DefaultColor,
+        NeutralBaseColor,
         TC_Default,
         true
     );
@@ -196,7 +297,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityNormal"),
         TEXT("TA_CubusDensityNormal"),
         [](const FCubusDensitySurfaceTextures& Surface) { return Surface.Normal.Get(); },
-        DefaultNormal,
+        NeutralNormal,
         TC_Normalmap,
         false
     );
@@ -205,7 +306,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityORM"),
         TEXT("TA_CubusDensityORM"),
         [](const FCubusDensitySurfaceTextures& Surface) { return Surface.ORM.Get(); },
-        DefaultColor,
+        NeutralOrm,
         TC_Masks,
         false
     );
@@ -214,7 +315,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityHeight"),
         TEXT("TA_CubusDensityHeight"),
         [](const FCubusDensitySurfaceTextures& Surface) { return Surface.Height.Get(); },
-        DefaultColor,
+        NeutralHeight,
         TC_Grayscale,
         false
     );
@@ -223,7 +324,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityMacroColor"),
         TEXT("TA_CubusDensityMacroColor"),
         [](const FCubusDensitySurfaceTextures& Surface) { return Surface.MacroColor.Get(); },
-        DefaultColor,
+        NeutralBaseColor,
         TC_Default,
         true
     );
@@ -232,7 +333,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityDetailNormal"),
         TEXT("TA_CubusDensityDetailNormal"),
         [](const FCubusDensitySurfaceTextures& Surface) { return Surface.DetailNormal.Get(); },
-        DefaultNormal,
+        NeutralNormal,
         TC_Normalmap,
         false
     );
@@ -247,7 +348,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         UE_LOG(
             LogTemp,
             Error,
-            TEXT("Cubus density texture-array build failed. Fix incompatible or missing source textures and rebuild.")
+            TEXT("Cubus density texture-array build failed. Fix incompatible source textures and rebuild.")
         );
         return;
     }
@@ -272,7 +373,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus built one unified density material and six MaterialId-indexed texture arrays.")
+        TEXT("Cubus built one unified density material, six MaterialId-indexed arrays, and neutral optional-map fallbacks.")
     );
 #else
     UE_LOG(LogTemp, Warning, TEXT("BuildDensityMaterial is only available in the Unreal Editor."));
