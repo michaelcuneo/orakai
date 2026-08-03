@@ -73,13 +73,16 @@ void AOrakaiCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 
 		if (bEnableSurvivalInteraction)
 		{
-			EnhancedInputComponent->BindKey(
+			// UE 5.8 deliberately deletes UEnhancedInputComponent::BindKey. These
+			// source-default mouse bindings still use the legacy key-binding path,
+			// so bind them through the UInputComponent base instead.
+			PlayerInputComponent->BindKey(
 				EKeys::LeftMouseButton,
 				IE_Pressed,
 				this,
 				&AOrakaiCharacter::HandleHarvestInput
 			);
-			EnhancedInputComponent->BindKey(
+			PlayerInputComponent->BindKey(
 				EKeys::RightMouseButton,
 				IE_Pressed,
 				this,
