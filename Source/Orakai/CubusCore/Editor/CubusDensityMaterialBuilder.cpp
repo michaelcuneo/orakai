@@ -118,11 +118,11 @@ namespace CubusDensityMaterialBuilder
     {
         UMaterialExpressionComponentMask* Node =
             AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
-        Node->R = false;
+        Node->R = true;
         Node->G = false;
         Node->B = false;
-        Node->A = true;
-        Connect(Node->Input, VertexColor);
+        Node->A = false;
+        Connect(Node->Input, VertexColor, 4);
         return Node;
     }
 
