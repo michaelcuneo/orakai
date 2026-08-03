@@ -45,6 +45,12 @@ at one tenth of the region frequency, preventing mountain country from fitting
 inside one or two chunks. Valley settings control the main drainage and
 tributary network.
 
-Generated chunk cache version 8 invalidates the old small-mountain baseline.
+Generated chunk cache version 9 invalidates the old uniform-detail baseline.
 Persistent player edits remain separate and are migrated forward, then
 reapplied after the new baseline loads.
+
+Local terrain relief is deliberately heterogeneous. Broad soil undulation is
+present even in plains, while rolling and mountain country receive patchy
+broken ground, warped metre-scale relief and intermittent erosion rills.
+Floodplains suppress these layers so waterways remain readable instead of
+becoming uniformly noisy.

@@ -49,6 +49,8 @@ struct ORAKAI_API FCubusTerrainFormSample
     float FoothillWeight = 0.0f;
     float Drainage = 0.0f;
     float Ridge = 0.0f;
+    float SurfaceRoughness = 0.0f;
+    float ErosionRills = 0.0f;
 };
 
 /**
@@ -57,8 +59,9 @@ struct ORAKAI_API FCubusTerrainFormSample
  * Kilometre-scale warped plate boundaries establish mountain ranges and
  * foothills. Smaller ridged multifractal detail then forms peaks inside those
  * ranges, while a separate main-channel/tributary field cuts broad valleys.
- * Fine detail is suppressed on valley floors and plains so the result reads
- * as geography rather than uniformly distributed noise.
+ * Heterogeneous soil undulation, broken ground and gated erosion rills add
+ * local variation without applying the same high-frequency noise everywhere.
+ * Fine relief is restrained on valley floors so drainage remains legible.
  */
 class ORAKAI_API FCubusTerrainForm
 {

@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 8: kilometre-scale mountain ranges replace the small
-    // thresholded mountain blobs from the version-seven baseline.
-    static constexpr uint32 CurrentGenerationVersion = 8;
+    // Bumped to 9: heterogeneous soil undulation, broken ground and erosion
+    // rills replace the uniform fine-detail field from version eight.
+    static constexpr uint32 CurrentGenerationVersion = 9;
 
     int64 World = 1;
     int32 Terrain = 0;

@@ -191,6 +191,61 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         2.0f,
         0.42f
     );
+
+    // Natural ground is not one uniformly scaled noise field. A slow patch
+    // field changes the character of the surface over hundreds of metres,
+    // while the warped samples below provide broad soil creep, broken ground
+    // and metre-scale irregularity inside those patches. All of them remain
+    // subordinate to DetailAmplitude so existing generation profiles retain
+    // one predictable master control.
+    const float SurfacePatch = FMath::Clamp(
+        0.5f + 0.5f * SampleFbm(
+            TerrainX + 24793.0f,
+            TerrainY - 19319.0f,
+            Settings.DetailFrequency * 0.10f,
+            3,
+            2.11f,
+            0.48f
+        ),
+        0.0f,
+        1.0f
+    );
+    const float SoilUndulation = SampleFbm(
+        TerrainX * 0.86f - TerrainY * 0.51f + 3761.0f,
+        TerrainX * 0.51f + TerrainY * 0.86f - 8291.0f,
+        Settings.DetailFrequency * 0.22f,
+        3,
+        2.03f,
+        0.52f
+    );
+    const float GrainWarpDistance = FMath::Clamp(
+        0.75f / Settings.DetailFrequency,
+        4.0f,
+        18.0f
+    );
+    const float GrainWarp = SampleFbm(
+        TerrainX - 15413.0f,
+        TerrainY + 1087.0f,
+        Settings.DetailFrequency * 0.48f,
+        2,
+        1.97f,
+        0.5f
+    ) * GrainWarpDistance;
+    const float MicroRelief = SampleFbm(
+        TerrainX + GrainWarp + 613.0f,
+        TerrainY - GrainWarp - 5441.0f,
+        Settings.DetailFrequency * 1.75f,
+        3,
+        2.17f,
+        0.43f
+    );
+    const float BrokenGround =
+        SampleRidgedFbm(
+            TerrainX * 0.73f + TerrainY * 0.68f - 9137.0f,
+            TerrainY * 0.73f - TerrainX * 0.68f + 12491.0f,
+            Settings.DetailFrequency * 0.72f,
+            3
+        ) * 2.0f - 1.0f;
     const float LocalRidge = SampleRidgedFbm(
         TerrainX + 911.0f,
         TerrainY + 1511.0f,
@@ -251,6 +306,29 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         Tributary * Catchment * 0.78f
     );
 
+    // Two differently oriented rill families are selected by the patch
+    // field. They are shallow and intermittent rather than a repeating set
+    // of parallel grooves, and are later masked away from flat floodplains.
+    const float RillA = SampleChannelMask(
+        TerrainX * 0.94f - TerrainY * 0.34f + 11939.0f,
+        TerrainX * 0.34f + TerrainY * 0.94f - 4153.0f,
+        Settings.DetailFrequency * 0.46f,
+        0.035f,
+        0.11f
+    );
+    const float RillB = SampleChannelMask(
+        TerrainX * 0.57f + TerrainY * 0.82f - 6983.0f,
+        TerrainY * 0.57f - TerrainX * 0.82f + 15731.0f,
+        Settings.DetailFrequency * 0.39f,
+        0.028f,
+        0.13f
+    );
+    const float LocalRills = FMath::Lerp(
+        RillA,
+        RillB,
+        SmoothStep(0.36f, 0.64f, SurfacePatch)
+    );
+
     const float ContinentStrength =
         0.28f * Result.PlainsWeight +
         0.72f * Result.RollingWeight +
@@ -268,15 +346,48 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         0.78f * Result.RollingWeight +
         1.0f * Result.MountainWeight;
 
-    // Erosion removes small-scale chatter from floodplains and drainage
-    // floors. Plains also receive much less high-frequency relief.
+    // Erosion removes chatter from floodplains and drainage floors. Plains
+    // still keep broad soil undulation and restrained local irregularity so
+    // they do not collapse into rigid, perfectly predictable sheets.
     const float ValleyFloor = Result.Drainage * Result.Drainage;
     const float Erosion = FMath::Clamp(1.0f - ValleyFloor * 0.82f, 0.12f, 1.0f);
     const float DetailStrength =
+        (0.20f * Result.PlainsWeight +
+         0.52f * Result.RollingWeight +
+         0.88f * Result.MountainWeight) *
+        Erosion;
+    const float PatchStrength = FMath::Lerp(0.32f, 1.0f, SurfacePatch);
+    const float UndulationStrength =
+        (0.72f * Result.PlainsWeight +
+         0.88f * Result.RollingWeight +
+         0.54f * Result.MountainWeight) *
+        FMath::Clamp(1.0f - ValleyFloor * 0.62f, 0.28f, 1.0f);
+    const float MicroStrength =
+        (0.34f * Result.PlainsWeight +
+         0.76f * Result.RollingWeight +
+         1.0f * Result.MountainWeight) *
+        PatchStrength * Erosion;
+    const float BrokenGroundStrength =
         (0.08f * Result.PlainsWeight +
          0.48f * Result.RollingWeight +
-         0.9f * Result.MountainWeight) *
-        Erosion;
+         1.0f * Result.MountainWeight) *
+        SmoothStep(0.28f, 0.76f, SurfacePatch) * Erosion;
+    const float RillStrength =
+        (0.04f * Result.PlainsWeight +
+         0.38f * Result.RollingWeight +
+         1.0f * Result.MountainWeight) *
+        FMath::Lerp(0.42f, 1.0f, Catchment) *
+        (1.0f - ValleyFloor);
+    Result.SurfaceRoughness = FMath::Clamp(
+        MicroStrength * 0.68f + BrokenGroundStrength * 0.32f,
+        0.0f,
+        1.0f
+    );
+    Result.ErosionRills = FMath::Clamp(
+        LocalRills * RillStrength,
+        0.0f,
+        1.0f
+    );
 
     // Broad uplift creates the physical mass of the range. MajorRidge and
     // PeakRhythm vary summits along its connected spine; LocalRidge provides
@@ -297,7 +408,11 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         Settings.BaseHeight +
         Continent * Settings.ContinentAmplitude * ContinentStrength +
         Hills * Settings.HillAmplitude * HillStrength * Erosion +
-        Detail * Settings.DetailAmplitude * DetailStrength +
+        SoilUndulation * Settings.DetailAmplitude * 0.78f * UndulationStrength +
+        Detail * Settings.DetailAmplitude * 0.54f * DetailStrength +
+        MicroRelief * Settings.DetailAmplitude * 0.68f * MicroStrength +
+        BrokenGround * Settings.DetailAmplitude * 0.34f * BrokenGroundStrength -
+        LocalRills * Settings.DetailAmplitude * 0.72f * RillStrength +
         RangeUplift * Erosion +
         LocalRidge * Settings.RidgeAmplitude * RidgeStrength -
         ValleyFloor * Settings.ValleyDepth * ValleyStrength;
