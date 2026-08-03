@@ -268,7 +268,6 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
     Material->SetShadingModel(MSM_DefaultLit);
     Material->TwoSided = false;
     Material->bUseMaterialAttributes = false;
-    Material->bUseFullPrecision = true;
 
     UTexture* DefaultColor = LoadObject<UTexture>(
         nullptr,
