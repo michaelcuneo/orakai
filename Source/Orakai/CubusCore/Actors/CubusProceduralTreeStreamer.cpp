@@ -364,8 +364,12 @@ void ACubusProceduralTreeStreamer::BuildChunkTrees(
             static_cast<double>(Instance.WorldVoxel.Z) * SafeVoxelSize - ChunkHalfWorldExtent
         );
         const float Scale = FMath::Max(0.01f, Instance.Scale * GlobalTreeScale);
+
+        // Trees remain axis-aligned with the voxel grid. Their procedural
+        // geometry supplies the visual variation; the whole tree is never
+        // rotated away from its supporting voxel.
         const FTransform WorldTreeTransform(
-            FRotator(0.0f, Instance.RotationYaw, 0.0f),
+            FQuat::Identity,
             WorldLocation,
             FVector(Scale)
         );
