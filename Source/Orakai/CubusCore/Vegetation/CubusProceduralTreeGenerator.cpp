@@ -4,28 +4,33 @@
 
 namespace CubusProceduralTree
 {
-    FVector SafePerpendicular(const FVector& Direction)
-    {
-        const FVector Reference =
-            FMath::Abs(Direction.Z) < 0.9f
-                ? FVector::UpVector
-                : FVector::ForwardVector;
-        return FVector::CrossProduct(Reference, Direction).GetSafeNormal();
-    }
-
     FLinearColor MakeWindColor(
         const float WindStrength,
         const float HeightMask,
-        const float Phase,
-        const float Stiffness
+        const float Phase
     )
     {
         return FLinearColor(
             FMath::Clamp(WindStrength, 0.0f, 1.0f),
             FMath::Clamp(HeightMask, 0.0f, 1.0f),
             FMath::Clamp(Phase, 0.0f, 1.0f),
-            FMath::Clamp(Stiffness, 0.0f, 1.0f)
+            FMath::Clamp(1.0f - WindStrength, 0.0f, 1.0f)
         );
+    }
+
+    FVector SnapVector(const FVector& Value, const float Grid)
+    {
+        const float SafeGrid = FMath::Max(1.0f, Grid);
+        return FVector(
+            FMath::GridSnap(Value.X, SafeGrid),
+            FMath::GridSnap(Value.Y, SafeGrid),
+            FMath::GridSnap(Value.Z, SafeGrid)
+        );
+    }
+
+    float SnapSize(const float Value, const float Grid)
+    {
+        return FMath::Max(Grid, FMath::GridSnap(Value, Grid));
     }
 
     void AddTriangle(
@@ -40,19 +45,41 @@ namespace CubusProceduralTree
         Section.Triangles.Add(C);
     }
 
-    void AddFrustum(
+    void AddFace(
+        FCubusTreeMeshSection& Section,
+        const FVector& A,
+        const FVector& B,
+        const FVector& C,
+        const FVector& D,
+        const FVector& Normal,
+        const FLinearColor& Wind
+    )
+    {
+        const int32 Base = Section.Vertices.Num();
+        Section.Vertices.Append({ A, B, C, D });
+        Section.Normals.Append({ Normal, Normal, Normal, Normal });
+        Section.UV0.Append(
+        {
+            FVector2D(0.0f, 0.0f),
+            FVector2D(1.0f, 0.0f),
+            FVector2D(1.0f, 1.0f),
+            FVector2D(0.0f, 1.0f)
+        });
+        Section.VertexColors.Append({ Wind, Wind, Wind, Wind });
+        AddTriangle(Section, Base, Base + 1, Base + 2);
+        AddTriangle(Section, Base, Base + 2, Base + 3);
+    }
+
+    void AddOrientedBox(
         FCubusTreeMeshSection& Section,
         const FVector& Start,
         const FVector& End,
-        const float StartRadius,
-        const float EndRadius,
-        const int32 SideCount,
+        const float StartHalfWidth,
+        const float EndHalfWidth,
         const float StartHeightMask,
         const float EndHeightMask,
         const float WindStrength,
-        const float Phase,
-        const bool bCapStart,
-        const bool bCapEnd
+        const float Phase
     )
     {
         const FVector Axis = (End - Start).GetSafeNormal();
@@ -61,144 +88,109 @@ namespace CubusProceduralTree
             return;
         }
 
-        const FVector BasisX = SafePerpendicular(Axis);
-        const FVector BasisY = FVector::CrossProduct(Axis, BasisX).GetSafeNormal();
-        const int32 Sides = FMath::Clamp(SideCount, 3, 12);
-        const int32 BaseVertex = Section.Vertices.Num();
-        const float Length = FVector::Distance(Start, End);
+        const FVector Reference =
+            FMath::Abs(Axis.Z) < 0.9f ? FVector::UpVector : FVector::ForwardVector;
+        const FVector Right = FVector::CrossProduct(Reference, Axis).GetSafeNormal();
+        const FVector Up = FVector::CrossProduct(Axis, Right).GetSafeNormal();
 
-        for (int32 Ring = 0; Ring < 2; ++Ring)
-        {
-            const FVector Center = Ring == 0 ? Start : End;
-            const float Radius = Ring == 0 ? StartRadius : EndRadius;
-            const float HeightMask = Ring == 0 ? StartHeightMask : EndHeightMask;
+        const float StartWidth = FMath::Max(2.0f, StartHalfWidth);
+        const float EndWidth = FMath::Max(2.0f, EndHalfWidth);
 
-            for (int32 Side = 0; Side < Sides; ++Side)
-            {
-                const float Alpha = static_cast<float>(Side) / static_cast<float>(Sides);
-                const float Angle = Alpha * UE_TWO_PI;
-                const FVector Radial =
-                    BasisX * FMath::Cos(Angle) + BasisY * FMath::Sin(Angle);
+        const FVector S0 = Start - Right * StartWidth - Up * StartWidth;
+        const FVector S1 = Start + Right * StartWidth - Up * StartWidth;
+        const FVector S2 = Start + Right * StartWidth + Up * StartWidth;
+        const FVector S3 = Start - Right * StartWidth + Up * StartWidth;
+        const FVector E0 = End - Right * EndWidth - Up * EndWidth;
+        const FVector E1 = End + Right * EndWidth - Up * EndWidth;
+        const FVector E2 = End + Right * EndWidth + Up * EndWidth;
+        const FVector E3 = End - Right * EndWidth + Up * EndWidth;
 
-                Section.Vertices.Add(Center + Radial * Radius);
-                Section.Normals.Add(Radial);
-                Section.UV0.Add(FVector2D(Alpha, Ring == 0 ? 0.0f : Length / 100.0f));
-                Section.VertexColors.Add(
-                    MakeWindColor(
-                        WindStrength,
-                        HeightMask,
-                        Phase,
-                        1.0f - WindStrength
-                    )
-                );
-            }
-        }
+        const FLinearColor StartWind = MakeWindColor(
+            WindStrength * StartHeightMask,
+            StartHeightMask,
+            Phase
+        );
+        const FLinearColor EndWind = MakeWindColor(
+            WindStrength * EndHeightMask,
+            EndHeightMask,
+            Phase
+        );
+        const FLinearColor SideWind = FLinearColor(
+            (StartWind.R + EndWind.R) * 0.5f,
+            (StartWind.G + EndWind.G) * 0.5f,
+            Phase,
+            (StartWind.A + EndWind.A) * 0.5f
+        );
 
-        for (int32 Side = 0; Side < Sides; ++Side)
-        {
-            const int32 Next = (Side + 1) % Sides;
-            const int32 A = BaseVertex + Side;
-            const int32 B = BaseVertex + Next;
-            const int32 C = BaseVertex + Sides + Side;
-            const int32 D = BaseVertex + Sides + Next;
-            AddTriangle(Section, A, D, C);
-            AddTriangle(Section, A, B, D);
-        }
-
-        if (bCapStart)
-        {
-            const int32 CenterIndex = Section.Vertices.Add(Start);
-            Section.Normals.Add(-Axis);
-            Section.UV0.Add(FVector2D(0.5f, 0.5f));
-            Section.VertexColors.Add(
-                MakeWindColor(WindStrength, StartHeightMask, Phase, 1.0f - WindStrength)
-            );
-
-            for (int32 Side = 0; Side < Sides; ++Side)
-            {
-                const int32 Next = (Side + 1) % Sides;
-                AddTriangle(Section, CenterIndex, BaseVertex + Next, BaseVertex + Side);
-            }
-        }
-
-        if (bCapEnd)
-        {
-            const int32 CenterIndex = Section.Vertices.Add(End);
-            Section.Normals.Add(Axis);
-            Section.UV0.Add(FVector2D(0.5f, 0.5f));
-            Section.VertexColors.Add(
-                MakeWindColor(WindStrength, EndHeightMask, Phase, 1.0f - WindStrength)
-            );
-            const int32 EndRing = BaseVertex + Sides;
-
-            for (int32 Side = 0; Side < Sides; ++Side)
-            {
-                const int32 Next = (Side + 1) % Sides;
-                AddTriangle(Section, CenterIndex, EndRing + Side, EndRing + Next);
-            }
-        }
+        AddFace(Section, S0, S1, S2, S3, -Axis, StartWind);
+        AddFace(Section, E3, E2, E1, E0, Axis, EndWind);
+        AddFace(Section, S1, E1, E2, S2, Right, SideWind);
+        AddFace(Section, S3, E3, E0, S0, -Right, SideWind);
+        AddFace(Section, S2, E2, E3, S3, Up, SideWind);
+        AddFace(Section, S0, E0, E1, S1, -Up, SideWind);
     }
 
-    void AddOctahedronCluster(
+    void AddCuboidCluster(
         FCubusTreeMeshSection& Section,
         const FVector& Center,
-        const FVector& Scale,
-        const FLinearColor& Tint,
+        const FVector& HalfExtent,
+        const float YawRadians,
         const float WindStrength,
         const float HeightMask,
         const float Phase
     )
     {
-        const int32 Base = Section.Vertices.Num();
-        const FVector LocalVertices[6] =
-        {
-            FVector( Scale.X, 0.0, 0.0),
-            FVector(-Scale.X, 0.0, 0.0),
-            FVector(0.0,  Scale.Y, 0.0),
-            FVector(0.0, -Scale.Y, 0.0),
-            FVector(0.0, 0.0,  Scale.Z),
-            FVector(0.0, 0.0, -Scale.Z)
-        };
+        const float C = FMath::Cos(YawRadians);
+        const float S = FMath::Sin(YawRadians);
+        const FVector Right(C, S, 0.0f);
+        const FVector Forward(-S, C, 0.0f);
+        const FVector Up = FVector::UpVector;
 
-        for (const FVector& Local : LocalVertices)
-        {
-            Section.Vertices.Add(Center + Local);
-            Section.Normals.Add(Local.GetSafeNormal());
-            Section.UV0.Add(FVector2D(Local.X >= 0.0 ? 1.0 : 0.0, Local.Z >= 0.0 ? 1.0 : 0.0));
-            FLinearColor Wind = MakeWindColor(
-                WindStrength,
-                HeightMask,
-                Phase,
-                1.0f - WindStrength
-            );
-            Wind *= Tint;
-            Wind.A = 1.0f - WindStrength;
-            Section.VertexColors.Add(Wind);
-        }
+        const FVector X = Right * HalfExtent.X;
+        const FVector Y = Forward * HalfExtent.Y;
+        const FVector Z = Up * HalfExtent.Z;
 
-        const int32 Faces[8][3] =
-        {
-            {4, 0, 2}, {4, 2, 1}, {4, 1, 3}, {4, 3, 0},
-            {5, 2, 0}, {5, 1, 2}, {5, 3, 1}, {5, 0, 3}
-        };
+        const FVector P000 = Center - X - Y - Z;
+        const FVector P100 = Center + X - Y - Z;
+        const FVector P110 = Center + X + Y - Z;
+        const FVector P010 = Center - X + Y - Z;
+        const FVector P001 = Center - X - Y + Z;
+        const FVector P101 = Center + X - Y + Z;
+        const FVector P111 = Center + X + Y + Z;
+        const FVector P011 = Center - X + Y + Z;
+        const FLinearColor Wind = MakeWindColor(WindStrength, HeightMask, Phase);
 
-        for (const auto& Face : Faces)
-        {
-            AddTriangle(Section, Base + Face[0], Base + Face[1], Base + Face[2]);
-        }
+        AddFace(Section, P100, P101, P111, P110, Right, Wind);
+        AddFace(Section, P010, P011, P001, P000, -Right, Wind);
+        AddFace(Section, P110, P111, P011, P010, Forward, Wind);
+        AddFace(Section, P000, P001, P101, P100, -Forward, Wind);
+        AddFace(Section, P101, P001, P011, P111, Up, Wind);
+        AddFace(Section, P000, P100, P110, P010, -Up, Wind);
     }
 
     FVector RandomScale(
         FRandomStream& Random,
         const FVector& Minimum,
-        const FVector& Maximum
+        const FVector& Maximum,
+        const float Grid
     )
     {
         return FVector(
-            Random.FRandRange(Minimum.X, Maximum.X),
-            Random.FRandRange(Minimum.Y, Maximum.Y),
-            Random.FRandRange(Minimum.Z, Maximum.Z)
+            SnapSize(Random.FRandRange(Minimum.X, Maximum.X), Grid),
+            SnapSize(Random.FRandRange(Minimum.Y, Maximum.Y), Grid),
+            SnapSize(Random.FRandRange(Minimum.Z, Maximum.Z), Grid)
         );
+    }
+
+    void AccumulateBounds(
+        const FCubusTreeMeshSection& Section,
+        FBox& Bounds
+    )
+    {
+        for (const FVector& Vertex : Section.Vertices)
+        {
+            Bounds += Vertex;
+        }
     }
 }
 
@@ -247,11 +239,14 @@ bool FCubusProceduralTreeGenerator::BuildTree(
     OutMesh.Seed = Seed;
 
     FRandomStream Random(Seed);
+    const float BlockGrid = FMath::Max(10.0f, Species.BaseRadius * 0.5f);
     const float MinimumHeight = FMath::Max(100.0f, Species.MinimumHeight);
     const float MaximumHeight = FMath::Max(MinimumHeight, Species.MaximumHeight);
-    const float Height = Random.FRandRange(MinimumHeight, MaximumHeight);
-    const int32 TrunkSegments = FMath::Clamp(Species.TrunkSegments, 2, 16);
-    const int32 TrunkSides = FMath::Clamp(Species.TrunkSides, 3, 12);
+    const float Height = SnapSize(
+        Random.FRandRange(MinimumHeight, MaximumHeight),
+        BlockGrid
+    );
+    const int32 TrunkSegments = FMath::Clamp(Species.TrunkSegments, 3, 12);
     const float Phase = Random.FRand();
     const FVector BendDirection = FVector(
         Random.FRandRange(-1.0f, 1.0f),
@@ -264,49 +259,53 @@ bool FCubusProceduralTreeGenerator::BuildTree(
 
     for (int32 Segment = 0; Segment <= TrunkSegments; ++Segment)
     {
-        const float Alpha =
-            static_cast<float>(Segment) / static_cast<float>(TrunkSegments);
-        const float Bend = FMath::Square(Alpha) * Species.TrunkBend;
-        const float Twist = FMath::Sin(Alpha * UE_PI * 1.5f + Phase * UE_TWO_PI) *
-            Species.TrunkBend * 0.2f;
-        const FVector Side = FVector(-BendDirection.Y, BendDirection.X, 0.0f);
-        TrunkPoints.Add(
-            FVector(0.0, 0.0, Height * Alpha) +
-            BendDirection * Bend +
-            Side * Twist
-        );
+        const float Alpha = static_cast<float>(Segment) /
+            static_cast<float>(TrunkSegments);
+        const FVector RawPoint =
+            FVector(0.0f, 0.0f, Height * Alpha) +
+            BendDirection * FMath::Square(Alpha) * Species.TrunkBend;
+        TrunkPoints.Add(SnapVector(RawPoint, BlockGrid));
     }
 
     for (int32 Segment = 0; Segment < TrunkSegments; ++Segment)
     {
-        const float A0 =
-            static_cast<float>(Segment) / static_cast<float>(TrunkSegments);
-        const float A1 =
-            static_cast<float>(Segment + 1) / static_cast<float>(TrunkSegments);
-        const float Radius0 = FMath::Lerp(
-            Species.BaseRadius,
-            Species.BaseRadius * Species.TopRadiusRatio,
-            A0
+        const float A0 = static_cast<float>(Segment) /
+            static_cast<float>(TrunkSegments);
+        const float A1 = static_cast<float>(Segment + 1) /
+            static_cast<float>(TrunkSegments);
+
+        // Deliberately stepped instead of continuously tapered.
+        const int32 TaperStep0 = FMath::FloorToInt(A0 * 4.0f);
+        const int32 TaperStep1 = FMath::FloorToInt(A1 * 4.0f);
+        const float StepAlpha0 = static_cast<float>(TaperStep0) / 4.0f;
+        const float StepAlpha1 = static_cast<float>(TaperStep1) / 4.0f;
+        const float Width0 = SnapSize(
+            FMath::Lerp(
+                Species.BaseRadius,
+                Species.BaseRadius * Species.TopRadiusRatio,
+                StepAlpha0
+            ),
+            BlockGrid * 0.5f
         );
-        const float Radius1 = FMath::Lerp(
-            Species.BaseRadius,
-            Species.BaseRadius * Species.TopRadiusRatio,
-            A1
+        const float Width1 = SnapSize(
+            FMath::Lerp(
+                Species.BaseRadius,
+                Species.BaseRadius * Species.TopRadiusRatio,
+                StepAlpha1
+            ),
+            BlockGrid * 0.5f
         );
 
-        AddFrustum(
+        AddOrientedBox(
             OutMesh.Bark,
             TrunkPoints[Segment],
             TrunkPoints[Segment + 1],
-            Radius0,
-            Radius1,
-            TrunkSides,
+            Width0,
+            Width1,
             A0,
             A1,
-            Species.TrunkWindStrength * A1,
-            Phase,
-            Segment == 0,
-            Segment == TrunkSegments - 1
+            Species.TrunkWindStrength,
+            Phase
         );
     }
 
@@ -319,47 +318,45 @@ bool FCubusProceduralTreeGenerator::BuildTree(
     for (int32 BranchIndex = 0; BranchIndex < BranchCount; ++BranchIndex)
     {
         const float BranchAlpha = Random.FRandRange(
-            FMath::Clamp(Species.BranchStartHeightRatio, 0.0f, 0.95f),
-            0.92f
+            FMath::Clamp(Species.BranchStartHeightRatio, 0.0f, 0.9f),
+            0.88f
         );
         const int32 SegmentIndex = FMath::Clamp(
             FMath::FloorToInt(BranchAlpha * TrunkSegments),
             0,
             TrunkSegments - 1
         );
-        const float LocalAlpha = BranchAlpha * TrunkSegments - SegmentIndex;
-        const FVector Start = FMath::Lerp(
-            TrunkPoints[SegmentIndex],
-            TrunkPoints[SegmentIndex + 1],
-            LocalAlpha
-        );
-        const float Angle = Random.FRandRange(0.0f, UE_TWO_PI);
+        const FVector Start = TrunkPoints[SegmentIndex];
+        const int32 DirectionIndex = Random.RandRange(0, 7);
+        const float Angle = static_cast<float>(DirectionIndex) * UE_PI / 4.0f;
         const FVector Horizontal(FMath::Cos(Angle), FMath::Sin(Angle), 0.0f);
         const FVector Direction = (
             Horizontal * (1.0f - Species.BranchUpwardBias) +
             FVector::UpVector * Species.BranchUpwardBias
         ).GetSafeNormal();
-        const float Length = Random.FRandRange(
-            FMath::Max(20.0f, Species.MinimumBranchLength),
-            FMath::Max(Species.MinimumBranchLength, Species.MaximumBranchLength)
+        const float Length = SnapSize(
+            Random.FRandRange(
+                FMath::Max(20.0f, Species.MinimumBranchLength),
+                FMath::Max(Species.MinimumBranchLength, Species.MaximumBranchLength)
+            ),
+            BlockGrid
         );
-        const FVector Tip = Start + Direction * Length;
-        const float StartRadius = Species.BaseRadius * Species.BranchRadiusRatio *
-            FMath::Lerp(1.0f, Species.TopRadiusRatio, BranchAlpha);
+        const FVector Tip = SnapVector(Start + Direction * Length, BlockGrid);
+        const float Width = SnapSize(
+            Species.BaseRadius * Species.BranchRadiusRatio,
+            BlockGrid * 0.5f
+        );
 
-        AddFrustum(
+        AddOrientedBox(
             OutMesh.Bark,
             Start,
             Tip,
-            StartRadius,
-            FMath::Max(3.0f, StartRadius * 0.25f),
-            FMath::Max(3, TrunkSides - 2),
+            Width,
+            FMath::Max(BlockGrid * 0.5f, Width * 0.55f),
             BranchAlpha,
             1.0f,
             Species.BranchWindStrength,
-            FMath::Frac(Phase + BranchIndex * 0.173f),
-            false,
-            true
+            FMath::Frac(Phase + BranchIndex * 0.173f)
         );
         BranchTips.Add(Tip);
     }
@@ -369,72 +366,87 @@ bool FCubusProceduralTreeGenerator::BuildTree(
         const int32 MinimumClusters = FMath::Max(0, Species.MinimumCanopyClusters);
         const int32 MaximumClusters = FMath::Max(MinimumClusters, Species.MaximumCanopyClusters);
         const int32 ClusterCount = Random.RandRange(MinimumClusters, MaximumClusters);
-        const FVector CrownCenter = TrunkPoints.Last() - FVector(0.0, 0.0, Height * 0.12f);
+        const FVector CrownCenter = SnapVector(
+            TrunkPoints.Last() - FVector(0.0f, 0.0f, Height * 0.12f),
+            BlockGrid
+        );
 
         for (int32 ClusterIndex = 0; ClusterIndex < ClusterCount; ++ClusterIndex)
         {
             FVector Center = CrownCenter;
-            FVector Scale = RandomScale(
+            FVector Extent = RandomScale(
                 Random,
-                Species.MinimumCanopyScale,
-                Species.MaximumCanopyScale
+                Species.MinimumCanopyScale * 0.5f,
+                Species.MaximumCanopyScale * 0.5f,
+                BlockGrid
             );
 
             if (Species.CanopyShape == ECubusTreeCanopyShape::LayeredConifer)
             {
                 const float LayerAlpha = ClusterCount > 1
-                    ? static_cast<float>(ClusterIndex) / static_cast<float>(ClusterCount - 1)
+                    ? static_cast<float>(ClusterIndex) /
+                        static_cast<float>(ClusterCount - 1)
                     : 0.0f;
-                Center.Z = Height * FMath::Lerp(0.42f, 0.95f, LayerAlpha);
-                Scale.X *= FMath::Lerp(1.35f, 0.45f, LayerAlpha);
-                Scale.Y *= FMath::Lerp(1.35f, 0.45f, LayerAlpha);
-                Scale.Z *= 0.55f;
+                Center.Z = SnapSize(
+                    Height * FMath::Lerp(0.38f, 0.96f, LayerAlpha),
+                    BlockGrid
+                );
+                Center.X += FMath::GridSnap(
+                    Random.FRandRange(-BlockGrid, BlockGrid),
+                    BlockGrid
+                );
+                Center.Y += FMath::GridSnap(
+                    Random.FRandRange(-BlockGrid, BlockGrid),
+                    BlockGrid
+                );
+                Extent.X *= FMath::Lerp(1.5f, 0.35f, LayerAlpha);
+                Extent.Y *= FMath::Lerp(1.5f, 0.35f, LayerAlpha);
+                Extent.Z = FMath::Max(BlockGrid, Extent.Z * 0.45f);
             }
             else
             {
                 const FVector Offset(
-                    Random.FRandRange(-Scale.X * 0.65f, Scale.X * 0.65f),
-                    Random.FRandRange(-Scale.Y * 0.65f, Scale.Y * 0.65f),
-                    Random.FRandRange(-Scale.Z * 0.35f, Scale.Z * 0.55f)
+                    Random.FRandRange(-Extent.X * 0.8f, Extent.X * 0.8f),
+                    Random.FRandRange(-Extent.Y * 0.8f, Extent.Y * 0.8f),
+                    Random.FRandRange(-Extent.Z * 0.35f, Extent.Z * 0.65f)
                 );
-                Center += Offset;
+                Center = SnapVector(Center + Offset, BlockGrid);
 
-                if (BranchTips.Num() > 0 && Random.FRand() < 0.5f)
+                if (BranchTips.Num() > 0 && Random.FRand() < 0.6f)
                 {
-                    Center = FMath::Lerp(
-                        Center,
-                        BranchTips[Random.RandRange(0, BranchTips.Num() - 1)],
-                        0.45f
+                    Center = SnapVector(
+                        FMath::Lerp(
+                            Center,
+                            BranchTips[Random.RandRange(0, BranchTips.Num() - 1)],
+                            0.55f
+                        ),
+                        BlockGrid
                     );
+                }
+
+                if (Species.CanopyShape == ECubusTreeCanopyShape::Sparse)
+                {
+                    Extent *= 0.65f;
                 }
             }
 
-            if (Species.CanopyShape == ECubusTreeCanopyShape::Sparse)
-            {
-                Scale *= 0.65f;
-            }
-
-            AddOctahedronCluster(
+            const int32 RotationStep = Random.RandRange(0, 3);
+            const float Yaw = static_cast<float>(RotationStep) * UE_PI * 0.5f;
+            AddCuboidCluster(
                 OutMesh.Canopy,
                 Center,
-                Scale,
-                Species.CanopyTint,
+                Extent,
+                Yaw,
                 Species.CanopyWindStrength,
                 FMath::Clamp(Center.Z / Height, 0.0f, 1.0f),
-                FMath::Frac(Phase + ClusterIndex * 0.217f)
+                FMath::Frac(Phase + ClusterIndex * 0.117f)
             );
         }
     }
 
-    for (const FVector& Vertex : OutMesh.Bark.Vertices)
-    {
-        OutMesh.Bounds += Vertex;
-    }
-    for (const FVector& Vertex : OutMesh.Canopy.Vertices)
-    {
-        OutMesh.Bounds += Vertex;
-    }
-
+    AccumulateBounds(OutMesh.Bark, OutMesh.Bounds);
+    AccumulateBounds(OutMesh.Canopy, OutMesh.Bounds);
     OutMesh.GeneratedHeight = Height;
+
     return OutMesh.IsValid();
 }
