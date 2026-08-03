@@ -17,14 +17,10 @@ namespace CubusDensityMesher
 
     const FIntVector CornerOffsets[8] =
     {
-        FIntVector(0, 0, 0),
-        FIntVector(1, 0, 0),
-        FIntVector(1, 1, 0),
-        FIntVector(0, 1, 0),
-        FIntVector(0, 0, 1),
-        FIntVector(1, 0, 1),
-        FIntVector(1, 1, 1),
-        FIntVector(0, 1, 1)
+        FIntVector(0, 0, 0), FIntVector(1, 0, 0),
+        FIntVector(1, 1, 0), FIntVector(0, 1, 0),
+        FIntVector(0, 0, 1), FIntVector(1, 0, 1),
+        FIntVector(1, 1, 1), FIntVector(0, 1, 1)
     };
 
     const int32 EdgeCornerIndices[12][2] =
@@ -36,11 +32,7 @@ namespace CubusDensityMesher
 
     FVector ToVector(const FIntVector& Value)
     {
-        return FVector(
-            static_cast<double>(Value.X),
-            static_cast<double>(Value.Y),
-            static_cast<double>(Value.Z)
-        );
+        return FVector(Value.X, Value.Y, Value.Z);
     }
 
     void ResolveMaterialPair(
@@ -92,10 +84,9 @@ namespace CubusDensityMesher
         }
 
         OutPrimaryMaterialId = FMath::Max(1, Materials[0]);
-        OutSecondaryMaterialId =
-            UniqueCount > 1
-                ? FMath::Max(1, Materials[1])
-                : OutPrimaryMaterialId;
+        OutSecondaryMaterialId = UniqueCount > 1
+            ? FMath::Max(1, Materials[1])
+            : OutPrimaryMaterialId;
 
         if (OutSecondaryMaterialId < OutPrimaryMaterialId)
         {
@@ -114,9 +105,7 @@ namespace CubusDensityMesher
             return 0.0f;
         }
 
-        return VertexMaterialId == SecondaryMaterialId
-            ? 1.0f
-            : 0.0f;
+        return VertexMaterialId == SecondaryMaterialId ? 1.0f : 0.0f;
     }
 
     void ResolveProjection(
@@ -177,14 +166,13 @@ namespace CubusDensityMesher
             DensityBuffer.GetSampleChecked(LocalSampleB);
 
         const float DensityDelta = SampleB.Density - SampleA.Density;
-        const float Alpha =
-            FMath::IsNearlyZero(DensityDelta)
-                ? 0.5f
-                : FMath::Clamp(
-                    (IsoLevel - SampleA.Density) / DensityDelta,
-                    0.0f,
-                    1.0f
-                );
+        const float Alpha = FMath::IsNearlyZero(DensityDelta)
+            ? 0.5f
+            : FMath::Clamp(
+                (IsoLevel - SampleA.Density) / DensityDelta,
+                0.0f,
+                1.0f
+            );
 
         const FVector LocalSamplePosition =
             FMath::Lerp(
@@ -193,17 +181,15 @@ namespace CubusDensityMesher
                 Alpha
             ) + DensityBuffer.GetSampleOffsetInVoxels();
 
-        const FVector GlobalSampleOrigin =
-            ToVector(
-                DensityBuffer.GetChunkCoordinate() * Cubus::ChunkSize
-            );
+        const FVector GlobalSampleOrigin = ToVector(
+            DensityBuffer.GetChunkCoordinate() * Cubus::ChunkSize
+        );
 
-        const FVector InterpolatedGradient =
-            FMath::Lerp(
-                DensityBuffer.GetGradientChecked(LocalSampleA),
-                DensityBuffer.GetGradientChecked(LocalSampleB),
-                Alpha
-            );
+        const FVector InterpolatedGradient = FMath::Lerp(
+            DensityBuffer.GetGradientChecked(LocalSampleA),
+            DensityBuffer.GetGradientChecked(LocalSampleB),
+            Alpha
+        );
 
         const bool bSampleAIsSolid = SampleA.IsSolid(IsoLevel);
 
@@ -215,18 +201,14 @@ namespace CubusDensityMesher
         Result.Normal = (-InterpolatedGradient).GetSafeNormal();
         Result.MaterialId = FMath::Max(
             1,
-            bSampleAIsSolid
-                ? SampleA.MaterialId
-                : SampleB.MaterialId
+            bSampleAIsSolid ? SampleA.MaterialId : SampleB.MaterialId
         );
 
         if (Result.Normal.IsNearlyZero())
         {
-            const FVector SolidToEmpty =
-                bSampleAIsSolid
-                    ? ToVector(LocalSampleB - LocalSampleA)
-                    : ToVector(LocalSampleA - LocalSampleB);
-
+            const FVector SolidToEmpty = bSampleAIsSolid
+                ? ToVector(LocalSampleB - LocalSampleA)
+                : ToVector(LocalSampleA - LocalSampleB);
             Result.Normal = SolidToEmpty.GetSafeNormal();
         }
 
@@ -299,7 +281,6 @@ namespace CubusDensityMesher
         {
             FVector2D UV;
             FVector TangentBasis;
-
             ResolveProjection(
                 WindingCrossNormal,
                 Vertex.GlobalSamplePosition,
@@ -331,9 +312,6 @@ namespace CubusDensityMesher
 
             MeshData.Normals.Add(Vertex.Normal);
             MeshData.UV0.Add(UV);
-
-            // Density materials use alpha exclusively as the biome/material
-            // blend weight. Block top/side/bottom face selection is not used.
             MeshData.VertexColors.Add(
                 FLinearColor(
                     1.0f,
@@ -346,7 +324,6 @@ namespace CubusDensityMesher
                     )
                 )
             );
-
             MeshData.Tangents.Add(
                 FProcMeshTangent(TangentDirection, false)
             );
@@ -364,6 +341,8 @@ void FCubusDensityMesher::BuildChunk(
     int32& OutGeneratedTriangleCount
 )
 {
+    using namespace CubusDensityMesher;
+
     OutMaterialMeshes.Reset();
     OutGeneratedTriangleCount = 0;
 
@@ -388,7 +367,6 @@ void FCubusDensityMesher::BuildChunk(
             for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
             {
                 const FIntVector CellOrigin(LocalX, LocalY, LocalZ);
-
                 FCubusDensitySample CornerSamples[8];
                 FIntVector CornerCoordinates[8];
                 int32 CaseIndex = 0;
@@ -475,7 +453,6 @@ void FCubusDensityMesher::BuildChunk(
 
                     int32 PrimaryMaterialId = 1;
                     int32 SecondaryMaterialId = 1;
-
                     ResolveMaterialPair(
                         TriangleVertices,
                         PrimaryMaterialId,
