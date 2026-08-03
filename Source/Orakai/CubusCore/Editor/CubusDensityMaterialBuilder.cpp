@@ -109,6 +109,28 @@ namespace CubusDensityMaterialBuilder
         return Node;
     }
 
+    UMaterialExpressionComponentMask* ComponentMask(
+        UMaterial* Material,
+        UMaterialExpression* Input,
+        const bool bR,
+        const bool bG,
+        const bool bB,
+        const bool bA,
+        const int32 X,
+        const int32 Y,
+        const int32 OutputIndex = 0
+    )
+    {
+        UMaterialExpressionComponentMask* Node =
+            AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
+        Node->R = bR;
+        Node->G = bG;
+        Node->B = bB;
+        Node->A = bA;
+        Connect(Node->Input, Input, OutputIndex);
+        return Node;
+    }
+
     UMaterialExpressionComponentMask* VertexAlpha(
         UMaterial* Material,
         UMaterialExpression* VertexColor,
@@ -116,14 +138,17 @@ namespace CubusDensityMaterialBuilder
         const int32 Y
     )
     {
-        UMaterialExpressionComponentMask* Node =
-            AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
-        Node->R = true;
-        Node->G = false;
-        Node->B = false;
-        Node->A = false;
-        Connect(Node->Input, VertexColor, 4);
-        return Node;
+        return ComponentMask(
+            Material,
+            VertexColor,
+            true,
+            false,
+            false,
+            false,
+            X,
+            Y,
+            4
+        );
     }
 
     void AddCustomInput(
@@ -434,6 +459,16 @@ return lerp(ao, bo, materialBlend);
     AddCustomInput(ORMKernel, TEXT("AORM"), AORM);
     AddCustomInput(ORMKernel, TEXT("BORM"), BORM);
 
+    UMaterialExpressionComponentMask* AmbientOcclusion = ComponentMask(
+        Material, ORMKernel, true, false, false, false, -800, 420
+    );
+    UMaterialExpressionComponentMask* Roughness = ComponentMask(
+        Material, ORMKernel, false, true, false, false, -800, 540
+    );
+    UMaterialExpressionComponentMask* Metallic = ComponentMask(
+        Material, ORMKernel, false, false, true, false, -800, 660
+    );
+
     UMaterialExpressionVectorParameter* AEmissiveColor = Vector(Material, TEXT("AEmissiveColor"), FLinearColor::Black, -700, 850);
     UMaterialExpressionScalarParameter* AEmissiveStrength = Scalar(Material, TEXT("AEmissiveStrength"), 0.0f, -700, 970);
     UMaterialExpressionVectorParameter* BEmissiveColor = Vector(Material, TEXT("BEmissiveColor"), FLinearColor::Black, -700, 1090);
@@ -453,9 +488,9 @@ return lerp(ao, bo, materialBlend);
     UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
     Connect(Data->BaseColor, ColorKernel);
     Connect(Data->Normal, NormalKernel);
-    Connect(Data->AmbientOcclusion, ORMKernel, 1);
-    Connect(Data->Roughness, ORMKernel, 2);
-    Connect(Data->Metallic, ORMKernel, 3);
+    Connect(Data->AmbientOcclusion, AmbientOcclusion);
+    Connect(Data->Roughness, Roughness);
+    Connect(Data->Metallic, Metallic);
     Connect(Data->EmissiveColor, Emissive);
 
     Save(Material);
