@@ -7,7 +7,9 @@ painted onto an already-generated surface.
 ## Generation order
 
 1. `FCubusTerrainForm` creates domain-warped land masses, plains, rolling
-   country, mountain chains and erosion-smoothed drainage valleys.
+   country, kilometre-scale mountain ranges and erosion-smoothed drainage
+   valleys. Mountain ranges follow connected warped plate boundaries, with
+   broad foothills, several major ridges and varying peaks along the spine.
 2. `FCubusBiomeField` samples moisture, temperature, elevation, slope and the
    shared waterway field.
 3. Block and density terrain select the same plains, forest, rocky and wetland
@@ -35,10 +37,14 @@ On the geology profile assigned to `CubusBlockWorldActor`:
 - assign distinct plains, forest, rocky and wetland surface material IDs;
 - tune the existing forest, plains, rocky and wetland vegetation densities.
 
-The existing terrain shape controls remain authoritative. Their meaning is now
-hierarchical: continent settings control macro relief, hills control rolling
-country, ridges control mountain chains, and valley settings control the main
-drainage and tributary network.
+The existing terrain shape controls remain authoritative. Their meaning is
+hierarchical: continent settings control regional relief, hills control
+rolling country, ridge amplitude controls range height and ridge frequency
+controls local crests within each range. The range footprint itself is derived
+at one tenth of the region frequency, preventing mountain country from fitting
+inside one or two chunks. Valley settings control the main drainage and
+tributary network.
 
-Generated chunk cache version 5 invalidates older baseline caches. Persistent
-player edits remain separate and are reapplied after the new baseline loads.
+Generated chunk cache version 8 invalidates the old small-mountain baseline.
+Persistent player edits remain separate and are migrated forward, then
+reapplied after the new baseline loads.

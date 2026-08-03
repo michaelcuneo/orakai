@@ -24,10 +24,11 @@ remains readable. Rivers may still cross them, and cave generation uses the
 raised landmark surface when applying surface-clearance rules.
 
 Changing these settings changes the generated baseline. Generation version 7
-invalidates the radial version-six landmark caches. The local backend loads the
-newest older delta store for the same world seed, reapplies the player edits
-over the new baseline, and writes a migrated version-seven store without
-deleting the older save.
+invalidated the radial version-six landmark caches; the current version-eight
+baseline retains the weathered landmark and adds kilometre-scale mountain
+ranges. The local backend loads the newest older delta store for the same world
+seed, reapplies the player edits over the new baseline, and writes a migrated
+store without deleting the older save.
 
 Run the focused automation coverage with:
 

@@ -31,15 +31,25 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     );
     Settings.MountainBlend = FMath::Clamp(Settings.MountainBlend, 0.001f, 1.0f);
 
-    // One broad warp is shared by every landform. This keeps detail aligned
-    // with the macro terrain instead of stacking unrelated noise layers.
+    // RegionFrequency used to be sampled directly, making a complete
+    // "mountain region" only a few hundred voxels wide. Treat it as the
+    // author-facing regional-detail frequency and derive a much slower
+    // tectonic field from it. At the defaults (one metre per voxel), the
+    // resulting plate-boundary ranges run for several kilometres.
+    const float TectonicFrequency = FMath::Max(
+        0.000001f,
+        Settings.RegionFrequency * 0.10f
+    );
+
+    // One kilometre-scale warp is shared by every landform. This keeps local
+    // relief aligned with the range instead of stacking unrelated noise.
     const float FormWarpFrequency = FMath::Max(
         0.000001f,
-        FMath::Min(Settings.RegionFrequency, Settings.ValleyWarpFrequency) * 0.65f
+        TectonicFrequency * 0.65f
     );
     const float FormWarpAmplitude = FMath::Max(
-        12.0f,
-        Settings.ValleyWarpAmplitude * 1.5f
+        256.0f,
+        Settings.ValleyWarpAmplitude * 12.0f
     );
     const float WarpX = SampleFbm(
         WorldX + 4871.0f,
@@ -60,10 +70,62 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float TerrainX = WorldX + WarpX;
     const float TerrainY = WorldY + WarpY;
 
-    const float RegionSignal = SampleFbm(
+    // Mountain ranges follow warped zero-crossings in a tectonic field. A
+    // zero contour is a connected spine, unlike a thresholded noise blob,
+    // so the range persists across many chunks instead of becoming a mound.
+    const float TectonicSignal = SampleFbm(
         TerrainX + 10427.0f,
         TerrainY - 8633.0f,
-        Settings.RegionFrequency,
+        TectonicFrequency,
+        3,
+        1.93f,
+        0.52f
+    );
+    const float TectonicDistance = FMath::Abs(TectonicSignal);
+    const float RangeContinuitySignal = SampleFbm(
+        TerrainX - 28391.0f,
+        TerrainY + 17657.0f,
+        TectonicFrequency * 0.43f,
+        3,
+        2.01f,
+        0.5f
+    );
+    const float RangeContinuity = SmoothStep(
+        -0.52f + Settings.MountainThreshold * 0.32f,
+        0.08f + Settings.MountainThreshold * 0.22f,
+        RangeContinuitySignal
+    );
+    const float CoreWidth = FMath::Lerp(
+        0.08f,
+        0.15f,
+        1.0f - FMath::Clamp(Settings.MountainThreshold, 0.0f, 1.0f)
+    );
+    const float CoreFalloff = FMath::Lerp(
+        0.045f,
+        0.14f,
+        Settings.MountainBlend
+    );
+    const float FoothillEdge = FMath::Min(
+        0.82f,
+        CoreWidth + CoreFalloff + 0.28f + Settings.MountainBlend * 0.35f
+    );
+    const float RangeCore =
+        (1.0f - SmoothStep(
+            CoreWidth,
+            CoreWidth + CoreFalloff,
+            TectonicDistance
+        )) * RangeContinuity;
+    const float FoothillBelt =
+        (1.0f - SmoothStep(
+            CoreWidth + CoreFalloff * 0.35f,
+            FoothillEdge,
+            TectonicDistance
+        )) * RangeContinuity;
+
+    const float RegionSignal = SampleFbm(
+        TerrainX - 11717.0f,
+        TerrainY + 23431.0f,
+        TectonicFrequency * 0.72f,
         3,
         2.0f,
         0.52f
@@ -73,15 +135,17 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         Settings.PlainsThreshold + Settings.PlainsBlend,
         RegionSignal
     );
-    const float MountainEntry = SmoothStep(
-        Settings.MountainThreshold - Settings.MountainBlend,
-        Settings.MountainThreshold + Settings.MountainBlend,
-        RegionSignal
-    );
 
     FCubusTerrainFormSample Result;
-    Result.PlainsWeight = 1.0f - PlainsExit;
-    Result.MountainWeight = MountainEntry;
+    Result.MountainCore = RangeCore;
+    Result.FoothillWeight = FMath::Max(FoothillBelt, RangeCore);
+    Result.PlainsWeight =
+        (1.0f - PlainsExit) * (1.0f - Result.FoothillWeight);
+    Result.MountainWeight = FMath::Clamp(
+        RangeCore + FoothillBelt * 0.48f,
+        0.0f,
+        1.0f
+    );
     Result.RollingWeight = FMath::Max(
         0.0f,
         1.0f - Result.PlainsWeight - Result.MountainWeight
@@ -95,7 +159,15 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         Result.MountainWeight /= TotalRegionWeight;
     }
 
-    const float Continent = SampleFbm(
+    const float MacroRelief = SampleFbm(
+        TerrainX + 317.0f,
+        TerrainY - 941.0f,
+        TectonicFrequency * 0.68f,
+        4,
+        2.01f,
+        0.5f
+    );
+    const float RegionalRelief = SampleFbm(
         TerrainX,
         TerrainY,
         Settings.ContinentFrequency,
@@ -119,12 +191,31 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         2.0f,
         0.42f
     );
-    Result.Ridge = SampleRidgedFbm(
+    const float LocalRidge = SampleRidgedFbm(
         TerrainX + 911.0f,
         TerrainY + 1511.0f,
         Settings.RidgeFrequency,
         4
     );
+    const float MajorRidge = SampleRidgedFbm(
+        TerrainX * 0.91f - TerrainY * 0.41f + 15401.0f,
+        TerrainX * 0.41f + TerrainY * 0.91f - 12011.0f,
+        TectonicFrequency * 4.5f,
+        3
+    );
+    const float PeakRhythm = FMath::Clamp(
+        0.5f + 0.5f * SampleFbm(
+            TerrainX * 0.78f + TerrainY * 0.63f - 6191.0f,
+            TerrainY * 0.78f - TerrainX * 0.63f + 9319.0f,
+            TectonicFrequency * 2.75f,
+            3,
+            2.06f,
+            0.48f
+        ),
+        0.0f,
+        1.0f
+    );
+    Result.Ridge = FMath::Max(LocalRidge, MajorRidge * RangeCore);
 
     // The broad channel establishes a continuous valley. A finer channel is
     // allowed only in selected catchments, producing tributaries instead of
@@ -187,12 +278,28 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
          0.9f * Result.MountainWeight) *
         Erosion;
 
+    // Broad uplift creates the physical mass of the range. MajorRidge and
+    // PeakRhythm vary summits along its connected spine; LocalRidge provides
+    // the smaller exposed crests. Foothills deliberately extend much farther
+    // than the core so a range is approached gradually over many chunks.
+    const float RangeUplift =
+        Settings.RidgeAmplitude *
+        (
+            FoothillBelt * 0.82f +
+            RangeCore * (1.15f + MajorRidge * 1.65f)
+        ) *
+        (0.72f + PeakRhythm * 0.55f);
+    const float Continent =
+        MacroRelief * 0.68f +
+        RegionalRelief * 0.32f;
+
     Result.Height =
         Settings.BaseHeight +
         Continent * Settings.ContinentAmplitude * ContinentStrength +
         Hills * Settings.HillAmplitude * HillStrength * Erosion +
         Detail * Settings.DetailAmplitude * DetailStrength +
-        Result.Ridge * Settings.RidgeAmplitude * RidgeStrength -
+        RangeUplift * Erosion +
+        LocalRidge * Settings.RidgeAmplitude * RidgeStrength -
         ValleyFloor * Settings.ValleyDepth * ValleyStrength;
 
     return Result;

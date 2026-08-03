@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 7: weathered, asymmetric landmark silhouettes replace the
-    // radial version-six baseline and must invalidate its chunk caches.
-    static constexpr uint32 CurrentGenerationVersion = 7;
+    // Bumped to 8: kilometre-scale mountain ranges replace the small
+    // thresholded mountain blobs from the version-seven baseline.
+    static constexpr uint32 CurrentGenerationVersion = 8;
 
     int64 World = 1;
     int32 Terrain = 0;

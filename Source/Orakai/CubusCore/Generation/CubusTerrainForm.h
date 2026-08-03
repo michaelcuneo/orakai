@@ -45,6 +45,8 @@ struct ORAKAI_API FCubusTerrainFormSample
     float PlainsWeight = 0.0f;
     float RollingWeight = 1.0f;
     float MountainWeight = 0.0f;
+    float MountainCore = 0.0f;
+    float FoothillWeight = 0.0f;
     float Drainage = 0.0f;
     float Ridge = 0.0f;
 };
@@ -52,10 +54,11 @@ struct ORAKAI_API FCubusTerrainFormSample
 /**
  * Deterministic multi-scale terrain form.
  *
- * Large domain-warped land masses establish regions, ridged multifractal
- * detail forms mountain chains, and a separate main-channel/tributary field
- * cuts broad valleys. Fine detail is suppressed on valley floors and plains
- * so the result reads as geography rather than uniformly distributed noise.
+ * Kilometre-scale warped plate boundaries establish mountain ranges and
+ * foothills. Smaller ridged multifractal detail then forms peaks inside those
+ * ranges, while a separate main-channel/tributary field cuts broad valleys.
+ * Fine detail is suppressed on valley floors and plains so the result reads
+ * as geography rather than uniformly distributed noise.
  */
 class ORAKAI_API FCubusTerrainForm
 {
