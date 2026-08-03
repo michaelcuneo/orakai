@@ -76,53 +76,6 @@ void FCubusBlockTerrainGenerator::GenerateFlatTerrain(
         ChunkCoordinate.Z *
         Cubus::ChunkSize;
 
-    constexpr int32 HeightBorder = 1;
-    constexpr int32 HeightGridSize = Cubus::ChunkSize + HeightBorder * 2;
-    TArray<int32> SurfaceHeights;
-    SurfaceHeights.SetNumUninitialized(HeightGridSize * HeightGridSize);
-    const auto HeightIndex = [=](const int32 LocalX, const int32 LocalY)
-    {
-        return
-            (LocalY + HeightBorder) * HeightGridSize +
-            (LocalX + HeightBorder);
-    };
-
-    for (int32 SampleY = -HeightBorder;
-         SampleY < Cubus::ChunkSize + HeightBorder;
-         ++SampleY)
-    {
-        for (int32 SampleX = -HeightBorder;
-             SampleX < Cubus::ChunkSize + HeightBorder;
-             ++SampleX)
-        {
-            SurfaceHeights[HeightIndex(SampleX, SampleY)] =
-                SampleTerrainHeight(
-                    ChunkWorldBaseX + SampleX,
-                    ChunkWorldBaseY + SampleY,
-                    BaseHeight,
-                    ContinentAmplitude,
-                    ContinentFrequency,
-                    HillAmplitude,
-                    HillFrequency,
-                    DetailAmplitude,
-                    DetailFrequency,
-                    RidgeAmplitude,
-                    RidgeFrequency,
-                    ValleyDepth,
-                    ValleyFrequency,
-                    ValleyWidth,
-                    ValleyFalloff,
-                    ValleyWarpAmplitude,
-                    ValleyWarpFrequency,
-                    RegionFrequency,
-                    PlainsThreshold,
-                    PlainsBlend,
-                    MountainThreshold,
-                    MountainBlend
-                );
-        }
-    }
-
     for (
         int32 LocalZ = 0;
         LocalZ < Cubus::ChunkSize;
@@ -215,6 +168,53 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
     const int32 ChunkWorldBaseZ =
         ChunkCoordinate.Z *
         Cubus::ChunkSize;
+
+    constexpr int32 HeightBorder = 1;
+    constexpr int32 HeightGridSize = Cubus::ChunkSize + HeightBorder * 2;
+    TArray<int32> SurfaceHeights;
+    SurfaceHeights.SetNumUninitialized(HeightGridSize * HeightGridSize);
+    const auto HeightIndex = [=](const int32 LocalX, const int32 LocalY)
+    {
+        return
+            (LocalY + HeightBorder) * HeightGridSize +
+            (LocalX + HeightBorder);
+    };
+
+    for (int32 SampleY = -HeightBorder;
+         SampleY < Cubus::ChunkSize + HeightBorder;
+         ++SampleY)
+    {
+        for (int32 SampleX = -HeightBorder;
+             SampleX < Cubus::ChunkSize + HeightBorder;
+             ++SampleX)
+        {
+            SurfaceHeights[HeightIndex(SampleX, SampleY)] =
+                SampleTerrainHeight(
+                    ChunkWorldBaseX + SampleX,
+                    ChunkWorldBaseY + SampleY,
+                    BaseHeight,
+                    ContinentAmplitude,
+                    ContinentFrequency,
+                    HillAmplitude,
+                    HillFrequency,
+                    DetailAmplitude,
+                    DetailFrequency,
+                    RidgeAmplitude,
+                    RidgeFrequency,
+                    ValleyDepth,
+                    ValleyFrequency,
+                    ValleyWidth,
+                    ValleyFalloff,
+                    ValleyWarpAmplitude,
+                    ValleyWarpFrequency,
+                    RegionFrequency,
+                    PlainsThreshold,
+                    PlainsBlend,
+                    MountainThreshold,
+                    MountainBlend
+                );
+        }
+    }
 
     for (
         int32 LocalY = 0;
