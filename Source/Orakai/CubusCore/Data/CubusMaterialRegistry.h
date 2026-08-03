@@ -29,10 +29,6 @@ public:
     )
     TObjectPtr<UMaterialInterface> DefaultMaterial = nullptr;
 
-    /**
-     * Dedicated parent material for smooth density terrain. It receives two
-     * texture sets (A/B) and blends them with vertex-color alpha.
-     */
     UPROPERTY(
         EditAnywhere,
         BlueprintReadOnly,
@@ -63,10 +59,6 @@ public:
         int32 MaterialId
     ) const;
 
-    /**
-     * Resolves ordinary positive material IDs and packed negative density
-     * material-pair keys.
-     */
     UMaterialInterface* ResolveRuntimeMaterial(
         int32 MaterialIdOrDensityKey
     ) const;
@@ -83,6 +75,15 @@ public:
     bool OccludesBlockFaces(
         int32 MaterialId
     ) const;
+
+    /** Builds M_CubusDensityPBR and assigns it to DensityMaterial. */
+    UFUNCTION(
+        BlueprintCallable,
+        CallInEditor,
+        Category = "Cubus|Materials|Density",
+        meta = (DisplayName = "Build Density Material")
+    )
+    void BuildDensityMaterial();
 
     UFUNCTION(
         BlueprintCallable,
