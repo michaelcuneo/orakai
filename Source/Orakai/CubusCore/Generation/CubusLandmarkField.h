@@ -16,6 +16,11 @@ struct ORAKAI_API FCubusLandmarkFieldSettings
     float MinimumHeightVoxels = 18.0f;
     float MaximumHeightVoxels = 42.0f;
     float PlateauRadiusFraction = 0.34f;
+    float MinimumAspectRatio = 1.15f;
+    float MaximumAspectRatio = 1.65f;
+    float OutlineIrregularity = 0.22f;
+    float ShoulderStrength = 0.58f;
+    float GullyStrength = 0.38f;
     int32 TerraceSteps = 5;
     float TerraceStrength = 0.32f;
     int32 SurfaceMaterialId = 3;
@@ -37,9 +42,10 @@ struct ORAKAI_API FCubusLandmarkSample
 /**
  * Sparse cellular landmark field shared by block and density generation.
  *
- * Each eligible world cell owns at most one broad, terraced stone mesa. The
- * cell hash controls presence, centre, radius and height, so the result is
- * stable across chunk boundaries and reconstructs from the world seed alone.
+ * Each eligible world cell owns at most one broad, weathered stone formation.
+ * Its seeded elliptical mass, broken rim, offset summit, shoulders and gullies
+ * avoid the rotationally symmetric "haystack" silhouette while remaining
+ * stable across chunk boundaries and reconstructible from the world seed.
  */
 class ORAKAI_API FCubusLandmarkField
 {

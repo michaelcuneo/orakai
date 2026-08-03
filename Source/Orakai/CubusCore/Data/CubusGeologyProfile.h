@@ -152,6 +152,21 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.05", ClampMax = "0.85"))
     float LandmarkPlateauRadiusFraction = 0.34f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Shape", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "1.0", ClampMax = "3.0"))
+    float LandmarkMinimumAspectRatio = 1.15f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Shape", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "1.0", ClampMax = "3.0"))
+    float LandmarkMaximumAspectRatio = 1.65f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Shape", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.0", ClampMax = "0.45"))
+    float LandmarkOutlineIrregularity = 0.22f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Weathering", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.0", ClampMax = "1.0"))
+    float LandmarkShoulderStrength = 0.58f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Weathering", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.0", ClampMax = "0.85"))
+    float LandmarkGullyStrength = 0.38f;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "1", ClampMax = "16"))
     int32 LandmarkTerraceSteps = 5;
 

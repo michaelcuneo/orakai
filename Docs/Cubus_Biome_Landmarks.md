@@ -11,19 +11,23 @@ Landmarks are configured on the active `Cubus Geology Profile` under
 - `Landmark Cell Size Voxels` controls average spacing.
 - `Landmark Spawn Chance` controls how many eligible cells contain a mesa.
 - Minimum/maximum radius and height control silhouette scale.
-- Plateau radius, terrace steps and terrace strength control the weathered
-  mesa shape.
+- Plateau radius, aspect-ratio range and outline irregularity control the main
+  mass and broken rim.
+- Shoulder strength adds lower secondary rock masses and saddles instead of a
+  single central peak.
+- Gully strength cuts seeded erosion channels into the sloped faces.
+- Terrace steps and terrace strength control the exposed rock benches.
 - `Landmark Surface Material Id` controls the exposed surface material.
 
 Landmarks suppress generated vegetation inside their footprint so the form
 remains readable. Rivers may still cross them, and cave generation uses the
 raised landmark surface when applying surface-clearance rules.
 
-Changing these settings changes the generated baseline. Generation version 6
-invalidates older generated chunk caches. The local backend loads the newest
-older delta store for the same world seed, reapplies the player edits over the
-new baseline, and writes a migrated version-six store without deleting the
-older save.
+Changing these settings changes the generated baseline. Generation version 7
+invalidates the radial version-six landmark caches. The local backend loads the
+newest older delta store for the same world seed, reapplies the player edits
+over the new baseline, and writes a migrated version-seven store without
+deleting the older save.
 
 Run the focused automation coverage with:
 

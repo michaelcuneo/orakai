@@ -62,6 +62,9 @@ bool FCubusLandmarkDeterminismTest::RunTest(const FString& Parameters)
     Settings.MaximumRadiusVoxels = 34.0f;
     Settings.MinimumHeightVoxels = 12.0f;
     Settings.MaximumHeightVoxels = 24.0f;
+    Settings.MinimumAspectRatio = 1.2f;
+    Settings.MaximumAspectRatio = 1.7f;
+    Settings.OutlineIrregularity = 0.24f;
 
     FCubusLandmarkSample StrongestSample;
     FVector2D StrongestCoordinate = FVector2D::ZeroVector;
@@ -117,6 +120,37 @@ bool FCubusLandmarkDeterminismTest::RunTest(const FString& Parameters)
     TestTrue(
         TEXT("Landmark sampling remains continuous across arbitrary chunk boundaries"),
         FMath::Abs(Adjacent.HeightOffset - StrongestSample.HeightOffset) < 1.0f
+    );
+
+    float MinimumRingHeight = TNumericLimits<float>::Max();
+    float MaximumRingHeight = -TNumericLimits<float>::Max();
+    constexpr int32 RingSampleCount = 16;
+    const float RingRadius = Settings.MinimumRadiusVoxels * 0.72f;
+
+    for (int32 RingIndex = 0; RingIndex < RingSampleCount; ++RingIndex)
+    {
+        const float RingAngle =
+            static_cast<float>(RingIndex) * 2.0f * PI /
+            static_cast<float>(RingSampleCount);
+        const FCubusLandmarkSample RingSample = FCubusLandmarkField::Sample(
+            StrongestCoordinate.X + FMath::Cos(RingAngle) * RingRadius,
+            StrongestCoordinate.Y + FMath::Sin(RingAngle) * RingRadius,
+            Settings
+        );
+        MinimumRingHeight = FMath::Min(
+            MinimumRingHeight,
+            RingSample.HeightOffset
+        );
+        MaximumRingHeight = FMath::Max(
+            MaximumRingHeight,
+            RingSample.HeightOffset
+        );
+    }
+
+    TestTrue(
+        TEXT("The landmark silhouette is not rotationally symmetric"),
+        MaximumRingHeight - MinimumRingHeight >
+            StrongestSample.HeightOffset * 0.08f
     );
     return true;
 }
