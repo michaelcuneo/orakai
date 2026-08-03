@@ -12,11 +12,11 @@
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionMultiply.h"
-#include "Materials/MaterialExpressionPixelNormalWS.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionVertexColor.h"
+#include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
@@ -118,6 +118,9 @@ namespace CubusDensityMaterialBuilder
     {
         UMaterialExpressionComponentMask* Node =
             AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
+        Node->R = false;
+        Node->G = false;
+        Node->B = false;
         Node->A = true;
         Connect(Node->Input, VertexColor);
         return Node;
@@ -286,8 +289,8 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
 
     UMaterialExpressionWorldPosition* WorldPosition =
         AddExpression<UMaterialExpressionWorldPosition>(Material, -3400, -900);
-    UMaterialExpressionPixelNormalWS* PixelNormal =
-        AddExpression<UMaterialExpressionPixelNormalWS>(Material, -3400, -700);
+    UMaterialExpressionVertexNormalWS* PixelNormal =
+        AddExpression<UMaterialExpressionVertexNormalWS>(Material, -3400, -700);
     UMaterialExpressionCameraPositionWS* CameraPosition =
         AddExpression<UMaterialExpressionCameraPositionWS>(Material, -3400, -500);
     UMaterialExpressionVertexColor* VertexColor =
