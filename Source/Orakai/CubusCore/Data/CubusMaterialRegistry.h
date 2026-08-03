@@ -94,14 +94,11 @@ private:
 
     mutable TMap<int32, int32> MaterialIndexById;
     mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>> RuntimeMaterialById;
-
-    /** Kept only so old assets/code invalidate cleanly after migration. */
     mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>> DensityRuntimeMaterialByKey;
-
     mutable TWeakObjectPtr<UMaterialInstanceDynamic> UnifiedDensityRuntimeMaterial;
 
     UPROPERTY(Transient)
-    mutable TObjectPtr<UTexture2D> DensityMaterialDataTexture = nullptr;
+    TObjectPtr<UTexture2D> DensityMaterialDataTexture = nullptr;
 
     mutable bool bLookupCacheDirty = true;
 
