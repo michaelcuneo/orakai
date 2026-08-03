@@ -6,12 +6,7 @@
 
 class UMaterial;
 
-/**
- * Editor-only utilities for generating Cubus material assets.
- *
- * The graph is assembled in C++ and every FExpressionInput is assigned
- * directly, avoiding the unreliable named-pin Python material API.
- */
+/** Editor-only utilities for generating Cubus material assets. */
 UCLASS()
 class ORAKAI_API UCubusMaterialBuilderLibrary final
     : public UBlueprintFunctionLibrary
@@ -19,10 +14,7 @@ class ORAKAI_API UCubusMaterialBuilderLibrary final
     GENERATED_BODY()
 
 public:
-    /**
-     * Creates or completely rebuilds /Game/Cubus/Materials/M_CubusBlockPBR.
-     * Returns the generated material, or nullptr when generation fails.
-     */
+    /** Creates or completely rebuilds M_CubusBlockPBR. */
     UFUNCTION(
         BlueprintCallable,
         Category = "Cubus|Editor|Materials",
@@ -31,12 +23,12 @@ public:
     static UMaterial* BuildCubusBlockPbrMaterial();
 
     /**
-     * Creates or completely rebuilds
-     * /Game/Cubus/Materials/M_CubusDensityPBR.
+     * Creates or completely rebuilds M_CubusDensityPBR.
      *
-     * The material blends texture sets A and B using vertex-color alpha.
-     * Density meshes therefore blend biome/material boundaries without using
-     * the block top/side/bottom selector.
+     * The generated material samples MaterialId-indexed texture arrays and
+     * blends four locally dominant density materials using packed UV0 IDs and
+     * vertex-colour RGBA weights. All density sections share this one master
+     * material and one registry-owned runtime instance.
      */
     UFUNCTION(
         BlueprintCallable,
