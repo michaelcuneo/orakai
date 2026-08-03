@@ -178,7 +178,8 @@ float id1 = floor(packed01 / MaterialIdPackingBase);
 float id2 = fmod(packed23, MaterialIdPackingBase);
 float id3 = floor(packed23 / MaterialIdPackingBase);
 
-float4 vertexWeights = max(VertexWeights, 0.0.xxxx);
+float alphaWeight = saturate(1.0 - VertexWeights.r - VertexWeights.g - VertexWeights.b);
+float4 vertexWeights = max(float4(VertexWeights.rgb, alphaWeight), 0.0.xxxx);
 vertexWeights /= max(dot(vertexWeights, 1.0.xxxx), 0.0001);
 
 float2 dataUv0 = float2((id0 + 0.5) / MaterialTableWidth, 0.375);
