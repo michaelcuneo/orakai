@@ -308,28 +308,37 @@ void ACubusProceduralTreeStreamer::BuildChunkTrees(
     Entry.Mesh->ClearAllMeshSections();
     Entry.Signature = Signature;
 
-    FCubusTreeMeshSection Bark;
-    FCubusTreeMeshSection Canopy;
+    FCubusTreeMeshSection BroadleafBark;
+    FCubusTreeMeshSection BroadleafCanopy;
+    FCubusTreeMeshSection ConiferBark;
+    FCubusTreeMeshSection ConiferCanopy;
+
     const float SafeVoxelSize = FMath::Max(1.0f, Chunk.GetVoxelSize());
     const double ChunkHalfWorldExtent =
         static_cast<double>(Cubus::ChunkSize) *
         static_cast<double>(SafeVoxelSize) * 0.5;
-    const FTransform ActorInverse = GetActorTransform().Inverse();
     const int32 SafeVariantCount = FMath::Clamp(VariantsPerSpecies, 1, 32);
 
     for (const FCubusVegetationInstance& Instance : ChunkData->GetVegetationInstances())
     {
         const UCubusTreeSpecies* Species = nullptr;
+        FCubusTreeMeshSection* BarkTarget = nullptr;
+        FCubusTreeMeshSection* CanopyTarget = nullptr;
+
         if (Instance.TypeId == BroadleafType)
         {
             Species = BroadleafSpecies;
+            BarkTarget = &BroadleafBark;
+            CanopyTarget = &BroadleafCanopy;
         }
         else if (Instance.TypeId == ConiferType)
         {
             Species = ConiferSpecies;
+            BarkTarget = &ConiferBark;
+            CanopyTarget = &ConiferCanopy;
         }
 
-        if (!IsValid(Species))
+        if (!IsValid(Species) || BarkTarget == nullptr || CanopyTarget == nullptr)
         {
             continue;
         }
@@ -358,14 +367,17 @@ void ACubusProceduralTreeStreamer::BuildChunkTrees(
             WorldLocation,
             FVector(Scale)
         );
-        const FTransform LocalTreeTransform = WorldTreeTransform * ActorInverse;
+        const FTransform LocalTreeTransform =
+            WorldTreeTransform.GetRelativeTransform(GetActorTransform());
 
-        AppendSection(Generated.Bark, LocalTreeTransform, Bark);
-        AppendSection(Generated.Canopy, LocalTreeTransform, Canopy);
+        AppendSection(Generated.Bark, LocalTreeTransform, *BarkTarget);
+        AppendSection(Generated.Canopy, LocalTreeTransform, *CanopyTarget);
     }
 
-    CreateSection(*Entry.Mesh, 0, Bark, bGenerateCollision);
-    CreateSection(*Entry.Mesh, 1, Canopy, false);
+    CreateSection(*Entry.Mesh, 0, BroadleafBark, bGenerateCollision);
+    CreateSection(*Entry.Mesh, 1, BroadleafCanopy, false);
+    CreateSection(*Entry.Mesh, 2, ConiferBark, bGenerateCollision);
+    CreateSection(*Entry.Mesh, 3, ConiferCanopy, false);
 
     if (IsValid(BroadleafSpecies))
     {
@@ -379,15 +391,15 @@ void ACubusProceduralTreeStreamer::BuildChunkTrees(
         }
     }
 
-    if (!IsValid(BroadleafSpecies) && IsValid(ConiferSpecies))
+    if (IsValid(ConiferSpecies))
     {
         if (IsValid(ConiferSpecies->BarkMaterial))
         {
-            Entry.Mesh->SetMaterial(0, ConiferSpecies->BarkMaterial);
+            Entry.Mesh->SetMaterial(2, ConiferSpecies->BarkMaterial);
         }
         if (IsValid(ConiferSpecies->CanopyMaterial))
         {
-            Entry.Mesh->SetMaterial(1, ConiferSpecies->CanopyMaterial);
+            Entry.Mesh->SetMaterial(3, ConiferSpecies->CanopyMaterial);
         }
     }
 }
