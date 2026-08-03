@@ -98,7 +98,7 @@ private:
     mutable TWeakObjectPtr<UMaterialInstanceDynamic> UnifiedDensityRuntimeMaterial;
 
     UPROPERTY(Transient)
-    TObjectPtr<UTexture2D> DensityMaterialDataTexture = nullptr;
+    mutable TObjectPtr<UTexture2D> DensityMaterialDataTexture = nullptr;
 
     mutable bool bLookupCacheDirty = true;
 
