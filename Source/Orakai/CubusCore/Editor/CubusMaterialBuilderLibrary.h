@@ -29,4 +29,19 @@ public:
         meta = (DevelopmentOnly)
     )
     static UMaterial* BuildCubusBlockPbrMaterial();
+
+    /**
+     * Creates or completely rebuilds
+     * /Game/Cubus/Materials/M_CubusDensityPBR.
+     *
+     * The material blends texture sets A and B using vertex-color alpha.
+     * Density meshes therefore blend biome/material boundaries without using
+     * the block top/side/bottom selector.
+     */
+    UFUNCTION(
+        BlueprintCallable,
+        Category = "Cubus|Editor|Materials",
+        meta = (DevelopmentOnly)
+    )
+    static UMaterial* BuildCubusDensityPbrMaterial();
 };
