@@ -36,6 +36,10 @@ public:
         const FIntVector& GlobalSampleCoordinate
     ) const override;
 
+    virtual FCubusDensitySample SampleContinuous(
+        const FVector& GlobalSampleCoordinate
+    ) const override;
+
     virtual FVector GetSampleOffsetInVoxels() const override;
 
 private:

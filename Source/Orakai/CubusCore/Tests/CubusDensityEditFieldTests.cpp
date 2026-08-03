@@ -109,4 +109,70 @@ bool FCubusSparseDensityEditFieldTest::RunTest(
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusContinuousDensityEditFieldTest,
+    "Orakai.Cubus.Density.Editing.ContinuousOverlay",
+    EAutomationTestFlags::EditorContext |
+    EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusContinuousDensityEditFieldTest::RunTest(
+    const FString& Parameters
+)
+{
+    (void)Parameters;
+
+    const CubusDensityEditFieldTests::FConstantField GeneratedField;
+    FCubusDensityEditMap Edits;
+
+    FCubusDensityEdit Edit;
+    Edit.DensityDelta = 4.0f;
+    Edit.MaterialId = 9;
+    Edits.Add(FIntVector::ZeroValue, Edit);
+
+    const FCubusDensityEditField EditedField(
+        GeneratedField,
+        Edits
+    );
+
+    const FCubusDensitySample Exact =
+        EditedField.SampleContinuous(FVector::ZeroVector);
+
+    TestEqual(
+        TEXT("A fine sample on an edit retains the full density delta"),
+        Exact.Density,
+        5.0f
+    );
+    TestEqual(
+        TEXT("A fine sample on an edit retains its material"),
+        Exact.MaterialId,
+        9
+    );
+
+    const FCubusDensitySample Halfway =
+        EditedField.SampleContinuous(FVector(0.5, 0.0, 0.0));
+
+    TestEqual(
+        TEXT("Fine density samples interpolate the canonical edit lattice"),
+        Halfway.Density,
+        3.0f
+    );
+    TestEqual(
+        TEXT("Interpolated solid edits keep the authored material"),
+        Halfway.MaterialId,
+        9
+    );
+
+    const FCubusDensitySample Outside =
+        EditedField.SampleContinuous(FVector(1.0, 0.0, 0.0));
+
+    TestEqual(
+        TEXT("The edit does not move when density resolution changes"),
+        Outside.Density,
+        1.0f
+    );
+
+    return true;
+}
+
 #endif

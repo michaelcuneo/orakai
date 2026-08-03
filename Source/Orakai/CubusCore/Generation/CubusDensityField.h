@@ -20,6 +20,27 @@ public:
     ) const = 0;
 
     /**
+     * Samples the field at a fractional canonical voxel coordinate.
+     *
+     * The one-metre block/edit lattice remains authoritative. Density LOD
+     * evaluates between those lattice points so changing mesh resolution does
+     * not change chunk bounds, biome scale, or persisted voxel addresses.
+     * Discrete fields may keep the nearest-lattice fallback below.
+     */
+    virtual FCubusDensitySample SampleContinuous(
+        const FVector& GlobalSampleCoordinate
+    ) const
+    {
+        return Sample(
+            FIntVector(
+                FMath::RoundToInt(GlobalSampleCoordinate.X),
+                FMath::RoundToInt(GlobalSampleCoordinate.Y),
+                FMath::RoundToInt(GlobalSampleCoordinate.Z)
+            )
+        );
+    }
+
+    /**
      * Spatial offset of each integer sample in voxel units.
      *
      * A true corner-sampled density field normally returns zero. The block

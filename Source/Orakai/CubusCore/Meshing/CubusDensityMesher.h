@@ -5,6 +5,7 @@
 #include "CubusCore/Meshing/CubusMeshData.h"
 
 class FCubusDensitySamplingBuffer;
+class ICubusDensityField;
 
 /** Extracts a smooth isosurface from a buffered Cubus density field. */
 class ORAKAI_API FCubusDensityMesher
@@ -27,6 +28,22 @@ public:
     static void BuildChunk(
         const FCubusDensitySamplingBuffer& DensityBuffer,
         float VoxelSize,
+        float IsoLevel,
+        TMap<int32, FCubusMeshData>& OutMaterialMeshes,
+        int32& OutGeneratedTriangleCount
+    );
+
+    /**
+     * Builds the same fixed-size canonical chunk at a finer sampling interval.
+     * SubdivisionsPerVoxel=4 means 25 cm samples when canonical voxels are
+     * 100 cm. Only coarse cells near a possible zero crossing are refined, so
+     * the mesher does not allocate a 128/320-cubed dense volume.
+     */
+    static void BuildAdaptiveChunk(
+        const ICubusDensityField& DensityField,
+        const FIntVector& ChunkCoordinate,
+        float CanonicalVoxelSize,
+        int32 SubdivisionsPerVoxel,
         float IsoLevel,
         TMap<int32, FCubusMeshData>& OutMaterialMeshes,
         int32& OutGeneratedTriangleCount

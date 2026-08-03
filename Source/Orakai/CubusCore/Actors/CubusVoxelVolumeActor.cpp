@@ -259,11 +259,12 @@ void ACubusVoxelVolumeActor::RebuildVolume()
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus chunk (%d, %d, %d) built mode=%d rootSections=%d blockSections=%d densitySections=%d vertices=%d triangles=%d densityTriangles=%d collision=%s time=%.2fms"),
+        TEXT("Cubus chunk (%d, %d, %d) built mode=%d densityStep=%.1fcm rootSections=%d blockSections=%d densitySections=%d vertices=%d triangles=%d densityTriangles=%d collision=%s time=%.2fms"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
         ChunkCoordinate.Z,
         static_cast<int32>(LastBuiltRenderMode),
+        GetDensitySampleSpacing(),
         GeneratedMaterialSectionCount,
         GeneratedBlockSectionCount,
         GeneratedDensitySectionCount,
@@ -567,18 +568,14 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
         DensityEditSnapshot
     );
 
-    FCubusDensitySamplingBuffer DensityBuffer;
-    DensityBuffer.Build(
-        ChunkCoordinate,
-        EditedDensityField
-    );
-
     FCubusMaterialMeshMap MaterialMeshes;
     int32 MesherTriangleCount = 0;
 
-    FCubusDensityMesher::BuildChunk(
-        DensityBuffer,
+    FCubusDensityMesher::BuildAdaptiveChunk(
+        EditedDensityField,
+        ChunkCoordinate,
         VoxelSize,
+        DensitySubdivisionsPerVoxel,
         0.0f,
         MaterialMeshes,
         MesherTriangleCount
@@ -667,6 +664,24 @@ void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(
     {
         OwningBlockWorld->RegisterChunk(this);
     }
+}
+
+bool ACubusVoxelVolumeActor::ConfigureDensityResolution(
+    const int32 InSubdivisionsPerVoxel
+)
+{
+    const int32 ResolvedSubdivisions =
+        FCubusDensityLod::NormalizeSubdivisions(
+            InSubdivisionsPerVoxel
+        );
+
+    if (DensitySubdivisionsPerVoxel == ResolvedSubdivisions)
+    {
+        return false;
+    }
+
+    DensitySubdivisionsPerVoxel = ResolvedSubdivisions;
+    return true;
 }
 
 void ACubusVoxelVolumeActor::ConfigureRendering(

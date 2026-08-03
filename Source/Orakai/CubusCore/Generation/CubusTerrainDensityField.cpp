@@ -141,10 +141,23 @@ FCubusDensitySample FCubusTerrainDensityField::Sample(
     const FIntVector& GlobalSampleCoordinate
 ) const
 {
+    return SampleContinuous(
+        FVector(
+            static_cast<double>(GlobalSampleCoordinate.X),
+            static_cast<double>(GlobalSampleCoordinate.Y),
+            static_cast<double>(GlobalSampleCoordinate.Z)
+        )
+    );
+}
+
+FCubusDensitySample FCubusTerrainDensityField::SampleContinuous(
+    const FVector& GlobalSampleCoordinate
+) const
+{
     const FColumnData& Column =
         GetColumnData(
-            GlobalSampleCoordinate.X,
-            GlobalSampleCoordinate.Y
+            static_cast<float>(GlobalSampleCoordinate.X),
+            static_cast<float>(GlobalSampleCoordinate.Y)
         );
 
     const float TerrainDensity =
@@ -231,12 +244,26 @@ float FCubusTerrainDensityField::SampleSurfaceVoxelHeight(
     );
 }
 
+FIntPoint FCubusTerrainDensityField::MakeCoordinateCacheKey(
+    const float WorldX,
+    const float WorldY
+)
+{
+    return FIntPoint(
+        FMath::RoundToInt(WorldX * CoordinateCacheScale),
+        FMath::RoundToInt(WorldY * CoordinateCacheScale)
+    );
+}
+
 float FCubusTerrainDensityField::GetCachedSurfaceVoxelHeight(
-    const int32 WorldSampleX,
-    const int32 WorldSampleY
+    const float WorldSampleX,
+    const float WorldSampleY
 ) const
 {
-    const FIntPoint Key(WorldSampleX, WorldSampleY);
+    const FIntPoint Key = MakeCoordinateCacheKey(
+        WorldSampleX,
+        WorldSampleY
+    );
 
     if (const float* ExistingHeight = HeightCache.Find(Key))
     {
@@ -248,8 +275,8 @@ float FCubusTerrainDensityField::GetCachedSurfaceVoxelHeight(
     // that same domain at X/Y - 0.5.
     const float Height =
         SampleSurfaceVoxelHeight(
-            static_cast<float>(WorldSampleX) - 0.5f,
-            static_cast<float>(WorldSampleY) - 0.5f
+            WorldSampleX - 0.5f,
+            WorldSampleY - 0.5f
         );
 
     HeightCache.Add(Key, Height);
@@ -258,11 +285,14 @@ float FCubusTerrainDensityField::GetCachedSurfaceVoxelHeight(
 
 const FCubusTerrainDensityField::FColumnData&
 FCubusTerrainDensityField::GetColumnData(
-    const int32 WorldSampleX,
-    const int32 WorldSampleY
+    const float WorldSampleX,
+    const float WorldSampleY
 ) const
 {
-    const FIntPoint Key(WorldSampleX, WorldSampleY);
+    const FIntPoint Key = MakeCoordinateCacheKey(
+        WorldSampleX,
+        WorldSampleY
+    );
 
     if (const FColumnData* ExistingColumn = ColumnCache.Find(Key))
     {
@@ -320,10 +350,10 @@ FCubusTerrainDensityField::GetColumnData(
         );
 
     const float TerrainX =
-        static_cast<float>(WorldSampleX) - 0.5f +
+        WorldSampleX - 0.5f +
         static_cast<float>(Settings.TerrainOffsetX);
     const float TerrainY =
-        static_cast<float>(WorldSampleY) - 0.5f +
+        WorldSampleY - 0.5f +
         static_cast<float>(Settings.TerrainOffsetY);
     const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(
         TerrainX,
@@ -354,8 +384,8 @@ FCubusTerrainDensityField::GetColumnData(
     else if (Settings.BiomeSettings.bEnabled)
     {
         Column.SurfaceMaterialId = FCubusBiomeField::Sample(
-            static_cast<float>(WorldSampleX) - 0.5f,
-            static_cast<float>(WorldSampleY) - 0.5f,
+            WorldSampleX - 0.5f,
+            WorldSampleY - 0.5f,
             Column.SurfaceVoxelHeight,
             Column.Slope,
             Settings.BiomeSettings
@@ -623,16 +653,17 @@ float FCubusTerrainDensityField::ApplyRiverLowering(
 }
 
 float FCubusTerrainDensityField::SampleCaveDensity(
-    const FIntVector& GlobalSampleCoordinate,
+    const FVector& GlobalSampleCoordinate,
     const float SurfaceVoxelHeight
 ) const
 {
-    const int32 WorldZ = GlobalSampleCoordinate.Z;
+    const float WorldZ =
+        static_cast<float>(GlobalSampleCoordinate.Z);
 
     if (
         WorldZ < Settings.CaveMinimumWorldZ ||
         WorldZ > Settings.CaveMaximumWorldZ ||
-        static_cast<float>(WorldZ) >
+        WorldZ >
             SurfaceVoxelHeight -
             static_cast<float>(Settings.CaveSurfaceClearance)
     )
@@ -641,22 +672,16 @@ float FCubusTerrainDensityField::SampleCaveDensity(
     }
 
     const float WorldX =
-        static_cast<float>(
-            GlobalSampleCoordinate.X +
-            Settings.CaveOffsetX
-        );
+        static_cast<float>(GlobalSampleCoordinate.X) +
+        static_cast<float>(Settings.CaveOffsetX);
 
     const float WorldY =
-        static_cast<float>(
-            GlobalSampleCoordinate.Y +
-            Settings.CaveOffsetY
-        );
+        static_cast<float>(GlobalSampleCoordinate.Y) +
+        static_cast<float>(Settings.CaveOffsetY);
 
     const float ShiftedWorldZ =
-        static_cast<float>(
-            GlobalSampleCoordinate.Z +
-            Settings.CaveOffsetZ
-        );
+        static_cast<float>(GlobalSampleCoordinate.Z) +
+        static_cast<float>(Settings.CaveOffsetZ);
 
     const float PrimaryNoise =
         FMath::Abs(

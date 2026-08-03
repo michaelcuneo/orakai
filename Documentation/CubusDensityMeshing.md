@@ -90,7 +90,11 @@ FCubusTerrainDensityField
 FCubusDensityEditField (generated field + sparse edit snapshot)
         |
         v
-35 x 35 x 35 halo sampling buffer
+player-distance density LOD
+        |
+        +-- 100 cm: 35 x 35 x 35 halo buffer
+        |
+        +-- 50/25/10 cm: sparse adaptive surface sampling
         |
         v
 FCubusDensityMesher
@@ -131,9 +135,38 @@ Marching Cubes owns cells whose lower sample coordinate is `0..31`. Their
 corners require samples `0..32`, and central-difference normals require the halo
 `-1..33`, producing a `35 x 35 x 35` temporary buffer.
 
-All field samples use global voxel coordinates. Adjacent streamed chunks receive
-the same scalar values on their shared boundary without depending on neighbour
-chunk data.
+All field samples use canonical global voxel coordinates. One canonical unit is
+still one block voxel (`GeneratedVoxelSize`, normally 100 cm). Adaptive density
+samples use fractional canonical coordinates, so 25 cm density sampling occurs
+at `0.25`-voxel intervals without shrinking chunks, mountains, rivers, caves,
+vegetation or saved edits.
+
+Adjacent streamed chunks receive the same scalar values without depending on
+neighbour chunk data. Fine chunks lock their boundary samples to interpolation
+of the canonical one-metre lattice. This keeps their boundary contour on the
+same coarse segments used by a neighbouring lower-LOD chunk instead of opening
+cracks when the two resolutions meet.
+
+## Density LOD
+
+`ACubusBlockWorldActor` selects density resolution from three player-centred
+tiers. Defaults for a 100 cm canonical voxel are:
+
+| Tier | Chunk radius | Sample spacing | Subdivisions |
+|---|---:|---:|---:|
+| Near | 1 | 25 cm | 4 |
+| Middle | 3 | 50 cm | 2 |
+| Far | remaining view | 100 cm | 1 |
+
+The supported subdivisions are `1`, `2`, `4` and `10`. Setting the near sample
+spacing to 10 cm enables the 10x tier, but it is intentionally not the default:
+even sparse surface refinement produces considerably more triangles and field
+queries at that resolution.
+
+The actor remeshes an existing density or hybrid chunk only when player motion
+moves it into another tier. Block-mode chunks ignore density LOD. Chunk actor
+locations and extents always remain `32 * GeneratedVoxelSize`, so streaming and
+persistence continue to address the same world volume.
 
 ## Runtime editing
 
@@ -145,7 +178,7 @@ representations:
 - `Remove Cubus Density From Hit`
 - `Add Cubus Density From Hit`
 
-Brush radii are measured in voxel/sample coordinates. Block brushes batch all
+Brush radii are measured in canonical voxel/sample coordinates. Block brushes batch all
 writes by chunk, save each touched chunk once, then queue the touched chunks and
 their face neighbours for remeshing. Density brushes accumulate sparse scalar
 deltas and queue a `3 x 3 x 3` chunk halo because central-difference normals can
@@ -153,7 +186,9 @@ depend on diagonal samples.
 
 Density edits are retained by the world actor while chunks stream out and back
 in. A rebuilding chunk receives an immutable, chunk-local snapshot containing
-only edits within its `35 x 35 x 35` sampling range.
+the canonical edit lattice plus its normal halo. Fine density samples
+trilinearly interpolate those deltas, so changing LOD does not move or discard
+an edit.
 
 ## Runtime diagnostics
 
@@ -166,7 +201,7 @@ Cubus streamed chunk class=BP_CubusVoxelPCGChunk_C coordinate=(X, Y, Z) renderMo
 After rebuilding:
 
 ```text
-Cubus chunk (X, Y, Z) built mode=1 rootSections=3 blockSections=0 densitySections=3 densityTriangles=...
+Cubus chunk (X, Y, Z) built mode=1 densityStep=25.0cm rootSections=3 blockSections=0 densitySections=3 densityTriangles=...
 ```
 
 Mode values are:
@@ -200,7 +235,6 @@ The native density path does not yet include:
 - density-native vegetation placement,
 - asynchronous revisioned meshing,
 - chunk-wide edge-vertex reuse,
-- LOD meshes,
 - or block/density transition cells.
 
 Block and density edits remain deliberately separate: block brushes modify
@@ -212,10 +246,12 @@ Automation tests cover:
 
 - a full-chunk horizontal plane,
 - a sphere crossing a chunk boundary,
+- adaptive 25 cm extraction inside a fixed 32 metre chunk,
+- mixed-resolution canonical boundary locking,
 - fractional surface placement,
 - deterministic seeded-domain displacement,
 - block-generator/native-density height parity,
 - continuous river lowering,
 - three-dimensional cave carving and surface clearance,
-- sparse add/remove density overlay and material overrides,
+- sparse add/remove density overlay, continuous edit interpolation and material overrides,
 - and mutable block-chunk occupancy invalidation.

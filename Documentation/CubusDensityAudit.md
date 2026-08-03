@@ -48,7 +48,7 @@ runtime chunk terrain:
 - base terrain, regions, valleys and mountains,
 - geology, rivers and caves,
 - block and density field construction,
-- `35 x 35 x 35` density halo sampling,
+- coarse halo and sparse adaptive density sampling,
 - Marching Cubes extraction,
 - root procedural-mesh section submission,
 - material assignment and collision cooking,
@@ -208,7 +208,13 @@ The following are not yet part of the native scalar field:
 - density-native vegetation queries,
 - revisioned asynchronous meshing,
 - shared edge vertices,
-- LOD and transition cells.
+- full block/density transition cells.
+
+Density mesh LOD is now player-centred and independent of the canonical block
+grid. Fine chunks use fractional field sampling while retaining the same 32 m
+chunk bounds, generation domain and persisted edit coordinates. Mixed density
+LOD boundaries are locked to the canonical lattice; this is separate from the
+still-unimplemented transition between block geometry and density geometry.
 
 Sparse player density edits now wrap the generated field before halo sampling.
 They survive chunk unload/reload for the lifetime of the world actor, but are
@@ -218,6 +224,7 @@ not yet persisted across sessions. Block edits remain a separate operation on
 ## Validation boundary
 
 The branch has source-level tests for plane extraction, cross-chunk seams,
-fractional surfaces, seeded-domain parity, rivers, caves and occupancy-cache
+adaptive and mixed-LOD boundaries, fractional surfaces, continuous edit
+interpolation, seeded-domain parity, rivers, caves and occupancy-cache
 invalidation. The authoritative integration test remains an UnrealBuildTool
 compile followed by PIE with streamed `BP_CubusVoxelPCGChunk` instances.

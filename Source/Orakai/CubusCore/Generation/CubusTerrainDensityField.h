@@ -104,6 +104,10 @@ public:
         const FIntVector& GlobalSampleCoordinate
     ) const override;
 
+    virtual FCubusDensitySample SampleContinuous(
+        const FVector& GlobalSampleCoordinate
+    ) const override;
+
     float SampleSurfaceVoxelHeight(
         float WorldX,
         float WorldY
@@ -128,17 +132,26 @@ private:
     FCubusTerrainDensitySettings Settings;
     FCubusTerrainFormSettings TerrainFormSettings;
 
+    // Common denominator for the supported 1, 1/2, 1/4 and 1/10 sample steps.
+    // Keeping this at 20 also avoids overflowing cache keys in large worlds.
+    static constexpr float CoordinateCacheScale = 20.0f;
+
     mutable TMap<FIntPoint, float> HeightCache;
     mutable TMap<FIntPoint, FColumnData> ColumnCache;
 
+    static FIntPoint MakeCoordinateCacheKey(
+        float WorldX,
+        float WorldY
+    );
+
     float GetCachedSurfaceVoxelHeight(
-        int32 WorldX,
-        int32 WorldY
+        float WorldX,
+        float WorldY
     ) const;
 
     const FColumnData& GetColumnData(
-        int32 WorldX,
-        int32 WorldY
+        float WorldX,
+        float WorldY
     ) const;
 
     FTerrainRegionWeights SampleTerrainRegions(
@@ -182,7 +195,7 @@ private:
     ) const;
 
     float SampleCaveDensity(
-        const FIntVector& GlobalSampleCoordinate,
+        const FVector& GlobalSampleCoordinate,
         float SurfaceVoxelHeight
     ) const;
 

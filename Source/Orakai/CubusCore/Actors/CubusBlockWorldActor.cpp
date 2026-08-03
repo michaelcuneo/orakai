@@ -7,6 +7,7 @@
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
+#include "CubusCore/Meshing/CubusDensityLod.h"
 #include "CubusCore/Persistence/OrakaiPersistenceSubsystem.h"
 #include "CubusCore/Persistence/OrakaiPersistenceTypes.h"
 #include "CubusCore/Storage/CubusChunkStore.h"
@@ -59,6 +60,26 @@ void ACubusBlockWorldActor::OnConstruction(
     GridDimensions.Z = FMath::Max(1, GridDimensions.Z);
 
     GeneratedVoxelSize = FMath::Max(1.0f, GeneratedVoxelSize);
+    DensityNearSampleSpacing = FMath::Clamp(
+        DensityNearSampleSpacing,
+        1.0f,
+        GeneratedVoxelSize
+    );
+    DensityMiddleSampleSpacing = FMath::Clamp(
+        DensityMiddleSampleSpacing,
+        DensityNearSampleSpacing,
+        GeneratedVoxelSize
+    );
+    DensityFarSampleSpacing = FMath::Clamp(
+        DensityFarSampleSpacing,
+        DensityMiddleSampleSpacing,
+        GeneratedVoxelSize
+    );
+    DensityNearChunkRadius = FMath::Max(0, DensityNearChunkRadius);
+    DensityMiddleChunkRadius = FMath::Max(
+        DensityNearChunkRadius,
+        DensityMiddleChunkRadius
+    );
 
     TerrainContinentAmplitude = FMath::Max(0.0f, TerrainContinentAmplitude);
     TerrainContinentFrequency = FMath::Max(0.000001f, TerrainContinentFrequency);
@@ -1171,6 +1192,10 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
         this
     );
 
+    ChunkActor->ConfigureDensityResolution(
+        ResolveDensitySubdivisions(Coordinate)
+    );
+
     ChunkActor->ConfigureRendering(
         MaterialRegistry
     );
@@ -1516,6 +1541,8 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 
     LastTrackedChunk = CentreCoordinate;
 
+    UpdateDensityLods(CentreCoordinate);
+
     BuildRequiredCoordinates(
         CentreCoordinate,
         HorizontalViewRadius,
@@ -1571,6 +1598,77 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
     }
 
     PendingRuntimeChunkCount = PendingChunkGeneration.Num();
+}
+
+int32 ACubusBlockWorldActor::ResolveDensitySubdivisions(
+    const FIntVector& ChunkCoordinate
+) const
+{
+    if (!bEnableDensityLod)
+    {
+        return 1;
+    }
+
+    const bool bHasTrackedChunk =
+        LastTrackedChunk.X != MAX_int32 &&
+        LastTrackedChunk.Y != MAX_int32 &&
+        LastTrackedChunk.Z != MAX_int32;
+
+    float TargetSpacing = DensityFarSampleSpacing;
+
+    if (bHasTrackedChunk)
+    {
+        const int32 Distance = FCubusDensityLod::ChunkDistance(
+            ChunkCoordinate,
+            LastTrackedChunk
+        );
+
+        if (Distance <= DensityNearChunkRadius)
+        {
+            TargetSpacing = DensityNearSampleSpacing;
+        }
+        else if (Distance <= DensityMiddleChunkRadius)
+        {
+            TargetSpacing = DensityMiddleSampleSpacing;
+        }
+    }
+
+    return FCubusDensityLod::ResolveSubdivisionsForSpacing(
+        GeneratedVoxelSize,
+        TargetSpacing
+    );
+}
+
+void ACubusBlockWorldActor::UpdateDensityLods(
+    const FIntVector& CentreCoordinate
+)
+{
+    (void)CentreCoordinate;
+
+    const ECubusVoxelRenderMode RenderMode = GetVoxelRenderMode();
+    if (
+        RenderMode != ECubusVoxelRenderMode::Density &&
+        RenderMode != ECubusVoxelRenderMode::Hybrid
+    )
+    {
+        return;
+    }
+
+    for (const auto& Entry : ChunksByCoordinate)
+    {
+        ACubusVoxelVolumeActor* ChunkActor = Entry.Value.Get();
+        if (!IsValid(ChunkActor))
+        {
+            continue;
+        }
+
+        if (ChunkActor->ConfigureDensityResolution(
+            ResolveDensitySubdivisions(Entry.Key)
+        ))
+        {
+            QueueChunkForRebuild(Entry.Key);
+        }
+    }
 }
 
 void ACubusBlockWorldActor::ProcessRuntimeQueues()

@@ -212,6 +212,29 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation", meta = (ClampMin = "1.0", Units = "cm"))
     float GeneratedVoxelSize = 100.0f;
 
+    /**
+     * Density-only mesh LOD. Chunk coordinates, block voxels, generation,
+     * vegetation, and persistence remain on the canonical GeneratedVoxelSize
+     * lattice; only smooth density sampling changes resolution.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD")
+    bool bEnableDensityLod = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", ClampMax = "100.0", Units = "cm"))
+    float DensityNearSampleSpacing = 25.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "0", UIMax = "8"))
+    int32 DensityNearChunkRadius = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", ClampMax = "100.0", Units = "cm"))
+    float DensityMiddleSampleSpacing = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "0", UIMax = "16"))
+    int32 DensityMiddleChunkRadius = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", Units = "cm"))
+    float DensityFarSampleSpacing = 100.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
     TSubclassOf<ACubusVoxelVolumeActor> ChunkActorClass;
 
@@ -460,6 +483,14 @@ private:
     FIntVector WorldLocationToChunkCoordinate(
         const FVector& WorldLocation
     ) const;
+
+    int32 ResolveDensitySubdivisions(
+        const FIntVector& ChunkCoordinate
+    ) const;
+
+    void UpdateDensityLods(
+        const FIntVector& CentreCoordinate
+    );
 
     void HoldPawnForInitialStreaming();
     void TryReleasePawnToTerrain();

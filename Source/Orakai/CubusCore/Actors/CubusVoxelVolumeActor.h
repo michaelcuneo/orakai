@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
+#include "CubusCore/Meshing/CubusDensityLod.h"
 #include "CubusCore/Rendering/CubusVoxelRenderMode.h"
 #include "CubusVoxelVolumeActor.generated.h"
 
@@ -43,6 +44,19 @@ public:
     float GetVoxelSize() const
     {
         return VoxelSize;
+    }
+
+    int32 GetDensitySubdivisionsPerVoxel() const
+    {
+        return DensitySubdivisionsPerVoxel;
+    }
+
+    float GetDensitySampleSpacing() const
+    {
+        return FCubusDensityLod::GetSampleSpacing(
+            VoxelSize,
+            DensitySubdivisionsPerVoxel
+        );
     }
 
     const FCubusBlockChunkData* GetChunkData() const
@@ -101,6 +115,9 @@ public:
         float InVoxelSize,
         ACubusBlockWorldActor* InBlockWorld
     );
+
+    /** Returns true when the chunk needs a density remesh. */
+    bool ConfigureDensityResolution(int32 InSubdivisionsPerVoxel);
 
     void ConfigureRendering(
         UCubusMaterialRegistry* InMaterialRegistry
@@ -174,6 +191,14 @@ protected:
         meta = (Units = "cm")
     )
     float VoxelSize = 100.0f;
+
+    UPROPERTY(
+        VisibleInstanceOnly,
+        BlueprintReadOnly,
+        Category = "Cubus|Density LOD",
+        meta = (AllowPrivateAccess = "true")
+    )
+    int32 DensitySubdivisionsPerVoxel = 1;
 
     UPROPERTY(
         EditAnywhere,
