@@ -195,9 +195,17 @@ void ACubusVoxelVolumeActor::RebuildVolume()
                 MeshSectionIndex
             );
 
+            RebuildBlockEditOverlay(
+                bGenerateCollision,
+                MeshSectionIndex
+            );
+
             bBuiltCollision =
                 bGenerateCollision &&
-                GeneratedDensitySectionCount > 0;
+                (
+                    GeneratedDensitySectionCount > 0 ||
+                    GeneratedBlockSectionCount > 0
+                );
             break;
         }
 
@@ -295,6 +303,79 @@ void ACubusVoxelVolumeActor::RebuildBlockMesh(
     );
 
     GeneratedBlockSectionCount =
+        CubusVoxelVolumeActor::AppendMaterialMeshes(
+            *ProceduralMesh,
+            MaterialRegistry.Get(),
+            MaterialMeshes,
+            bGenerateBlockCollision,
+            InOutMeshSectionIndex,
+            GeneratedVertexCount,
+            GeneratedTriangleCount
+        );
+}
+
+void ACubusVoxelVolumeActor::RebuildBlockEditOverlay(
+    const bool bGenerateBlockCollision,
+    int32& InOutMeshSectionIndex
+)
+{
+    ACubusBlockWorldActor* BlockWorld = OwningBlockWorld.Get();
+    if (!IsValid(BlockWorld))
+    {
+        return;
+    }
+
+    TUniquePtr<FCubusBlockChunkData> Centre =
+        MakeUnique<FCubusBlockChunkData>(ChunkCoordinate);
+
+    if (!BlockWorld->BuildBlockEditOverlayChunk(ChunkCoordinate, *Centre))
+    {
+        return;
+    }
+
+    auto BuildNeighbour =
+        [BlockWorld, this](const FIntVector& Offset)
+        -> TUniquePtr<FCubusBlockChunkData>
+        {
+            const FIntVector Coordinate = ChunkCoordinate + Offset;
+            TUniquePtr<FCubusBlockChunkData> Result =
+                MakeUnique<FCubusBlockChunkData>(Coordinate);
+
+            if (!BlockWorld->BuildBlockEditOverlayChunk(Coordinate, *Result))
+            {
+                return nullptr;
+            }
+            return Result;
+        };
+
+    TUniquePtr<FCubusBlockChunkData> PositiveX = BuildNeighbour(FIntVector(1, 0, 0));
+    TUniquePtr<FCubusBlockChunkData> NegativeX = BuildNeighbour(FIntVector(-1, 0, 0));
+    TUniquePtr<FCubusBlockChunkData> PositiveY = BuildNeighbour(FIntVector(0, 1, 0));
+    TUniquePtr<FCubusBlockChunkData> NegativeY = BuildNeighbour(FIntVector(0, -1, 0));
+    TUniquePtr<FCubusBlockChunkData> PositiveZ = BuildNeighbour(FIntVector(0, 0, 1));
+    TUniquePtr<FCubusBlockChunkData> NegativeZ = BuildNeighbour(FIntVector(0, 0, -1));
+
+    FCubusBlockChunkNeighborhood Neighborhood;
+    Neighborhood.Centre = Centre.Get();
+    Neighborhood.PositiveX = PositiveX.Get();
+    Neighborhood.NegativeX = NegativeX.Get();
+    Neighborhood.PositiveY = PositiveY.Get();
+    Neighborhood.NegativeY = NegativeY.Get();
+    Neighborhood.PositiveZ = PositiveZ.Get();
+    Neighborhood.NegativeZ = NegativeZ.Get();
+
+    FCubusMaterialMeshMap MaterialMeshes;
+    int32 OverlayFaceCount = 0;
+    FCubusBlockMesher::BuildChunk(
+        Neighborhood,
+        MaterialRegistry.Get(),
+        VoxelSize,
+        MaterialMeshes,
+        OverlayFaceCount
+    );
+
+    GeneratedFaceCount += OverlayFaceCount;
+    GeneratedBlockSectionCount +=
         CubusVoxelVolumeActor::AppendMaterialMeshes(
             *ProceduralMesh,
             MaterialRegistry.Get(),

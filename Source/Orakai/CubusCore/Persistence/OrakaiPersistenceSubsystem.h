@@ -13,8 +13,8 @@
  *
  * Game code calls this subsystem; it throttles high-frequency player position
  * updates, forwards discrete edits immediately, and delegates all transport to
- * a swappable IOrakaiPersistenceBackend. A logging backend is installed by
- * default so nothing depends on the SpacetimeDB SDK being present. Call
+ * a swappable IOrakaiPersistenceBackend. A local delta backend is installed by
+ * default so offline worlds survive restarts. Call
  * SetBackend() to install the SpacetimeDB backend once it is available.
  */
 UCLASS()
@@ -38,7 +38,7 @@ public:
 
     /**
      * Install and connect the SpacetimeDB backend, replacing the default
-     * logging backend. Safe to call from Blueprints at startup.
+     * local backend. Safe to call from Blueprints at startup.
      */
     UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence")
     void ConnectToSpacetimeDB(
@@ -78,6 +78,26 @@ public:
         const FIntVector& LocalCoordinate
     );
 
+    void RecordDensityEdit(
+        const FIntVector& WorldSample,
+        float DensityDelta,
+        int32 MaterialId
+    );
+
+    void ClearDensityEdit(const FIntVector& WorldSample);
+
+    void GetVoxelEditsForChunk(
+        const FIntVector& ChunkCoordinate,
+        TArray<FOrakaiVoxelEdit>& OutEdits
+    ) const;
+
+    void GetDensityEdits(TArray<FOrakaiDensityEdit>& OutEdits) const;
+
+    void GetFoliageEditsForChunk(
+        const FIntVector& ChunkCoordinate,
+        TArray<FOrakaiFoliageEdit>& OutEdits
+    ) const;
+
     /** Forward a foliage delta immediately. */
     void RecordFoliageEdit(
         const FIntVector& WorldVoxel,
@@ -89,6 +109,12 @@ public:
 
     /** Remove a foliage delta immediately. */
     void ClearFoliageEdit(const FIntVector& WorldVoxel);
+
+    UFUNCTION(BlueprintPure, Category = "Orakai|Persistence|Inventory")
+    int32 GetInventoryQuantity(FName ItemId) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|Inventory")
+    void SetInventoryQuantity(FName ItemId, int32 Quantity);
 
     /** Minimum seconds between forwarded player position updates. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|Persistence")

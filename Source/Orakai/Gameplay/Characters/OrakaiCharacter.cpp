@@ -11,6 +11,11 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "Orakai.h"
+#include "CubusCore/Actors/CubusBlockWorldActor.h"
+#include "CubusCore/Persistence/OrakaiPersistenceSubsystem.h"
+#include "Gameplay/Interaction/Voxel/CubusVoxelEditLibrary.h"
+#include "EngineUtils.h"
+#include "InputCoreTypes.h"
 
 AOrakaiCharacter::AOrakaiCharacter()
 {
@@ -65,6 +70,22 @@ void AOrakaiCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 
 		// Looking
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AOrakaiCharacter::Look);
+
+		if (bEnableSurvivalInteraction)
+		{
+			EnhancedInputComponent->BindKey(
+				EKeys::LeftMouseButton,
+				IE_Pressed,
+				this,
+				&AOrakaiCharacter::HandleHarvestInput
+			);
+			EnhancedInputComponent->BindKey(
+				EKeys::RightMouseButton,
+				IE_Pressed,
+				this,
+				&AOrakaiCharacter::HandlePlaceWoodInput
+			);
+		}
 	}
 	else
 	{
@@ -130,4 +151,147 @@ void AOrakaiCharacter::DoJumpEnd()
 {
 	// signal the character to stop jumping
 	StopJumping();
+}
+
+ACubusBlockWorldActor* AOrakaiCharacter::FindCubusWorld() const
+{
+	UWorld* World = GetWorld();
+	if (!IsValid(World))
+	{
+		return nullptr;
+	}
+
+	for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
+	{
+		if (IsValid(*Iterator))
+		{
+			return *Iterator;
+		}
+	}
+
+	return nullptr;
+}
+
+bool AOrakaiCharacter::BuildInteractionRay(
+	FVector& OutStart,
+	FVector& OutEnd
+) const
+{
+	if (!IsValid(FollowCamera))
+	{
+		return false;
+	}
+
+	OutStart = FollowCamera->GetComponentLocation();
+	OutEnd = OutStart +
+		FollowCamera->GetForwardVector() * FMath::Max(100.0f, InteractionDistance);
+	return true;
+}
+
+int32 AOrakaiCharacter::GetWoodCount() const
+{
+	const UOrakaiPersistenceSubsystem* Persistence =
+		UOrakaiPersistenceSubsystem::Get(this);
+	return Persistence != nullptr
+		? Persistence->GetInventoryQuantity(TEXT("Wood"))
+		: 0;
+}
+
+bool AOrakaiCharacter::DoHarvestTree()
+{
+	ACubusBlockWorldActor* CubusWorld = FindCubusWorld();
+	FVector TraceStart;
+	FVector TraceEnd;
+	FIntVector TreeWorldVoxel;
+
+	if (
+		!IsValid(CubusWorld) ||
+		!BuildInteractionRay(TraceStart, TraceEnd) ||
+		!CubusWorld->HarvestTreeAlongRay(
+			TraceStart,
+			TraceEnd,
+			TreeSelectionRadius,
+			TreeWorldVoxel
+		)
+	)
+	{
+		return false;
+	}
+
+	UOrakaiPersistenceSubsystem* Persistence =
+		UOrakaiPersistenceSubsystem::Get(this);
+	if (Persistence == nullptr)
+	{
+		return false;
+	}
+
+	const int32 NewWoodCount =
+		Persistence->GetInventoryQuantity(TEXT("Wood")) +
+		FMath::Max(1, WoodPerTree);
+	Persistence->SetInventoryQuantity(TEXT("Wood"), NewWoodCount);
+
+	UE_LOG(
+		LogOrakai,
+		Display,
+		TEXT("Harvested tree (%d, %d, %d): wood=%d"),
+		TreeWorldVoxel.X,
+		TreeWorldVoxel.Y,
+		TreeWorldVoxel.Z,
+		NewWoodCount
+	);
+	return true;
+}
+
+void AOrakaiCharacter::HandleHarvestInput()
+{
+	DoHarvestTree();
+}
+
+void AOrakaiCharacter::HandlePlaceWoodInput()
+{
+	DoPlaceWoodBlock();
+}
+
+bool AOrakaiCharacter::DoPlaceWoodBlock()
+{
+	UOrakaiPersistenceSubsystem* Persistence =
+		UOrakaiPersistenceSubsystem::Get(this);
+	if (Persistence == nullptr)
+	{
+		return false;
+	}
+
+	const int32 WoodCount =
+		Persistence->GetInventoryQuantity(TEXT("Wood"));
+	if (WoodCount <= 0)
+	{
+		return false;
+	}
+
+	FVector TraceStart;
+	FVector TraceEnd;
+	if (!BuildInteractionRay(TraceStart, TraceEnd))
+	{
+		return false;
+	}
+
+	FHitResult Hit;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(OrakaiPlaceWood), true, this);
+	if (
+		!GetWorld()->LineTraceSingleByChannel(
+			Hit,
+			TraceStart,
+			TraceEnd,
+			ECC_Visibility,
+			QueryParams
+		) ||
+		!UCubusVoxelEditLibrary::AddVoxelFromHit(Hit, WoodBlockMaterialId, false)
+	)
+	{
+		return false;
+	}
+
+	Persistence->SetInventoryQuantity(TEXT("Wood"), WoodCount - 1);
+	UE_LOG(LogOrakai, Display, TEXT("Placed wood block: wood=%d"), WoodCount - 1);
+	return true;
 }

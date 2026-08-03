@@ -889,6 +889,150 @@ void ACubusWorldVegetationActor::UpdateDynamicWindBridge()
     LastBridgedWindIntensity = WindIntensity;
 }
 
+bool ACubusWorldVegetationActor::FindInteractiveTreeAlongRay(
+    const FVector& TraceStart,
+    const FVector& TraceEnd,
+    const float SelectionRadius,
+    FIntVector& OutWorldVoxel
+)
+{
+    ResolveBlockWorld();
+    OutWorldVoxel = FIntVector::ZeroValue;
+
+    UWorld* World = GetWorld();
+    const FVector Segment = TraceEnd - TraceStart;
+    const double SegmentLengthSquared = Segment.SizeSquared();
+
+    if (
+        !IsValid(World) ||
+        !IsValid(BlockWorld) ||
+        SegmentLengthSquared <= static_cast<double>(SMALL_NUMBER)
+    )
+    {
+        return false;
+    }
+
+    const FCubusVegetationRandomizationSettings RandomizationSettings
+    {
+        bEnableRuntimeRandomization,
+        RuntimeRandomizationSeed,
+        RandomPruneProbability,
+        RandomScaleJitterMin,
+        RandomScaleJitterMax,
+        RandomPositionJitterVoxelFraction,
+        RandomYawJitterDegrees
+    };
+
+    const double SafeRadiusSquared =
+        FMath::Square(FMath::Max(1.0f, SelectionRadius));
+    double BestAlongSegment = TNumericLimits<double>::Max();
+    bool bFound = false;
+
+    for (
+        TActorIterator<ACubusVoxelVolumeActor> Iterator(World);
+        Iterator;
+        ++Iterator
+    )
+    {
+        const ACubusVoxelVolumeActor* Chunk = *Iterator;
+        if (
+            !IsValid(Chunk) ||
+            Chunk->GetOwner() != BlockWorld ||
+            Chunk->GetChunkData() == nullptr
+        )
+        {
+            continue;
+        }
+
+        const float SafeVoxelSize = FMath::Max(1.0f, Chunk->GetVoxelSize());
+        const double ChunkHalfWorldExtent =
+            static_cast<double>(Cubus::ChunkSize) * SafeVoxelSize * 0.5;
+
+        for (const FCubusVegetationInstance& Instance
+             : Chunk->GetChunkData()->GetVegetationInstances())
+        {
+            if (
+                Instance.TypeId != WorldBroadleafType &&
+                Instance.TypeId != WorldConiferType
+            )
+            {
+                continue;
+            }
+
+            const FVector BaseWorldLocation(
+                (static_cast<double>(Instance.WorldVoxel.X) + 0.5) * SafeVoxelSize -
+                    ChunkHalfWorldExtent,
+                (static_cast<double>(Instance.WorldVoxel.Y) + 0.5) * SafeVoxelSize -
+                    ChunkHalfWorldExtent,
+                static_cast<double>(Instance.WorldVoxel.Z) * SafeVoxelSize -
+                    ChunkHalfWorldExtent
+            );
+
+            const float TypeScaleMultiplier = ResolveTypeScaleMultiplier(
+                Instance.TypeId,
+                bEnablePerTypeScaleOverrides,
+                BroadleafScaleMultiplier,
+                ConiferScaleMultiplier,
+                ShrubScaleMultiplier,
+                GrassScaleMultiplier,
+                ReedsScaleMultiplier,
+                AlpineScaleMultiplier
+            );
+
+            const float CombinedScale = FMath::Max(
+                0.01f,
+                Instance.Scale *
+                    FMath::Max(0.01f, GlobalPlantScaleMultiplier) *
+                    FMath::Max(0.01f, TypeScaleMultiplier)
+            );
+
+            const FCubusResolvedVegetationPlacement Resolved =
+                VegetationPlacement.Resolve(
+                    Instance,
+                    BaseWorldLocation,
+                    SafeVoxelSize,
+                    CombinedScale,
+                    RandomizationSettings
+                );
+
+            if (Resolved.bPruned)
+            {
+                continue;
+            }
+
+            // Aim at the lower trunk rather than the ground placement point.
+            const FVector Target =
+                Resolved.Location +
+                FVector::UpVector * SafeVoxelSize * 3.0f * Resolved.Scale;
+
+            const double Along = FVector::DotProduct(
+                Target - TraceStart,
+                Segment
+            ) / SegmentLengthSquared;
+
+            if (Along < 0.0 || Along > 1.0)
+            {
+                continue;
+            }
+
+            const FVector ClosestPoint = TraceStart + Segment * Along;
+            if (FVector::DistSquared(Target, ClosestPoint) > SafeRadiusSquared)
+            {
+                continue;
+            }
+
+            if (Along < BestAlongSegment)
+            {
+                BestAlongSegment = Along;
+                OutWorldVoxel = Instance.WorldVoxel;
+                bFound = true;
+            }
+        }
+    }
+
+    return bFound;
+}
+
 void ACubusWorldVegetationActor::RebuildWorldVegetation()
 {
     ResolveBlockWorld();

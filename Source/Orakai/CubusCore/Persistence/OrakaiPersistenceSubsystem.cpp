@@ -1,6 +1,6 @@
 #include "CubusCore/Persistence/OrakaiPersistenceSubsystem.h"
 
-#include "CubusCore/Persistence/OrakaiLoggingPersistenceBackend.h"
+#include "CubusCore/Persistence/OrakaiLocalPersistenceBackend.h"
 #include "CubusCore/Persistence/OrakaiPersistenceBackend.h"
 #include "CubusCore/Persistence/OrakaiPersistenceLog.h"
 #include "CubusCore/Persistence/OrakaiSpacetimeBackend.h"
@@ -39,9 +39,9 @@ void UOrakaiPersistenceSubsystem::Initialize(FSubsystemCollectionBase& Collectio
 {
     Super::Initialize(Collection);
 
-    // Default to the logging backend so the game runs without the SpacetimeDB
-    // SDK. SetBackend() swaps in the real transport when it is available.
-    Backend = MakeUnique<FOrakaiLoggingPersistenceBackend>();
+    // Local play must survive process restarts. The backend stores only deltas;
+    // generated chunk payloads remain a separate disposable cache.
+    Backend = MakeUnique<FOrakaiLocalPersistenceBackend>();
     Backend->Connect();
 
     TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
@@ -184,6 +184,78 @@ void UOrakaiPersistenceSubsystem::ClearVoxelEdit(
     }
 }
 
+void UOrakaiPersistenceSubsystem::RecordDensityEdit(
+    const FIntVector& WorldSample,
+    const float DensityDelta,
+    const int32 MaterialId
+)
+{
+    if (!Backend.IsValid())
+    {
+        return;
+    }
+
+    FOrakaiDensityEdit Edit;
+    Edit.WorldSample = WorldSample;
+    Edit.DensityDelta = DensityDelta;
+    Edit.MaterialId = MaterialId;
+    Backend->RecordDensityEdit(Edit);
+}
+
+void UOrakaiPersistenceSubsystem::ClearDensityEdit(
+    const FIntVector& WorldSample
+)
+{
+    if (Backend.IsValid())
+    {
+        Backend->ClearDensityEdit(WorldSample);
+    }
+}
+
+void UOrakaiPersistenceSubsystem::GetVoxelEditsForChunk(
+    const FIntVector& ChunkCoordinate,
+    TArray<FOrakaiVoxelEdit>& OutEdits
+) const
+{
+    if (Backend.IsValid())
+    {
+        Backend->GetVoxelEditsForChunk(ChunkCoordinate, OutEdits);
+    }
+    else
+    {
+        OutEdits.Reset();
+    }
+}
+
+void UOrakaiPersistenceSubsystem::GetDensityEdits(
+    TArray<FOrakaiDensityEdit>& OutEdits
+) const
+{
+    if (Backend.IsValid())
+    {
+        Backend->GetDensityEdits(OutEdits);
+    }
+    else
+    {
+        OutEdits.Reset();
+    }
+}
+
+void UOrakaiPersistenceSubsystem::GetFoliageEditsForChunk(
+    const FIntVector& ChunkCoordinate,
+    TArray<FOrakaiFoliageEdit>& OutEdits
+) const
+{
+    if (Backend.IsValid())
+    {
+        Backend->GetFoliageEditsForChunk(ChunkCoordinate, OutEdits);
+    }
+    else
+    {
+        OutEdits.Reset();
+    }
+}
+
 void UOrakaiPersistenceSubsystem::RecordFoliageEdit(
     const FIntVector& WorldVoxel,
     const bool bRemoved,
@@ -211,6 +283,26 @@ void UOrakaiPersistenceSubsystem::ClearFoliageEdit(const FIntVector& WorldVoxel)
     if (Backend.IsValid())
     {
         Backend->ClearFoliageEdit(WorldVoxel);
+    }
+}
+
+int32 UOrakaiPersistenceSubsystem::GetInventoryQuantity(
+    const FName ItemId
+) const
+{
+    return Backend.IsValid()
+        ? Backend->GetInventoryQuantity(ItemId)
+        : 0;
+}
+
+void UOrakaiPersistenceSubsystem::SetInventoryQuantity(
+    const FName ItemId,
+    const int32 Quantity
+)
+{
+    if (Backend.IsValid())
+    {
+        Backend->SetInventoryQuantity(ItemId, Quantity);
     }
 }
 

@@ -15,6 +15,7 @@ class USceneComponent;
 class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
 class UPCGGraphInterface;
+class FCubusBlockChunkData;
 
 UCLASS(
     BlueprintType,
@@ -55,6 +56,11 @@ public:
 
     FCubusDensityEditMap BuildDensityEditSnapshot(
         const FIntVector& ChunkCoordinate
+    ) const;
+
+    bool BuildBlockEditOverlayChunk(
+        const FIntVector& ChunkCoordinate,
+        FCubusBlockChunkData& OutChunk
     ) const;
 
     const FCubusGenerationSeeds GetGenerationSeeds() const
@@ -163,6 +169,14 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
     void RemoveFoliageAtWorldVoxel(FIntVector WorldVoxel);
+
+    UFUNCTION(BlueprintCallable, Category = "Cubus|Gameplay")
+    bool HarvestTreeAlongRay(
+        FVector TraceStart,
+        FVector TraceEnd,
+        float SelectionRadius,
+        FIntVector& OutTreeWorldVoxel
+    );
 
     void ReleaseHeldPawnAtLocation(
         APawn* PlayerPawn,
@@ -378,6 +392,8 @@ private:
     void RemoveInvalidChunks();
     void RebuildChunkAtCoordinate(const FIntVector& ChunkCoordinate);
     void PublishWorldConfig();
+    void RestoreDensityEdits();
+    void ApplyPersistedEditsToChunk(ACubusVoxelVolumeActor& ChunkActor);
     void RecordTrackedPawnCoordinate();
 
     ACubusVoxelVolumeActor* SpawnChunkAtCoordinate(

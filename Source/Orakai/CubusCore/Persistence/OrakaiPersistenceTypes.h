@@ -17,6 +17,14 @@ struct FOrakaiVoxelEdit
     bool bIsWater = false;
 };
 
+/** A sparse scalar-field delta applied on top of generated density terrain. */
+struct FOrakaiDensityEdit
+{
+    FIntVector WorldSample = FIntVector::ZeroValue;
+    float DensityDelta = 0.0f;
+    int32 MaterialId = 0;
+};
+
 /** A single authoritative foliage delta applied on top of generated foliage. */
 struct FOrakaiFoliageEdit
 {
@@ -37,6 +45,13 @@ struct FOrakaiPlayerCoordinate
     FVector Location = FVector::ZeroVector;
     float Yaw = 0.0f;
     float Pitch = 0.0f;
+};
+
+/** Minimal item stack used by the first local survival interaction. */
+struct FOrakaiInventoryEntry
+{
+    FName ItemId = NAME_None;
+    int32 Quantity = 0;
 };
 
 namespace OrakaiPersistence

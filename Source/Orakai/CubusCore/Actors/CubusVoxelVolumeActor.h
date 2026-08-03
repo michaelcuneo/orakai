@@ -350,6 +350,11 @@ private:
         int32& InOutMeshSectionIndex
     );
 
+    void RebuildBlockEditOverlay(
+        bool bGenerateBlockCollision,
+        int32& InOutMeshSectionIndex
+    );
+
     const FCubusBlockChunkData* FindNeighbourChunkData(
         const FIntVector& CoordinateOffset
     ) const;

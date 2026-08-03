@@ -289,3 +289,23 @@ void FCubusBlockChunkData::Clear()
 
     Fill(EmptyVoxel);
 }
+
+bool FCubusBlockChunkData::RemoveVegetationAtWorldVoxel(
+    const FIntVector& WorldVoxel
+)
+{
+    return VegetationInstances.RemoveAll(
+        [&WorldVoxel](const FCubusVegetationInstance& Instance)
+        {
+            return Instance.WorldVoxel == WorldVoxel;
+        }
+    ) > 0;
+}
+
+void FCubusBlockChunkData::AddOrReplaceVegetationInstance(
+    const FCubusVegetationInstance& Instance
+)
+{
+    RemoveVegetationAtWorldVoxel(Instance.WorldVoxel);
+    VegetationInstances.Add(Instance);
+}

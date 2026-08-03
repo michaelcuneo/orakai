@@ -90,6 +90,9 @@ public:
         return MakeArrayView(VegetationInstances);
     }
 
+    bool RemoveVegetationAtWorldVoxel(const FIntVector& WorldVoxel);
+    void AddOrReplaceVegetationInstance(const FCubusVegetationInstance& Instance);
+
 private:
     FIntVector ChunkCoordinate = FIntVector::ZeroValue;
     FCubusGenerationSeeds GenerationSeeds;

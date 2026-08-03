@@ -58,6 +58,14 @@ public:
      */
     void InvalidateDynamicWindBridgeTargets();
 
+    /** Resolve a visible generated tree without enabling collision per instance. */
+    bool FindInteractiveTreeAlongRay(
+        const FVector& TraceStart,
+        const FVector& TraceEnd,
+        float SelectionRadius,
+        FIntVector& OutWorldVoxel
+    );
+
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<USceneComponent> Root;

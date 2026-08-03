@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 3: vegetation now uses sparse biome-specific grove placement
-    // and carries biome affinity into runtime species selection.
-    static constexpr uint32 CurrentGenerationVersion = 3;
+    // Bumped to 4: generated chunk caches are now baseline-only and all
+    // player-authored terrain/foliage changes live in a separate delta store.
+    static constexpr uint32 CurrentGenerationVersion = 4;
 
     int64 World = 1;
     int32 Terrain = 0;
