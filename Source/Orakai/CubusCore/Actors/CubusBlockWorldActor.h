@@ -10,6 +10,7 @@
 
 class ACubusVoxelVolumeActor;
 class ACubusWorldVegetationActor;
+class AActor;
 class APawn;
 class USceneComponent;
 class UCubusMaterialRegistry;
@@ -322,6 +323,36 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
     TObjectPtr<UCubusMaterialRegistry> MaterialRegistry = nullptr;
 
+    /** Lets the existing world weather drive Cubus material response. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials")
+    bool bEnableWeatherMaterialBridge = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.01", Units = "s"))
+    float WeatherMaterialUpdateInterval = 0.1f;
+
+    /** Fraction of full wetness gained per second at maximum rainfall. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0"))
+    float WeatherWettingRate = 0.12f;
+
+    /** Fraction of wetness lost per second after rain stops. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0"))
+    float WeatherDryingRate = 0.015f;
+
+    /** Base-colour multiplier at full wetness. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatherWetDarkening = 0.65f;
+
+    /** Surface roughness at full wetness. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatherWetRoughness = 0.12f;
+
+    /** Testing hook that bypasses the sampled UDW rain intensity. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials|Testing", meta = (EditCondition = "bEnableWeatherMaterialBridge"))
+    bool bOverrideWeatherRainIntensity = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials|Testing", meta = (EditCondition = "bEnableWeatherMaterialBridge && bOverrideWeatherRainIntensity", ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatherRainIntensityOverride = 0.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Geology")
     TObjectPtr<UCubusGeologyProfile> GeologyProfile = nullptr;
 
@@ -364,6 +395,15 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
     bool bInitialSpawnAreaReady = false;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
+    bool bWeatherMaterialBridgeConnected = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
+    float CurrentWeatherRainIntensity = 0.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
+    float CurrentMaterialWetness = 0.0f;
+
 private:
     UPCGGraphInterface* VegetationPCGGraph = nullptr;
     bool bGenerateVegetationPCG = false;
@@ -382,12 +422,18 @@ private:
 
     TWeakObjectPtr<APawn> TrackedPawn;
     TWeakObjectPtr<ACubusWorldVegetationActor> WorldVegetationActor;
+
+    UPROPERTY(Transient)
+    TObjectPtr<AActor> CachedWeatherActor = nullptr;
+
     FIntVector LastTrackedChunk = FIntVector(MAX_int32, MAX_int32, MAX_int32);
     FVector HeldPawnLocation = FVector::ZeroVector;
     bool bPawnHeldForStreaming = false;
     bool bSpawnTimeoutReported = false;
     float HeldPawnElapsedSeconds = 0.0f;
     float TimeUntilStreamingUpdate = 0.0f;
+    float TimeUntilWeatherMaterialUpdate = 0.0f;
+    float WeatherMaterialElapsedSeconds = 0.0f;
 
     void RemoveInvalidChunks();
     void RebuildChunkAtCoordinate(const FIntVector& ChunkCoordinate);
@@ -418,5 +464,6 @@ private:
     void HoldPawnForInitialStreaming();
     void TryReleasePawnToTerrain();
     void EnsureWorldVegetationActor();
+    void UpdateWeatherMaterials(float DeltaSeconds);
     void RecordGeneratedTreeTombstone(const FIntVector& WorldVoxel);
 };

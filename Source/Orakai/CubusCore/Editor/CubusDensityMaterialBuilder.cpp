@@ -299,6 +299,9 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
 
     UMaterialExpressionScalarParameter* TableWidth = Scalar(Material, TEXT("DensityMaterialTableWidth"), 2.0f, -2700, 300);
     UMaterialExpressionScalarParameter* PackingBase = Scalar(Material, TEXT("DensityMaterialIdPackingBase"), 4096.0f, -2700, 450);
+    UMaterialExpressionScalarParameter* WeatherWetness = Scalar(Material, TEXT("CubusWeatherWetness"), 0.0f, -2700, 600);
+    UMaterialExpressionScalarParameter* WeatherWetDarkening = Scalar(Material, TEXT("CubusWeatherWetDarkening"), 0.65f, -2700, 750);
+    UMaterialExpressionScalarParameter* WeatherWetRoughness = Scalar(Material, TEXT("CubusWeatherWetRoughness"), 0.12f, -2700, 900);
 
     const FString Common = CommonKernelCode();
 
@@ -316,13 +319,16 @@ float3 c0 = CUBUS_COLOR(id0, p0, axes0, tint0, detail0);
 float3 c1 = CUBUS_COLOR(id1, p1, axes1, tint1, detail1);
 float3 c2 = CUBUS_COLOR(id2, p2, axes2, tint2, detail2);
 float3 c3 = CUBUS_COLOR(id3, p3, axes3, tint3, detail3);
-return c0 * blendWeights.r + c1 * blendWeights.g + c2 * blendWeights.b + c3 * blendWeights.a;
+float3 dryColor = c0 * blendWeights.r + c1 * blendWeights.g + c2 * blendWeights.b + c3 * blendWeights.a;
+return dryColor * lerp(1.0, saturate(WeatherWetDarkening), saturate(WeatherWetness));
 )");
 
     UMaterialExpressionCustom* ColorKernel = Custom(Material, TEXT("Cubus Four-Way Density Color"), ColorCode, CMOT_Float3, -1400, -500);
     AddCommonInputs(ColorKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase);
     AddCustomInput(ColorKernel, TEXT("BaseColorArray"), BaseColorArray);
     AddCustomInput(ColorKernel, TEXT("MacroArray"), MacroArray);
+    AddCustomInput(ColorKernel, TEXT("WeatherWetness"), WeatherWetness);
+    AddCustomInput(ColorKernel, TEXT("WeatherWetDarkening"), WeatherWetDarkening);
 
     FString NormalCode = Common + TEXT(R"(
 float4 d0 = Texture2DSampleLevel(MaterialData, MaterialDataSampler, float2((id0 + 0.5) / MaterialTableWidth, 0.625), 0);
@@ -356,12 +362,16 @@ return normalize(n0 * blendWeights.r + n1 * blendWeights.g + n2 * blendWeights.b
     FString OrmCode = Common + TEXT(R"(
 #define CUBUS_ORM(ID,P,AX) (Texture2DArraySample(OrmArray, OrmArraySampler, float3(P.yz, ID)).rgb * AX.x + Texture2DArraySample(OrmArray, OrmArraySampler, float3(P.xz, ID)).rgb * AX.y + Texture2DArraySample(OrmArray, OrmArraySampler, float3(P.xy, ID)).rgb * AX.z)
 float3 o0 = CUBUS_ORM(id0, p0, axes0); float3 o1 = CUBUS_ORM(id1, p1, axes1); float3 o2 = CUBUS_ORM(id2, p2, axes2); float3 o3 = CUBUS_ORM(id3, p3, axes3);
-return o0 * blendWeights.r + o1 * blendWeights.g + o2 * blendWeights.b + o3 * blendWeights.a;
+float3 orm = o0 * blendWeights.r + o1 * blendWeights.g + o2 * blendWeights.b + o3 * blendWeights.a;
+orm.g = lerp(orm.g, saturate(WeatherWetRoughness), saturate(WeatherWetness));
+return orm;
 )");
 
     UMaterialExpressionCustom* OrmKernel = Custom(Material, TEXT("Cubus Four-Way Density ORM"), OrmCode, CMOT_Float3, -1400, 500);
     AddCommonInputs(OrmKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase);
     AddCustomInput(OrmKernel, TEXT("OrmArray"), OrmArray);
+    AddCustomInput(OrmKernel, TEXT("WeatherWetness"), WeatherWetness);
+    AddCustomInput(OrmKernel, TEXT("WeatherWetRoughness"), WeatherWetRoughness);
 
     FString EmissiveCode = Common + TEXT(R"(
 float4 e0 = Texture2DSampleLevel(MaterialData, MaterialDataSampler, float2((id0 + 0.5) / MaterialTableWidth, 0.875), 0);

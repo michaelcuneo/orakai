@@ -167,9 +167,69 @@ UMaterialInterface* UCubusMaterialRegistry::ResolveRuntimeMaterial(
     RuntimeMaterial->SetVectorParameterValue(TEXT("Tint"), Definition->Tint);
     RuntimeMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), Definition->EmissiveColor);
     RuntimeMaterial->SetScalarParameterValue(TEXT("EmissiveStrength"), FMath::Max(0.0f, Definition->EmissiveStrength));
+    ApplyWeatherParameters(RuntimeMaterial);
 
     RuntimeMaterialById.Add(MaterialIdOrDensityKey, RuntimeMaterial);
     return RuntimeMaterial;
+}
+
+void UCubusMaterialRegistry::ApplyWeatherParameters(
+    UMaterialInstanceDynamic* RuntimeMaterial
+) const
+{
+    if (!IsValid(RuntimeMaterial))
+    {
+        return;
+    }
+
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusWeatherWetness"),
+        FMath::Clamp(WeatherWetness, 0.0f, 1.0f)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusWeatherWetDarkening"),
+        FMath::Clamp(WeatherWetDarkening, 0.0f, 1.0f)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusWeatherWetRoughness"),
+        FMath::Clamp(WeatherWetRoughness, 0.0f, 1.0f)
+    );
+}
+
+void UCubusMaterialRegistry::SetWeatherMaterialState(
+    const float Wetness,
+    const float WetDarkening,
+    const float WetRoughness
+) const
+{
+    const float NewWetness = FMath::Clamp(Wetness, 0.0f, 1.0f);
+    const float NewWetDarkening = FMath::Clamp(WetDarkening, 0.0f, 1.0f);
+    const float NewWetRoughness = FMath::Clamp(WetRoughness, 0.0f, 1.0f);
+
+    if (FMath::IsNearlyEqual(WeatherWetness, NewWetness, 0.001f) &&
+        FMath::IsNearlyEqual(WeatherWetDarkening, NewWetDarkening, 0.001f) &&
+        FMath::IsNearlyEqual(WeatherWetRoughness, NewWetRoughness, 0.001f))
+    {
+        return;
+    }
+
+    WeatherWetness = NewWetness;
+    WeatherWetDarkening = NewWetDarkening;
+    WeatherWetRoughness = NewWetRoughness;
+
+    for (const TPair<int32, TWeakObjectPtr<UMaterialInstanceDynamic>>& Pair :
+         RuntimeMaterialById)
+    {
+        ApplyWeatherParameters(Pair.Value.Get());
+    }
+
+    for (const TPair<int32, TWeakObjectPtr<UMaterialInstanceDynamic>>& Pair :
+         DensityRuntimeMaterialByKey)
+    {
+        ApplyWeatherParameters(Pair.Value.Get());
+    }
+
+    ApplyWeatherParameters(UnifiedDensityRuntimeMaterial.Get());
 }
 
 void UCubusMaterialRegistry::RebuildDensityMaterialDataTexture() const
@@ -321,6 +381,7 @@ UMaterialInterface* UCubusMaterialRegistry::ResolveUnifiedDensityRuntimeMaterial
     }
 
     BindDensityGpuResources(RuntimeMaterial);
+    ApplyWeatherParameters(RuntimeMaterial);
     UnifiedDensityRuntimeMaterial = RuntimeMaterial;
     return RuntimeMaterial;
 }

@@ -64,6 +64,13 @@ public:
         int32 SecondaryMaterialId
     ) const;
 
+    /** Updates shared terrain material instances without rebuilding chunks. */
+    void SetWeatherMaterialState(
+        float Wetness,
+        float WetDarkening,
+        float WetRoughness
+    ) const;
+
     bool IsRenderableSolid(int32 MaterialId) const;
     bool OccludesBlockFaces(int32 MaterialId) const;
 
@@ -75,6 +82,15 @@ public:
         meta = (DisplayName = "Build Density Material")
     )
     void BuildDensityMaterial();
+
+    /** Rebuilds both Cubus master materials with live weather response. */
+    UFUNCTION(
+        BlueprintCallable,
+        CallInEditor,
+        Category = "Cubus|Materials|Weather",
+        meta = (DisplayName = "Build Weather Responsive Materials")
+    )
+    void BuildWeatherResponsiveMaterials();
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Materials")
     void ValidateRegistry();
@@ -91,11 +107,16 @@ private:
     void RebuildLookupCache() const;
     void RebuildDensityMaterialDataTexture() const;
     void BindDensityGpuResources(UMaterialInstanceDynamic* RuntimeMaterial) const;
+    void ApplyWeatherParameters(UMaterialInstanceDynamic* RuntimeMaterial) const;
 
     mutable TMap<int32, int32> MaterialIndexById;
     mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>> RuntimeMaterialById;
     mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>> DensityRuntimeMaterialByKey;
     mutable TWeakObjectPtr<UMaterialInstanceDynamic> UnifiedDensityRuntimeMaterial;
+
+    mutable float WeatherWetness = 0.0f;
+    mutable float WeatherWetDarkening = 0.65f;
+    mutable float WeatherWetRoughness = 0.12f;
 
     UPROPERTY(Transient)
     mutable TObjectPtr<UTexture2D> DensityMaterialDataTexture = nullptr;

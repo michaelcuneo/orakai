@@ -422,3 +422,36 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
     UE_LOG(LogTemp, Warning, TEXT("BuildDensityMaterial is only available in the Unreal Editor."));
 #endif
 }
+
+void UCubusMaterialRegistry::BuildWeatherResponsiveMaterials()
+{
+#if WITH_EDITOR
+    UMaterial* BlockMaterial =
+        UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial();
+
+    if (!IsValid(BlockMaterial))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("Cubus failed to build the weather-responsive block material.")
+        );
+        return;
+    }
+
+    BuildDensityMaterial();
+    RuntimeMaterialById.Reset();
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("Cubus rebuilt block and density materials with live weather response.")
+    );
+#else
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("BuildWeatherResponsiveMaterials is only available in the Unreal Editor.")
+    );
+#endif
+}

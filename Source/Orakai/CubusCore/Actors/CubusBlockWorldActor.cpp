@@ -10,6 +10,7 @@
 #include "CubusCore/Persistence/OrakaiPersistenceSubsystem.h"
 #include "CubusCore/Persistence/OrakaiPersistenceTypes.h"
 #include "CubusCore/Storage/CubusChunkStore.h"
+#include "CubusCore/Weather/CubusWeatherMaterialUtilities.h"
 
 #include "Components/SceneComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -97,6 +98,14 @@ void ACubusBlockWorldActor::OnConstruction(
     MaxChunksRemovedPerTick = FMath::Max(1, MaxChunksRemovedPerTick);
     MaxDirtyChunksRebuiltPerTick = FMath::Max(1, MaxDirtyChunksRebuiltPerTick);
     StreamingUpdateInterval = FMath::Max(0.05f, StreamingUpdateInterval);
+    WeatherMaterialUpdateInterval =
+        FMath::Max(0.01f, WeatherMaterialUpdateInterval);
+    WeatherWettingRate = FMath::Max(0.0f, WeatherWettingRate);
+    WeatherDryingRate = FMath::Max(0.0f, WeatherDryingRate);
+    WeatherWetDarkening = FMath::Clamp(WeatherWetDarkening, 0.0f, 1.0f);
+    WeatherWetRoughness = FMath::Clamp(WeatherWetRoughness, 0.0f, 1.0f);
+    WeatherRainIntensityOverride =
+        FMath::Clamp(WeatherRainIntensityOverride, 0.0f, 1.0f);
 
     RefreshChunkRegistry();
 }
@@ -120,6 +129,19 @@ void ACubusBlockWorldActor::BeginPlay()
 
     PublishWorldConfig();
     RestoreDensityEdits();
+
+    CurrentMaterialWetness = 0.0f;
+    CurrentWeatherRainIntensity = 0.0f;
+    TimeUntilWeatherMaterialUpdate = 0.0f;
+    WeatherMaterialElapsedSeconds = 0.0f;
+    if (IsValid(MaterialRegistry))
+    {
+        MaterialRegistry->SetWeatherMaterialState(
+            CurrentMaterialWetness,
+            WeatherWetDarkening,
+            WeatherWetRoughness
+        );
+    }
 
     EnsureWorldVegetationActor();
 
@@ -243,6 +265,8 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
+    UpdateWeatherMaterials(DeltaSeconds);
+
     // Editing is valid in both fixed-grid and streamed worlds.
     ProcessDirtyChunkQueue();
 
@@ -296,6 +320,77 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
     TryReleasePawnToTerrain();
 
     RecordTrackedPawnCoordinate();
+}
+
+void ACubusBlockWorldActor::UpdateWeatherMaterials(const float DeltaSeconds)
+{
+    if (!bEnableWeatherMaterialBridge || !IsValid(MaterialRegistry))
+    {
+        bWeatherMaterialBridgeConnected = false;
+        return;
+    }
+
+    WeatherMaterialElapsedSeconds += FMath::Max(0.0f, DeltaSeconds);
+    TimeUntilWeatherMaterialUpdate -= DeltaSeconds;
+
+    if (TimeUntilWeatherMaterialUpdate > 0.0f)
+    {
+        return;
+    }
+
+    TimeUntilWeatherMaterialUpdate =
+        FMath::Max(0.01f, WeatherMaterialUpdateInterval);
+    const float MaterialDeltaSeconds = WeatherMaterialElapsedSeconds;
+    WeatherMaterialElapsedSeconds = 0.0f;
+
+    if (!IsValid(CachedWeatherActor))
+    {
+        CachedWeatherActor =
+            FCubusWeatherMaterialUtilities::ResolveWeatherActor(GetWorld());
+    }
+
+    FCubusWeatherMaterialSample WeatherSample;
+    if (IsValid(CachedWeatherActor))
+    {
+        WeatherSample = FCubusWeatherMaterialUtilities::Sample(
+            GetWorld(),
+            CachedWeatherActor
+        );
+    }
+
+    if (bOverrideWeatherRainIntensity)
+    {
+        WeatherSample.bHasSurfaceWetness = false;
+        WeatherSample.bHasRainIntensity = true;
+        WeatherSample.RainIntensity =
+            FMath::Clamp(WeatherRainIntensityOverride, 0.0f, 1.0f);
+    }
+
+    bWeatherMaterialBridgeConnected =
+        bOverrideWeatherRainIntensity ||
+        (
+            IsValid(CachedWeatherActor) &&
+            (WeatherSample.bHasRainIntensity || WeatherSample.bHasSurfaceWetness)
+        );
+
+    CurrentWeatherRainIntensity = WeatherSample.bHasRainIntensity
+        ? FMath::Clamp(WeatherSample.RainIntensity, 0.0f, 1.0f)
+        : 0.0f;
+
+    CurrentMaterialWetness =
+        FCubusWeatherMaterialUtilities::AdvanceWetness(
+            CurrentMaterialWetness,
+            WeatherSample,
+            MaterialDeltaSeconds,
+            WeatherWettingRate,
+            WeatherDryingRate
+        );
+
+    MaterialRegistry->SetWeatherMaterialState(
+        CurrentMaterialWetness,
+        WeatherWetDarkening,
+        WeatherWetRoughness
+    );
 }
 
 void ACubusBlockWorldActor::RegisterChunk(
