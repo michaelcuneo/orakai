@@ -9,7 +9,7 @@
 #include "CubusCore/Vegetation/CubusProceduralTreeGenerator.h"
 #include "CubusCore/Vegetation/CubusVegetationChunkFilter.h"
 #include "Camera/PlayerCameraManager.h"
-#include "Components/ProceduralMeshComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -48,21 +48,19 @@ namespace
         FCubusTreeMeshSection& Target
     )
     {
-        const int32 BaseVertex = Target.Vertices.Num();
+        const int32 VertexOffset = Target.Vertices.Num();
 
         for (int32 Index = 0; Index < Source.Vertices.Num(); ++Index)
         {
             Target.Vertices.Add(Transform.TransformPosition(Source.Vertices[Index]));
-            Target.Normals.Add(
-                Transform.TransformVectorNoScale(Source.Normals[Index]).GetSafeNormal()
-            );
+            Target.Normals.Add(Transform.TransformVectorNoScale(Source.Normals[Index]).GetSafeNormal());
             Target.UV0.Add(Source.UV0[Index]);
             Target.VertexColors.Add(Source.VertexColors[Index]);
         }
 
         for (const int32 TriangleIndex : Source.Triangles)
         {
-            Target.Triangles.Add(BaseVertex + TriangleIndex);
+            Target.Triangles.Add(VertexOffset + TriangleIndex);
         }
     }
 
@@ -75,7 +73,6 @@ namespace
     {
         if (!Section.IsValid())
         {
-            Mesh.ClearMeshSection(SectionIndex);
             return;
         }
 
@@ -108,7 +105,8 @@ void ACubusProceduralTreeStreamer::BeginPlay()
 {
     Super::BeginPlay();
     ResolveBlockWorld();
-    TimeUntilRefresh = 0.0f;
+    RefreshVisibleChunks();
+    TimeUntilRefresh = FMath::Max(0.1f, RefreshInterval);
 }
 
 void ACubusProceduralTreeStreamer::Tick(const float DeltaSeconds)
@@ -180,10 +178,15 @@ bool ACubusProceduralTreeStreamer::IsChunkVisible(
     const bool bHasCamera
 ) const
 {
+    if (!bCullByCameraChunkRadius || !bHasCamera)
+    {
+        return true;
+    }
+
     return FCubusVegetationChunkFilter::IsWithinCameraRadius(
         &Chunk,
         CameraLocation,
-        bCullByCameraChunkRadius && bHasCamera,
+        true,
         CameraChunkHorizontalRadius,
         CameraChunkVerticalRadius
     );
@@ -198,8 +201,7 @@ void ACubusProceduralTreeStreamer::RefreshVisibleChunks()
     }
 
     const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
-    const bool bHasCamera =
-        IsValid(PlayerController) && IsValid(PlayerController->PlayerCameraManager);
+    const bool bHasCamera = IsValid(PlayerController) && IsValid(PlayerController->PlayerCameraManager);
     const FVector CameraLocation = bHasCamera
         ? PlayerController->PlayerCameraManager->GetCameraLocation()
         : FVector::ZeroVector;
@@ -226,11 +228,11 @@ void ACubusProceduralTreeStreamer::RefreshVisibleChunks()
         }
 
         const FIntVector ChunkCoordinate = Chunk->GetChunkCoordinate();
-        const uint32 Signature = CalculateTreeSignature(*ChunkData);
         VisibleChunkCoordinates.Add(ChunkCoordinate);
+        const uint32 Signature = CalculateTreeSignature(*ChunkData);
 
-        FCubusStreamedTreeChunk* Existing = StreamedChunks.Find(ChunkCoordinate);
-        if (Existing == nullptr || Existing->Signature != Signature)
+        const FCubusStreamedTreeChunk* Existing = StreamedChunks.Find(ChunkCoordinate);
+        if (Existing == nullptr || Existing->Signature != Signature || !IsValid(Existing->Mesh))
         {
             BuildChunkTrees(*Chunk, Signature);
         }
@@ -312,11 +314,11 @@ void ACubusProceduralTreeStreamer::BuildChunkTrees(
     FCubusTreeMeshSection BroadleafCanopy;
     FCubusTreeMeshSection ConiferBark;
     FCubusTreeMeshSection ConiferCanopy;
-
     const float SafeVoxelSize = FMath::Max(1.0f, Chunk.GetVoxelSize());
     const double ChunkHalfWorldExtent =
         static_cast<double>(Cubus::ChunkSize) *
         static_cast<double>(SafeVoxelSize) * 0.5;
+    const FTransform ActorInverse = GetActorTransform().Inverse();
     const int32 SafeVariantCount = FMath::Clamp(VariantsPerSpecies, 1, 32);
 
     for (const FCubusVegetationInstance& Instance : ChunkData->GetVegetationInstances())
@@ -367,8 +369,7 @@ void ACubusProceduralTreeStreamer::BuildChunkTrees(
             WorldLocation,
             FVector(Scale)
         );
-        const FTransform LocalTreeTransform =
-            WorldTreeTransform.GetRelativeTransform(GetActorTransform());
+        const FTransform LocalTreeTransform = WorldTreeTransform * ActorInverse;
 
         AppendSection(Generated.Bark, LocalTreeTransform, *BarkTarget);
         AppendSection(Generated.Canopy, LocalTreeTransform, *CanopyTarget);
