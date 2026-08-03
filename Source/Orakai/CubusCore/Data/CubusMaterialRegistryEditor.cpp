@@ -6,7 +6,9 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Texture2D.h"
 #include "Engine/Texture2DArray.h"
+#include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -131,6 +133,45 @@ namespace CubusMaterialRegistryEditor
 
         SaveAsset(Texture);
         return Texture;
+    }
+
+    void ForceGeometricDensityNormal(UMaterial* Material)
+    {
+        if (!IsValid(Material))
+        {
+            return;
+        }
+
+        UMaterialExpressionVertexNormalWS* VertexNormal = nullptr;
+        for (UMaterialExpression* Expression :
+            Material->GetEditorOnlyData()->ExpressionCollection.Expressions)
+        {
+            VertexNormal = Cast<UMaterialExpressionVertexNormalWS>(Expression);
+            if (IsValid(VertexNormal))
+            {
+                break;
+            }
+        }
+
+        if (!IsValid(VertexNormal))
+        {
+            UE_LOG(
+                LogTemp,
+                Error,
+                TEXT("M_CubusDensityPBR contains no VertexNormalWS expression.")
+            );
+            return;
+        }
+
+        Material->Modify();
+        FExpressionInput& NormalInput =
+            Material->GetEditorOnlyData()->Normal;
+        NormalInput.Expression = VertexNormal;
+        NormalInput.OutputIndex = 0;
+
+        UMaterialEditingLibrary::RecompileMaterial(Material);
+        Material->PostEditChange();
+        SaveAsset(Material);
     }
 
     template <typename TSelector>
@@ -362,6 +403,8 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         return;
     }
 
+    ForceGeometricDensityNormal(BuiltMaterial);
+
     DensityMaterial = BuiltMaterial;
     DensityRuntimeMaterialByKey.Reset();
     UnifiedDensityRuntimeMaterial.Reset();
@@ -373,7 +416,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus built one unified density material, six MaterialId-indexed arrays, and neutral optional-map fallbacks.")
+        TEXT("Cubus built unified density arrays and uses geometric world normals for stable lighting.")
     );
 #else
     UE_LOG(LogTemp, Warning, TEXT("BuildDensityMaterial is only available in the Unreal Editor."));
