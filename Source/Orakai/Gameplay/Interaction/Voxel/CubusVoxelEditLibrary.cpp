@@ -198,3 +198,102 @@ bool UCubusVoxelEditLibrary::AddVoxelFromHit(
         bIsWater
     );
 }
+
+int32 UCubusVoxelEditLibrary::RemoveBlockBrushFromHit(
+    const FHitResult& Hit,
+    const int32 BrushRadius
+)
+{
+    FIntVector WorldVoxel;
+    ACubusBlockWorldActor* BlockWorld = nullptr;
+
+    if (!ResolveHitVoxel(Hit, WorldVoxel, BlockWorld))
+    {
+        return 0;
+    }
+
+    return BlockWorld->EditBlockSphereAtWorldVoxel(
+        WorldVoxel,
+        BrushRadius,
+        0,
+        false
+    );
+}
+
+int32 UCubusVoxelEditLibrary::AddBlockBrushFromHit(
+    const FHitResult& Hit,
+    const int32 BrushRadius,
+    const int32 MaterialId,
+    const bool bIsWater
+)
+{
+    if (MaterialId <= 0)
+    {
+        return 0;
+    }
+
+    FIntVector WorldVoxel;
+    ACubusBlockWorldActor* BlockWorld = nullptr;
+
+    if (!ResolveAdjacentVoxel(Hit, WorldVoxel, BlockWorld))
+    {
+        return 0;
+    }
+
+    return BlockWorld->EditBlockSphereAtWorldVoxel(
+        WorldVoxel,
+        BrushRadius,
+        MaterialId,
+        bIsWater
+    );
+}
+
+int32 UCubusVoxelEditLibrary::RemoveDensityFromHit(
+    const FHitResult& Hit,
+    const int32 BrushRadius,
+    const float Strength
+)
+{
+    FIntVector WorldSample;
+    ACubusBlockWorldActor* BlockWorld = nullptr;
+
+    if (!ResolveHitVoxel(Hit, WorldSample, BlockWorld))
+    {
+        return 0;
+    }
+
+    return BlockWorld->EditDensitySphereAtWorldSample(
+        WorldSample,
+        BrushRadius,
+        -FMath::Abs(Strength),
+        0
+    );
+}
+
+int32 UCubusVoxelEditLibrary::AddDensityFromHit(
+    const FHitResult& Hit,
+    const int32 BrushRadius,
+    const float Strength,
+    const int32 MaterialId
+)
+{
+    if (MaterialId <= 0)
+    {
+        return 0;
+    }
+
+    FIntVector WorldSample;
+    ACubusBlockWorldActor* BlockWorld = nullptr;
+
+    if (!ResolveAdjacentVoxel(Hit, WorldSample, BlockWorld))
+    {
+        return 0;
+    }
+
+    return BlockWorld->EditDensitySphereAtWorldSample(
+        WorldSample,
+        BrushRadius,
+        FMath::Abs(Strength),
+        MaterialId
+    );
+}

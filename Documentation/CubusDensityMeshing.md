@@ -87,6 +87,9 @@ ACubusVoxelVolumeActor::RebuildVolume
 FCubusTerrainDensityField
         |
         v
+FCubusDensityEditField (generated field + sparse edit snapshot)
+        |
+        v
 35 x 35 x 35 halo sampling buffer
         |
         v
@@ -132,6 +135,26 @@ All field samples use global voxel coordinates. Adjacent streamed chunks receive
 the same scalar values on their shared boundary without depending on neighbour
 chunk data.
 
+## Runtime editing
+
+`UCubusVoxelEditLibrary` exposes separate Blueprint nodes for the two terrain
+representations:
+
+- `Remove Cubus Block Brush From Hit`
+- `Add Cubus Block Brush From Hit`
+- `Remove Cubus Density From Hit`
+- `Add Cubus Density From Hit`
+
+Brush radii are measured in voxel/sample coordinates. Block brushes batch all
+writes by chunk, save each touched chunk once, then queue the touched chunks and
+their face neighbours for remeshing. Density brushes accumulate sparse scalar
+deltas and queue a `3 x 3 x 3` chunk halo because central-difference normals can
+depend on diagonal samples.
+
+Density edits are retained by the world actor while chunks stream out and back
+in. A rebuilding chunk receives an immutable, chunk-local snapshot containing
+only edits within its `35 x 35 x 35` sampling range.
+
 ## Runtime diagnostics
 
 Before generation, each streamed PCG chunk logs:
@@ -170,7 +193,6 @@ report zero density sections.
 
 The native density path does not yet include:
 
-- sparse player density edits,
 - SpaceTimeDB density deltas,
 - discrete blocks embedded in density,
 - liquid surfaces,
@@ -181,8 +203,8 @@ The native density path does not yet include:
 - LOD meshes,
 - or block/density transition cells.
 
-Block edits currently modify `FCubusBlockChunkData`; they do not yet sculpt the
-native scalar field.
+Block and density edits remain deliberately separate: block brushes modify
+`FCubusBlockChunkData`, while density brushes modify the scalar-field overlay.
 
 ## Regression coverage
 
@@ -195,4 +217,5 @@ Automation tests cover:
 - block-generator/native-density height parity,
 - continuous river lowering,
 - three-dimensional cave carving and surface clearance,
+- sparse add/remove density overlay and material overrides,
 - and mutable block-chunk occupancy invalidation.

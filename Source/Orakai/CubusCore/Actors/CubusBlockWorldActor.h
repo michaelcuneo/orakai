@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "CubusCore/Generation/CubusDensityEditField.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Rendering/CubusVoxelRenderMode.h"
 
@@ -43,6 +44,18 @@ public:
     void RebuildChunkAndNeighbours(
         const FIntVector& ChunkCoordinate
     );
+
+    void QueueChunkForRebuild(const FIntVector& ChunkCoordinate);
+    void QueueChunkAndFaceNeighboursForRebuild(
+        const FIntVector& ChunkCoordinate
+    );
+    void QueueDensityEditDependenciesForRebuild(
+        const FIntVector& ChunkCoordinate
+    );
+
+    FCubusDensityEditMap BuildDensityEditSnapshot(
+        const FIntVector& ChunkCoordinate
+    ) const;
 
     const FCubusGenerationSeeds GetGenerationSeeds() const
     {
@@ -122,6 +135,22 @@ public:
     bool EditVoxelAtWorldVoxel(FIntVector WorldVoxel, int32 MaterialId, bool bIsWater);
 
     UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+    int32 EditBlockSphereAtWorldVoxel(
+        FIntVector CentreWorldVoxel,
+        int32 BrushRadius,
+        int32 MaterialId,
+        bool bIsWater = false
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+    int32 EditDensitySphereAtWorldSample(
+        FIntVector CentreWorldSample,
+        int32 BrushRadius,
+        float DensityDelta,
+        int32 MaterialId = 1
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
     bool ClearVoxelEditAtWorldVoxel(FIntVector WorldVoxel);
 
     UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
@@ -194,6 +223,9 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
     int32 MaxChunksRemovedPerTick = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
+    int32 MaxDirtyChunksRebuiltPerTick = 2;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0.05", Units = "s"))
     float StreamingUpdateInterval = 0.25f;
@@ -329,14 +361,17 @@ private:
 
     TArray<FIntVector> PendingChunkGeneration;
     TArray<FIntVector> PendingChunkRemoval;
+    TSet<FIntVector> DirtyChunkCoordinates;
     TSet<FIntVector> RequiredChunkCoordinates;
     TSet<FIntVector> InitialRequiredCoordinates;
+    FCubusDensityEditMap DensityEdits;
 
     TWeakObjectPtr<APawn> TrackedPawn;
     TWeakObjectPtr<ACubusWorldVegetationActor> WorldVegetationActor;
     FIntVector LastTrackedChunk = FIntVector(MAX_int32, MAX_int32, MAX_int32);
     FVector HeldPawnLocation = FVector::ZeroVector;
     bool bPawnHeldForStreaming = false;
+    bool bSpawnTimeoutReported = false;
     float HeldPawnElapsedSeconds = 0.0f;
     float TimeUntilStreamingUpdate = 0.0f;
 
@@ -352,6 +387,7 @@ private:
 
     void UpdateRuntimeStreaming(bool bForce);
     void ProcessRuntimeQueues();
+    void ProcessDirtyChunkQueue();
     void BuildRequiredCoordinates(
         const FIntVector& CentreCoordinate,
         int32 HorizontalRadius,

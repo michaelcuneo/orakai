@@ -7,6 +7,7 @@
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "CubusCore/Generation/CubusBlockTerrainGenerator.h"
+#include "CubusCore/Generation/CubusDensityEditField.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
 #include "CubusCore/Meshing/CubusBlockMesher.h"
@@ -142,6 +143,7 @@ void ACubusVoxelVolumeActor::GenerateTerrainData()
 void ACubusVoxelVolumeActor::RebuildVolume()
 {
     ++RebuildCount;
+    bLastBuildHadCollision = false;
     EnsureChunkData();
 
     if (!IsValid(ProceduralMesh))
@@ -231,6 +233,8 @@ void ACubusVoxelVolumeActor::RebuildVolume()
             ? ECollisionEnabled::QueryAndPhysics
             : ECollisionEnabled::NoCollision
     );
+
+    bLastBuildHadCollision = bBuiltCollision;
 
     LastBuildTimeMilliseconds =
         static_cast<float>(
@@ -453,10 +457,25 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
         DensitySettings
     );
 
+    FCubusDensityEditMap DensityEditSnapshot;
+
+    if (IsValid(OwningBlockWorld.Get()))
+    {
+        DensityEditSnapshot =
+            OwningBlockWorld->BuildDensityEditSnapshot(
+                ChunkCoordinate
+            );
+    }
+
+    const FCubusDensityEditField EditedDensityField(
+        DensityField,
+        DensityEditSnapshot
+    );
+
     FCubusDensitySamplingBuffer DensityBuffer;
     DensityBuffer.Build(
         ChunkCoordinate,
-        DensityField
+        EditedDensityField
     );
 
     FCubusMaterialMeshMap MaterialMeshes;

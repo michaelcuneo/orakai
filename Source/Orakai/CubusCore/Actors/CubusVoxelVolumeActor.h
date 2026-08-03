@@ -60,6 +60,11 @@ public:
         return ProceduralMesh.Get();
     }
 
+    bool HasBuiltTerrainCollision() const
+    {
+        return bLastBuildHadCollision;
+    }
+
     bool TryLoadCachedChunk();
     bool SaveCachedChunk() const;
     void RegenerateVegetationData();
@@ -330,6 +335,7 @@ protected:
 private:
     TUniquePtr<FCubusBlockChunkData> ChunkData;
     bool bChunkCacheDirty = false;
+    bool bLastBuildHadCollision = false;
 
     void EnsureChunkData();
     void SynchronizeChunkState();

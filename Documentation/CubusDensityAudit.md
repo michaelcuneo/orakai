@@ -201,7 +201,6 @@ This change is independent of voxel density.
 
 The following are not yet part of the native scalar field:
 
-- sparse player density edits,
 - SpaceTimeDB density deltas,
 - discrete blocks embedded in density,
 - liquid surfaces,
@@ -211,8 +210,10 @@ The following are not yet part of the native scalar field:
 - shared edge vertices,
 - LOD and transition cells.
 
-Block edits still mutate `FCubusBlockChunkData`; they do not yet sculpt the
-native density field.
+Sparse player density edits now wrap the generated field before halo sampling.
+They survive chunk unload/reload for the lifetime of the world actor, but are
+not yet persisted across sessions. Block edits remain a separate operation on
+`FCubusBlockChunkData`, preserving the engine's explicit dual representation.
 
 ## Validation boundary
 

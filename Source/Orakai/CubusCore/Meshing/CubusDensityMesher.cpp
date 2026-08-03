@@ -345,6 +345,7 @@ void FCubusDensityMesher::BuildChunk(
                     }
 
                     FInterpolatedVertex TriangleVertices[3];
+                    bool bTriangleIsValid = true;
 
                     for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
                     {
@@ -354,7 +355,18 @@ void FCubusDensityMesher::BuildChunk(
                                 TriangleEdgeIndex + VertexIndex
                             );
 
-                        check(EdgeIndex >= 0 && EdgeIndex < 12);
+                        if (EdgeIndex < 0 || EdgeIndex >= 12)
+                        {
+                            ensureMsgf(
+                                false,
+                                TEXT("Invalid Marching Cubes edge %d for case %d at table index %d."),
+                                EdgeIndex,
+                                CaseIndex,
+                                TriangleEdgeIndex + VertexIndex
+                            );
+                            bTriangleIsValid = false;
+                            break;
+                        }
 
                         if (!bEdgeVertexBuilt[EdgeIndex])
                         {
@@ -373,6 +385,11 @@ void FCubusDensityMesher::BuildChunk(
                         }
 
                         TriangleVertices[VertexIndex] = EdgeVertices[EdgeIndex];
+                    }
+
+                    if (!bTriangleIsValid)
+                    {
+                        continue;
                     }
 
                     if (AddTriangle(

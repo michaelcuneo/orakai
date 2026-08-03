@@ -74,4 +74,49 @@ public:
         int32 MaterialId,
         bool bIsWater = false
     );
+
+    UFUNCTION(
+        BlueprintCallable,
+        Category = "Cubus|Voxel Editing",
+        meta = (DisplayName = "Remove Cubus Block Brush From Hit")
+    )
+    static int32 RemoveBlockBrushFromHit(
+        const FHitResult& Hit,
+        int32 BrushRadius = 1
+    );
+
+    UFUNCTION(
+        BlueprintCallable,
+        Category = "Cubus|Voxel Editing",
+        meta = (DisplayName = "Add Cubus Block Brush From Hit")
+    )
+    static int32 AddBlockBrushFromHit(
+        const FHitResult& Hit,
+        int32 BrushRadius,
+        int32 MaterialId,
+        bool bIsWater = false
+    );
+
+    UFUNCTION(
+        BlueprintCallable,
+        Category = "Cubus|Voxel Editing",
+        meta = (DisplayName = "Remove Cubus Density From Hit")
+    )
+    static int32 RemoveDensityFromHit(
+        const FHitResult& Hit,
+        int32 BrushRadius = 1,
+        float Strength = 2.0f
+    );
+
+    UFUNCTION(
+        BlueprintCallable,
+        Category = "Cubus|Voxel Editing",
+        meta = (DisplayName = "Add Cubus Density From Hit")
+    )
+    static int32 AddDensityFromHit(
+        const FHitResult& Hit,
+        int32 BrushRadius,
+        float Strength,
+        int32 MaterialId
+    );
 };
