@@ -1,5 +1,7 @@
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 
+#include "CubusCore/Rendering/CubusDensityMaterialKey.h"
+
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -24,6 +26,23 @@ namespace CubusMaterialRegistry
         }
     }
 
+    const FCubusBlockSurfaceTextures& ResolveDensitySurface(
+        const FCubusMaterialDefinition& Definition
+    )
+    {
+        if (Definition.SideSurface.HasAnyTexture())
+        {
+            return Definition.SideSurface;
+        }
+
+        if (Definition.TopSurface.HasAnyTexture())
+        {
+            return Definition.TopSurface;
+        }
+
+        return Definition.BottomSurface;
+    }
+
     void ApplySurface(
         UMaterialInstanceDynamic* RuntimeMaterial,
         const TCHAR* Prefix,
@@ -38,10 +57,66 @@ namespace CubusMaterialRegistry
 
         const FString PrefixString(Prefix);
 
-        ApplyTextureIfValid(RuntimeMaterial, FName(PrefixString + TEXT("BaseColor")), Resolved.BaseColor.Get());
-        ApplyTextureIfValid(RuntimeMaterial, FName(PrefixString + TEXT("Normal")), Resolved.Normal.Get());
-        ApplyTextureIfValid(RuntimeMaterial, FName(PrefixString + TEXT("ORM")), Resolved.ORM.Get());
-        ApplyTextureIfValid(RuntimeMaterial, FName(PrefixString + TEXT("Height")), Resolved.Height.Get());
+        ApplyTextureIfValid(
+            RuntimeMaterial,
+            FName(PrefixString + TEXT("BaseColor")),
+            Resolved.BaseColor.Get()
+        );
+        ApplyTextureIfValid(
+            RuntimeMaterial,
+            FName(PrefixString + TEXT("Normal")),
+            Resolved.Normal.Get()
+        );
+        ApplyTextureIfValid(
+            RuntimeMaterial,
+            FName(PrefixString + TEXT("ORM")),
+            Resolved.ORM.Get()
+        );
+        ApplyTextureIfValid(
+            RuntimeMaterial,
+            FName(PrefixString + TEXT("Height")),
+            Resolved.Height.Get()
+        );
+    }
+
+    void ApplyDensityDefinition(
+        UMaterialInstanceDynamic* RuntimeMaterial,
+        const TCHAR* Prefix,
+        const FCubusMaterialDefinition& Definition
+    )
+    {
+        const FCubusBlockSurfaceTextures& Surface =
+            ResolveDensitySurface(Definition);
+
+        ApplySurface(
+            RuntimeMaterial,
+            Prefix,
+            Surface,
+            Surface
+        );
+
+        const FString PrefixString(Prefix);
+
+        RuntimeMaterial->SetScalarParameterValue(
+            FName(PrefixString + TEXT("TextureScale")),
+            FMath::Max(0.01f, Definition.TextureScale)
+        );
+        RuntimeMaterial->SetScalarParameterValue(
+            FName(PrefixString + TEXT("HeightStrength")),
+            FMath::Max(0.0f, Definition.HeightStrength)
+        );
+        RuntimeMaterial->SetVectorParameterValue(
+            FName(PrefixString + TEXT("Tint")),
+            Definition.Tint
+        );
+        RuntimeMaterial->SetVectorParameterValue(
+            FName(PrefixString + TEXT("EmissiveColor")),
+            Definition.EmissiveColor
+        );
+        RuntimeMaterial->SetScalarParameterValue(
+            FName(PrefixString + TEXT("EmissiveStrength")),
+            FMath::Max(0.0f, Definition.EmissiveStrength)
+        );
     }
 }
 
@@ -106,20 +181,37 @@ UMaterialInterface* UCubusMaterialRegistry::ResolveMaterial(
 }
 
 UMaterialInterface* UCubusMaterialRegistry::ResolveRuntimeMaterial(
-    const int32 MaterialId
+    const int32 MaterialIdOrDensityKey
 ) const
 {
+    int32 PrimaryMaterialId = 0;
+    int32 SecondaryMaterialId = 0;
+
+    if (
+        FCubusDensityMaterialKey::Decode(
+            MaterialIdOrDensityKey,
+            PrimaryMaterialId,
+            SecondaryMaterialId
+        )
+    )
+    {
+        return ResolveDensityRuntimeMaterial(
+            PrimaryMaterialId,
+            SecondaryMaterialId
+        );
+    }
+
     const FCubusMaterialDefinition* Definition =
-        FindMaterialDefinition(MaterialId);
+        FindMaterialDefinition(MaterialIdOrDensityKey);
 
     if (Definition == nullptr || !Definition->UsesPbrTextures())
     {
-        return ResolveMaterial(MaterialId);
+        return ResolveMaterial(MaterialIdOrDensityKey);
     }
 
     if (
         const TWeakObjectPtr<UMaterialInstanceDynamic>* Existing =
-            RuntimeMaterialById.Find(MaterialId)
+            RuntimeMaterialById.Find(MaterialIdOrDensityKey)
     )
     {
         if (Existing->IsValid())
@@ -129,7 +221,7 @@ UMaterialInterface* UCubusMaterialRegistry::ResolveRuntimeMaterial(
     }
 
     UMaterialInterface* ParentMaterial =
-        ResolveMaterial(MaterialId);
+        ResolveMaterial(MaterialIdOrDensityKey);
 
     if (!IsValid(ParentMaterial))
     {
@@ -147,19 +239,137 @@ UMaterialInterface* UCubusMaterialRegistry::ResolveRuntimeMaterial(
         return ParentMaterial;
     }
 
-    CubusMaterialRegistry::ApplySurface(RuntimeMaterial, TEXT("Side"), Definition->SideSurface, Definition->SideSurface);
-    CubusMaterialRegistry::ApplySurface(RuntimeMaterial, TEXT("Top"), Definition->TopSurface, Definition->SideSurface);
-    CubusMaterialRegistry::ApplySurface(RuntimeMaterial, TEXT("Bottom"), Definition->BottomSurface, Definition->SideSurface);
+    CubusMaterialRegistry::ApplySurface(
+        RuntimeMaterial,
+        TEXT("Side"),
+        Definition->SideSurface,
+        Definition->SideSurface
+    );
+    CubusMaterialRegistry::ApplySurface(
+        RuntimeMaterial,
+        TEXT("Top"),
+        Definition->TopSurface,
+        Definition->SideSurface
+    );
+    CubusMaterialRegistry::ApplySurface(
+        RuntimeMaterial,
+        TEXT("Bottom"),
+        Definition->BottomSurface,
+        Definition->SideSurface
+    );
 
-    RuntimeMaterial->SetScalarParameterValue(TEXT("TextureScale"), FMath::Max(0.01f, Definition->TextureScale));
-    RuntimeMaterial->SetScalarParameterValue(TEXT("HeightStrength"), FMath::Max(0.0f, Definition->HeightStrength));
-    RuntimeMaterial->SetScalarParameterValue(TEXT("SideTopBlendStart"), FMath::Clamp(Definition->SideTopBlendStart, 0.0f, 1.0f));
-    RuntimeMaterial->SetScalarParameterValue(TEXT("SideTopBlendSharpness"), FMath::Max(0.01f, Definition->SideTopBlendSharpness));
-    RuntimeMaterial->SetVectorParameterValue(TEXT("Tint"), Definition->Tint);
-    RuntimeMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), Definition->EmissiveColor);
-    RuntimeMaterial->SetScalarParameterValue(TEXT("EmissiveStrength"), FMath::Max(0.0f, Definition->EmissiveStrength));
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("TextureScale"),
+        FMath::Max(0.01f, Definition->TextureScale)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("HeightStrength"),
+        FMath::Max(0.0f, Definition->HeightStrength)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("SideTopBlendStart"),
+        FMath::Clamp(Definition->SideTopBlendStart, 0.0f, 1.0f)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("SideTopBlendSharpness"),
+        FMath::Max(0.01f, Definition->SideTopBlendSharpness)
+    );
+    RuntimeMaterial->SetVectorParameterValue(
+        TEXT("Tint"),
+        Definition->Tint
+    );
+    RuntimeMaterial->SetVectorParameterValue(
+        TEXT("EmissiveColor"),
+        Definition->EmissiveColor
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("EmissiveStrength"),
+        FMath::Max(0.0f, Definition->EmissiveStrength)
+    );
 
-    RuntimeMaterialById.Add(MaterialId, RuntimeMaterial);
+    RuntimeMaterialById.Add(
+        MaterialIdOrDensityKey,
+        RuntimeMaterial
+    );
+
+    return RuntimeMaterial;
+}
+
+UMaterialInterface*
+UCubusMaterialRegistry::ResolveDensityRuntimeMaterial(
+    const int32 PrimaryMaterialId,
+    const int32 SecondaryMaterialId
+) const
+{
+    const int32 DensityKey =
+        FCubusDensityMaterialKey::Make(
+            PrimaryMaterialId,
+            SecondaryMaterialId
+        );
+
+    if (
+        const TWeakObjectPtr<UMaterialInstanceDynamic>* Existing =
+            DensityRuntimeMaterialByKey.Find(DensityKey)
+    )
+    {
+        if (Existing->IsValid())
+        {
+            return Existing->Get();
+        }
+    }
+
+    const FCubusMaterialDefinition* PrimaryDefinition =
+        FindMaterialDefinition(PrimaryMaterialId);
+    const FCubusMaterialDefinition* SecondaryDefinition =
+        FindMaterialDefinition(SecondaryMaterialId);
+
+    if (PrimaryDefinition == nullptr)
+    {
+        return DefaultMaterial.Get();
+    }
+
+    if (SecondaryDefinition == nullptr)
+    {
+        SecondaryDefinition = PrimaryDefinition;
+    }
+
+    UMaterialInterface* ParentMaterial = DensityMaterial.Get();
+
+    if (!IsValid(ParentMaterial))
+    {
+        // Do not feed density alpha into the block face selector. Until a
+        // density parent is assigned, use the primary material as a safe
+        // non-blended fallback.
+        return ResolveRuntimeMaterial(PrimaryMaterialId);
+    }
+
+    UMaterialInstanceDynamic* RuntimeMaterial =
+        UMaterialInstanceDynamic::Create(
+            ParentMaterial,
+            const_cast<UCubusMaterialRegistry*>(this)
+        );
+
+    if (!IsValid(RuntimeMaterial))
+    {
+        return ParentMaterial;
+    }
+
+    CubusMaterialRegistry::ApplyDensityDefinition(
+        RuntimeMaterial,
+        TEXT("A"),
+        *PrimaryDefinition
+    );
+    CubusMaterialRegistry::ApplyDensityDefinition(
+        RuntimeMaterial,
+        TEXT("B"),
+        *SecondaryDefinition
+    );
+
+    DensityRuntimeMaterialByKey.Add(
+        DensityKey,
+        RuntimeMaterial
+    );
+
     return RuntimeMaterial;
 }
 
@@ -197,11 +407,25 @@ void UCubusMaterialRegistry::ValidateRegistry()
 {
     if (!IsValid(DefaultMaterial.Get()))
     {
-        UE_LOG(LogTemp, Error, TEXT("Cubus material registry has no valid DefaultMaterial."));
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("Cubus material registry has no valid DefaultMaterial.")
+        );
+    }
+
+    if (!IsValid(DensityMaterial.Get()))
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("Cubus material registry has no DensityMaterial. Density terrain will use its primary material without biome blending.")
+        );
     }
 
     bLookupCacheDirty = true;
     RuntimeMaterialById.Reset();
+    DensityRuntimeMaterialByKey.Reset();
     RebuildLookupCache();
 
     TSet<int32> UsedIds;
@@ -224,7 +448,12 @@ void UCubusMaterialRegistry::ValidateRegistry()
 
         if (UsedIds.Contains(Definition.MaterialId))
         {
-            UE_LOG(LogTemp, Error, TEXT("Cubus material registry contains duplicate ID %d."), Definition.MaterialId);
+            UE_LOG(
+                LogTemp,
+                Error,
+                TEXT("Cubus material registry contains duplicate ID %d."),
+                Definition.MaterialId
+            );
         }
 
         UsedIds.Add(Definition.MaterialId);
@@ -234,7 +463,11 @@ void UCubusMaterialRegistry::ValidateRegistry()
             Definition.State != ECubusMatterState::Empty
         )
         {
-            UE_LOG(LogTemp, Error, TEXT("Cubus material ID 0 must use the Empty state."));
+            UE_LOG(
+                LogTemp,
+                Error,
+                TEXT("Cubus material ID 0 must use the Empty state.")
+            );
         }
 
         if (
@@ -242,13 +475,22 @@ void UCubusMaterialRegistry::ValidateRegistry()
             Definition.bRenderable
         )
         {
-            UE_LOG(LogTemp, Warning, TEXT("Empty material '%s' is marked renderable."), *Definition.Name.ToString());
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("Empty material '%s' is marked renderable."),
+                *Definition.Name.ToString()
+            );
         }
     }
 
     if (!UsedIds.Contains(0))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cubus material registry has no definition for Air using ID 0."));
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("Cubus material registry has no definition for Air using ID 0.")
+        );
     }
 }
 
@@ -258,6 +500,7 @@ void UCubusMaterialRegistry::PostLoad()
 
     bLookupCacheDirty = true;
     RuntimeMaterialById.Reset();
+    DensityRuntimeMaterialByKey.Reset();
     RebuildLookupCache();
 }
 
@@ -277,7 +520,10 @@ void UCubusMaterialRegistry::RebuildLookupCache() const
 
         if (!MaterialIndexById.Contains(Definition.MaterialId))
         {
-            MaterialIndexById.Add(Definition.MaterialId, MaterialIndex);
+            MaterialIndexById.Add(
+                Definition.MaterialId,
+                MaterialIndex
+            );
         }
     }
 
@@ -293,6 +539,7 @@ void UCubusMaterialRegistry::PostEditChangeProperty(
 
     bLookupCacheDirty = true;
     RuntimeMaterialById.Reset();
+    DensityRuntimeMaterialByKey.Reset();
     RebuildLookupCache();
 }
 #endif
