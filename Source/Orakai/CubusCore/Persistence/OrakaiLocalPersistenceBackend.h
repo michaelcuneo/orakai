@@ -41,12 +41,24 @@ public:
     ) const override;
     virtual int32 GetInventoryQuantity(FName ItemId) const override;
     virtual void SetInventoryQuantity(FName ItemId, int32 Quantity) override;
+    virtual void RecordWorldObject(const FOrakaiWorldObjectRecord& Record) override;
+    virtual void ClearWorldObject(const FString& ObjectId) override;
+    virtual bool GetWorldObject(
+        const FString& ObjectId,
+        FOrakaiWorldObjectRecord& OutRecord
+    ) const override;
+    virtual void GetWorldObjectsForChunk(
+        const FIntVector& ChunkCoordinate,
+        TArray<FOrakaiWorldObjectRecord>& OutRecords
+    ) const override;
 
 private:
     bool Load();
     bool Save() const;
     FString GetStorePath() const;
     void MarkDirty();
+    void IndexWorldObject(const FOrakaiWorldObjectRecord& Record);
+    void UnindexWorldObject(const FOrakaiWorldObjectRecord& Record);
 
     bool bConnected = false;
     bool bWorldConfigured = false;
@@ -61,4 +73,6 @@ private:
     TMap<FIntVector, FOrakaiDensityEdit> DensityEdits;
     TMap<FString, FOrakaiFoliageEdit> FoliageEdits;
     TMap<FName, int32> Inventory;
+    TMap<FString, FOrakaiWorldObjectRecord> WorldObjects;
+    TMultiMap<int64, FString> WorldObjectIdsByChunk;
 };

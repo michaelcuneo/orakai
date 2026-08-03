@@ -10,13 +10,31 @@
 namespace OrakaiLocalPersistence
 {
     constexpr uint32 Magic = 0x4F52444C; // ORDL
-    constexpr uint32 Version = 1;
+    constexpr uint32 Version = 2;
+    constexpr uint32 FirstSupportedVersion = 1;
 
     void SerializeIntVector(FArchive& Archive, FIntVector& Value)
     {
         Archive << Value.X;
         Archive << Value.Y;
         Archive << Value.Z;
+    }
+
+    void SerializeTransform(FArchive& Archive, FTransform& Value)
+    {
+        FVector Translation = Value.GetTranslation();
+        FQuat Rotation = Value.GetRotation();
+        FVector Scale = Value.GetScale3D();
+
+        Archive << Translation;
+        Archive << Rotation;
+        Archive << Scale;
+
+        if (Archive.IsLoading())
+        {
+            Rotation.Normalize();
+            Value = FTransform(Rotation, Translation, Scale);
+        }
     }
 }
 
@@ -231,6 +249,104 @@ void FOrakaiLocalPersistenceBackend::SetInventoryQuantity(
     MarkDirty();
 }
 
+void FOrakaiLocalPersistenceBackend::IndexWorldObject(
+    const FOrakaiWorldObjectRecord& Record
+)
+{
+    WorldObjectIdsByChunk.AddUnique(
+        OrakaiPersistence::PackChunkKey(Record.ChunkCoordinate),
+        Record.ObjectId
+    );
+}
+
+void FOrakaiLocalPersistenceBackend::UnindexWorldObject(
+    const FOrakaiWorldObjectRecord& Record
+)
+{
+    WorldObjectIdsByChunk.RemoveSingle(
+        OrakaiPersistence::PackChunkKey(Record.ChunkCoordinate),
+        Record.ObjectId
+    );
+}
+
+void FOrakaiLocalPersistenceBackend::RecordWorldObject(
+    const FOrakaiWorldObjectRecord& Record
+)
+{
+    if (Record.ObjectId.IsEmpty() || Record.TypeId.IsNone())
+    {
+        return;
+    }
+
+    if (const FOrakaiWorldObjectRecord* Existing =
+            WorldObjects.Find(Record.ObjectId))
+    {
+        UnindexWorldObject(*Existing);
+    }
+
+    WorldObjects.Add(Record.ObjectId, Record);
+    IndexWorldObject(Record);
+    MarkDirty();
+}
+
+void FOrakaiLocalPersistenceBackend::ClearWorldObject(
+    const FString& ObjectId
+)
+{
+    if (const FOrakaiWorldObjectRecord* Existing = WorldObjects.Find(ObjectId))
+    {
+        const FOrakaiWorldObjectRecord ExistingCopy = *Existing;
+        WorldObjects.Remove(ObjectId);
+        UnindexWorldObject(ExistingCopy);
+        MarkDirty();
+    }
+}
+
+bool FOrakaiLocalPersistenceBackend::GetWorldObject(
+    const FString& ObjectId,
+    FOrakaiWorldObjectRecord& OutRecord
+) const
+{
+    if (const FOrakaiWorldObjectRecord* Record = WorldObjects.Find(ObjectId))
+    {
+        OutRecord = *Record;
+        return true;
+    }
+
+    return false;
+}
+
+void FOrakaiLocalPersistenceBackend::GetWorldObjectsForChunk(
+    const FIntVector& ChunkCoordinate,
+    TArray<FOrakaiWorldObjectRecord>& OutRecords
+) const
+{
+    OutRecords.Reset();
+
+    TArray<FString> ObjectIds;
+    WorldObjectIdsByChunk.MultiFind(
+        OrakaiPersistence::PackChunkKey(ChunkCoordinate),
+        ObjectIds
+    );
+
+    for (const FString& ObjectId : ObjectIds)
+    {
+        if (const FOrakaiWorldObjectRecord* Record =
+                WorldObjects.Find(ObjectId))
+        {
+            OutRecords.Add(*Record);
+        }
+    }
+
+    OutRecords.Sort(
+        [](const FOrakaiWorldObjectRecord& Left,
+           const FOrakaiWorldObjectRecord& Right)
+        {
+            return Left.ObjectId < Right.ObjectId;
+        }
+    );
+}
+
 FString FOrakaiLocalPersistenceBackend::GetStorePath() const
 {
     return FPaths::Combine(
@@ -251,6 +367,8 @@ bool FOrakaiLocalPersistenceBackend::Load()
     DensityEdits.Reset();
     FoliageEdits.Reset();
     Inventory.Reset();
+    WorldObjects.Reset();
+    WorldObjectIdsByChunk.Reset();
     bHasPlayerCoordinate = false;
     bDirty = false;
     TimeSinceLastMutation = 0.0f;
@@ -273,7 +391,8 @@ bool FOrakaiLocalPersistenceBackend::Load()
 
     if (
         StoredMagic != OrakaiLocalPersistence::Magic ||
-        StoredVersion != OrakaiLocalPersistence::Version ||
+        StoredVersion < OrakaiLocalPersistence::FirstSupportedVersion ||
+        StoredVersion > OrakaiLocalPersistence::Version ||
         StoredSeed != WorldSeed ||
         StoredGenerationVersion != GenerationVersion
     )
@@ -332,6 +451,41 @@ bool FOrakaiLocalPersistenceBackend::Load()
         Reader << ItemString;
         Reader << Quantity;
         Inventory.Add(FName(*ItemString), FMath::Max(0, Quantity));
+    }
+
+    if (StoredVersion >= 2)
+    {
+        int32 WorldObjectCount = 0;
+        Reader << WorldObjectCount;
+        for (
+            int32 Index = 0;
+            Index < WorldObjectCount && !Reader.IsError();
+            ++Index
+        )
+        {
+            FOrakaiWorldObjectRecord Record;
+            FString TypeString;
+            Reader << Record.ObjectId;
+            Reader << TypeString;
+            OrakaiLocalPersistence::SerializeIntVector(
+                Reader,
+                Record.ChunkCoordinate
+            );
+            OrakaiLocalPersistence::SerializeTransform(
+                Reader,
+                Record.Transform
+            );
+            Reader << Record.bGenerated;
+            Reader << Record.bDestroyed;
+            Reader << Record.Payload;
+            Record.TypeId = FName(*TypeString);
+
+            if (!Record.ObjectId.IsEmpty() && !Record.TypeId.IsNone())
+            {
+                WorldObjects.Add(Record.ObjectId, Record);
+                IndexWorldObject(Record);
+            }
+        }
     }
 
     return !Reader.IsError();
@@ -405,6 +559,24 @@ bool FOrakaiLocalPersistenceBackend::Save() const
         int32 Quantity = Pair.Value;
         Writer << ItemString;
         Writer << Quantity;
+    }
+
+    int32 WorldObjectCount = WorldObjects.Num();
+    Writer << WorldObjectCount;
+    for (const TPair<FString, FOrakaiWorldObjectRecord>& Pair : WorldObjects)
+    {
+        FOrakaiWorldObjectRecord Record = Pair.Value;
+        FString TypeString = Record.TypeId.ToString();
+        Writer << Record.ObjectId;
+        Writer << TypeString;
+        OrakaiLocalPersistence::SerializeIntVector(
+            Writer,
+            Record.ChunkCoordinate
+        );
+        OrakaiLocalPersistence::SerializeTransform(Writer, Record.Transform);
+        Writer << Record.bGenerated;
+        Writer << Record.bDestroyed;
+        Writer << Record.Payload;
     }
     Writer.Close();
 

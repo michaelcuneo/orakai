@@ -418,4 +418,5 @@ private:
     void HoldPawnForInitialStreaming();
     void TryReleasePawnToTerrain();
     void EnsureWorldVegetationActor();
+    void RecordGeneratedTreeTombstone(const FIntVector& WorldVoxel);
 };

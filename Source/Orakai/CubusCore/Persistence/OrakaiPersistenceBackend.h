@@ -87,4 +87,27 @@ public:
     }
 
     virtual void SetInventoryQuantity(const FName ItemId, int32 Quantity) {}
+
+    /**
+     * Persistent non-terrain object deltas. Optional for older remote
+     * backends; local worlds support these records by default.
+     */
+    virtual void RecordWorldObject(const FOrakaiWorldObjectRecord& Record) {}
+    virtual void ClearWorldObject(const FString& ObjectId) {}
+
+    virtual bool GetWorldObject(
+        const FString& ObjectId,
+        FOrakaiWorldObjectRecord& OutRecord
+    ) const
+    {
+        return false;
+    }
+
+    virtual void GetWorldObjectsForChunk(
+        const FIntVector& ChunkCoordinate,
+        TArray<FOrakaiWorldObjectRecord>& OutRecords
+    ) const
+    {
+        OutRecords.Reset();
+    }
 };

@@ -116,6 +116,59 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|Inventory")
     void SetInventoryQuantity(FName ItemId, int32 Quantity);
 
+    /** Stable ID for a deterministic generated object such as a tree or rock. */
+    UFUNCTION(BlueprintPure, Category = "Orakai|Persistence|World Objects")
+    FString MakeGeneratedWorldObjectId(
+        int64 WorldSeed,
+        FName TypeId,
+        FIntVector StableCoordinate
+    ) const;
+
+    /** Store or replace a complete object delta. */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    void RecordWorldObject(const FOrakaiWorldObjectRecord& Record);
+
+    /** Create and persist a player-authored object record. */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    FString RecordPlacedWorldObject(
+        FName TypeId,
+        FIntVector ChunkCoordinate,
+        FTransform Transform,
+        const FString& Payload
+    );
+
+    /** Persist a tombstone for a reproducible generated object. */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    FString TombstoneGeneratedWorldObject(
+        int64 WorldSeed,
+        FName TypeId,
+        FIntVector StableCoordinate,
+        FIntVector ChunkCoordinate,
+        FTransform GeneratedTransform
+    );
+
+    /**
+     * Destroy an object delta. Generated objects become tombstones; placed
+     * objects are removed because they have no generated baseline.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    bool DestroyWorldObject(const FString& ObjectId);
+
+    /** Remove a delta and reveal the deterministic generated baseline again. */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    void ClearWorldObjectDelta(const FString& ObjectId);
+
+    UFUNCTION(BlueprintPure, Category = "Orakai|Persistence|World Objects")
+    bool GetWorldObject(
+        const FString& ObjectId,
+        FOrakaiWorldObjectRecord& OutRecord
+    ) const;
+
+    UFUNCTION(BlueprintPure, Category = "Orakai|Persistence|World Objects")
+    TArray<FOrakaiWorldObjectRecord> GetWorldObjectsForChunk(
+        FIntVector ChunkCoordinate
+    ) const;
+
     /** Minimum seconds between forwarded player position updates. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|Persistence")
     float PositionSendInterval = 0.2f;

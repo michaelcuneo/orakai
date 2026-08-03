@@ -880,6 +880,26 @@ void ACubusBlockWorldActor::RemoveFoliageAtWorldVoxel(const FIntVector WorldVoxe
     }
 }
 
+void ACubusBlockWorldActor::RecordGeneratedTreeTombstone(
+    const FIntVector& WorldVoxel
+)
+{
+    if (UOrakaiPersistenceSubsystem* Persistence =
+            UOrakaiPersistenceSubsystem::Get(this))
+    {
+        // Trees remain rendered by the existing foliage system. This parallel
+        // object tombstone gives the same generated tree a stable identity for
+        // later replication, loot, regrowth and object-specific state.
+        Persistence->TombstoneGeneratedWorldObject(
+            WorldSeed,
+            TEXT("Tree"),
+            WorldVoxel,
+            OrakaiPersistence::WorldVoxelToChunk(WorldVoxel),
+            FTransform::Identity
+        );
+    }
+}
+
 bool ACubusBlockWorldActor::HarvestTreeAlongRay(
     const FVector TraceStart,
     const FVector TraceEnd,
@@ -901,6 +921,7 @@ bool ACubusBlockWorldActor::HarvestTreeAlongRay(
             )
         )
         {
+            RecordGeneratedTreeTombstone(OutTreeWorldVoxel);
             RemoveFoliageAtWorldVoxel(OutTreeWorldVoxel);
             return true;
         }
@@ -978,6 +999,7 @@ bool ACubusBlockWorldActor::HarvestTreeAlongRay(
         return false;
     }
 
+    RecordGeneratedTreeTombstone(OutTreeWorldVoxel);
     RemoveFoliageAtWorldVoxel(OutTreeWorldVoxel);
     return true;
 }

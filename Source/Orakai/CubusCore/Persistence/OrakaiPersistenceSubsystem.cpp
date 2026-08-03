@@ -306,6 +306,140 @@ void UOrakaiPersistenceSubsystem::SetInventoryQuantity(
     }
 }
 
+FString UOrakaiPersistenceSubsystem::MakeGeneratedWorldObjectId(
+    const int64 WorldSeed,
+    const FName TypeId,
+    const FIntVector StableCoordinate
+) const
+{
+    return OrakaiPersistence::MakeGeneratedWorldObjectId(
+        WorldSeed,
+        TypeId,
+        StableCoordinate
+    );
+}
+
+void UOrakaiPersistenceSubsystem::RecordWorldObject(
+    const FOrakaiWorldObjectRecord& Record
+)
+{
+    if (Backend.IsValid())
+    {
+        Backend->RecordWorldObject(Record);
+    }
+}
+
+FString UOrakaiPersistenceSubsystem::RecordPlacedWorldObject(
+    const FName TypeId,
+    const FIntVector ChunkCoordinate,
+    const FTransform Transform,
+    const FString& Payload
+)
+{
+    if (!Backend.IsValid() || TypeId.IsNone())
+    {
+        return FString();
+    }
+
+    FOrakaiWorldObjectRecord Record;
+    Record.ObjectId = OrakaiPersistence::MakePlacedWorldObjectId();
+    Record.TypeId = TypeId;
+    Record.ChunkCoordinate = ChunkCoordinate;
+    Record.Transform = Transform;
+    Record.bGenerated = false;
+    Record.bDestroyed = false;
+    Record.Payload = Payload;
+    Backend->RecordWorldObject(Record);
+    return Record.ObjectId;
+}
+
+FString UOrakaiPersistenceSubsystem::TombstoneGeneratedWorldObject(
+    const int64 WorldSeed,
+    const FName TypeId,
+    const FIntVector StableCoordinate,
+    const FIntVector ChunkCoordinate,
+    const FTransform GeneratedTransform
+)
+{
+    if (!Backend.IsValid() || TypeId.IsNone())
+    {
+        return FString();
+    }
+
+    FOrakaiWorldObjectRecord Record;
+    Record.ObjectId = OrakaiPersistence::MakeGeneratedWorldObjectId(
+        WorldSeed,
+        TypeId,
+        StableCoordinate
+    );
+    Record.TypeId = TypeId;
+    Record.ChunkCoordinate = ChunkCoordinate;
+    Record.Transform = GeneratedTransform;
+    Record.bGenerated = true;
+    Record.bDestroyed = true;
+    Backend->RecordWorldObject(Record);
+    return Record.ObjectId;
+}
+
+bool UOrakaiPersistenceSubsystem::DestroyWorldObject(
+    const FString& ObjectId
+)
+{
+    if (!Backend.IsValid() || ObjectId.IsEmpty())
+    {
+        return false;
+    }
+
+    FOrakaiWorldObjectRecord Record;
+    if (!Backend->GetWorldObject(ObjectId, Record))
+    {
+        return false;
+    }
+
+    if (Record.bGenerated)
+    {
+        Record.bDestroyed = true;
+        Backend->RecordWorldObject(Record);
+    }
+    else
+    {
+        Backend->ClearWorldObject(ObjectId);
+    }
+
+    return true;
+}
+
+void UOrakaiPersistenceSubsystem::ClearWorldObjectDelta(
+    const FString& ObjectId
+)
+{
+    if (Backend.IsValid())
+    {
+        Backend->ClearWorldObject(ObjectId);
+    }
+}
+
+bool UOrakaiPersistenceSubsystem::GetWorldObject(
+    const FString& ObjectId,
+    FOrakaiWorldObjectRecord& OutRecord
+) const
+{
+    return Backend.IsValid() && Backend->GetWorldObject(ObjectId, OutRecord);
+}
+
+TArray<FOrakaiWorldObjectRecord>
+UOrakaiPersistenceSubsystem::GetWorldObjectsForChunk(
+    const FIntVector ChunkCoordinate
+) const
+{
+    TArray<FOrakaiWorldObjectRecord> Records;
+    if (Backend.IsValid())
+    {
+        Backend->GetWorldObjectsForChunk(ChunkCoordinate, Records);
+    }
+    return Records;
+}
+
 bool UOrakaiPersistenceSubsystem::HandleTick(const float DeltaSeconds)
 {
     if (Backend.IsValid())
