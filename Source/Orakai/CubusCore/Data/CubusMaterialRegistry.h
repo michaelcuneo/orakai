@@ -29,6 +29,17 @@ public:
     )
     TObjectPtr<UMaterialInterface> DefaultMaterial = nullptr;
 
+    /**
+     * Dedicated parent material for smooth density terrain. It receives two
+     * texture sets (A/B) and blends them with vertex-color alpha.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Cubus|Materials|Density"
+    )
+    TObjectPtr<UMaterialInterface> DensityMaterial = nullptr;
+
     UPROPERTY(
         EditAnywhere,
         BlueprintReadOnly,
@@ -52,8 +63,17 @@ public:
         int32 MaterialId
     ) const;
 
+    /**
+     * Resolves ordinary positive material IDs and packed negative density
+     * material-pair keys.
+     */
     UMaterialInterface* ResolveRuntimeMaterial(
-        int32 MaterialId
+        int32 MaterialIdOrDensityKey
+    ) const;
+
+    UMaterialInterface* ResolveDensityRuntimeMaterial(
+        int32 PrimaryMaterialId,
+        int32 SecondaryMaterialId
     ) const;
 
     bool IsRenderableSolid(
@@ -85,6 +105,8 @@ private:
     mutable TMap<int32, int32> MaterialIndexById;
     mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>>
         RuntimeMaterialById;
+    mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>>
+        DensityRuntimeMaterialByKey;
 
     mutable bool bLookupCacheDirty = true;
 
