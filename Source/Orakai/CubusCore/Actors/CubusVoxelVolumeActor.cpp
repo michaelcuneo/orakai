@@ -8,6 +8,7 @@
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "CubusCore/Generation/CubusBlockTerrainGenerator.h"
 #include "CubusCore/Generation/CubusDensityEditField.h"
+#include "CubusCore/Generation/CubusLandmarkField.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
 #include "CubusCore/Meshing/CubusBlockMesher.h"
@@ -502,6 +503,12 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
             GeologyProfile.Get(),
             Seeds.Biomes,
             Seeds.Rivers
+        );
+
+    DensitySettings.LandmarkSettings =
+        FCubusLandmarkField::MakeSettings(
+            GeologyProfile.Get(),
+            Seeds.Terrain
         );
 
     if (IsValid(GeologyProfile.Get()))

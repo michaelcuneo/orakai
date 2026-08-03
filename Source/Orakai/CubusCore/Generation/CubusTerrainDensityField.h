@@ -4,6 +4,7 @@
 
 #include "CubusCore/Generation/CubusBiomeField.h"
 #include "CubusCore/Generation/CubusDensityField.h"
+#include "CubusCore/Generation/CubusLandmarkField.h"
 #include "CubusCore/Generation/CubusTerrainForm.h"
 
 /**
@@ -81,6 +82,7 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float RockMaterialDepth = 7.0f;
 
     FCubusBiomeFieldSettings BiomeSettings;
+    FCubusLandmarkFieldSettings LandmarkSettings;
 };
 
 /**

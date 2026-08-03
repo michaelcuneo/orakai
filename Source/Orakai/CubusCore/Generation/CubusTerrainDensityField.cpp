@@ -218,8 +218,14 @@ float FCubusTerrainDensityField::SampleSurfaceVoxelHeight(
         TerrainFormSettings
     ).Height;
 
+    const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(
+        TerrainX,
+        TerrainY,
+        Settings.LandmarkSettings
+    );
+
     return ApplyRiverLowering(
-        BaseSurfaceHeight,
+        BaseSurfaceHeight + LandmarkSample.HeightOffset,
         WorldX,
         WorldY
     );
@@ -313,7 +319,26 @@ FCubusTerrainDensityField::GetColumnData(
             GradientY * GradientY
         );
 
-    if (Column.Slope >= Settings.RockSlopeThreshold)
+    const float TerrainX =
+        static_cast<float>(WorldSampleX) - 0.5f +
+        static_cast<float>(Settings.TerrainOffsetX);
+    const float TerrainY =
+        static_cast<float>(WorldSampleY) - 0.5f +
+        static_cast<float>(Settings.TerrainOffsetY);
+    const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(
+        TerrainX,
+        TerrainY,
+        Settings.LandmarkSettings
+    );
+
+    if (LandmarkSample.IsInside())
+    {
+        Column.SurfaceMaterialId = FMath::Max(
+            1,
+            Settings.LandmarkSettings.SurfaceMaterialId
+        );
+    }
+    else if (Column.Slope >= Settings.RockSlopeThreshold)
     {
         Column.SurfaceMaterialId =
             Settings.RockMaterialId;

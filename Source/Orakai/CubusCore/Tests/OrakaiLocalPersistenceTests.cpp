@@ -305,4 +305,89 @@ bool FOrakaiLegacyLocalDeltaCompatibilityTest::RunTest(
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FOrakaiGenerationDeltaMigrationTest,
+    "Orakai.Cubus.Persistence.GenerationDeltaMigration",
+    EAutomationTestFlags::EditorContext |
+    EAutomationTestFlags::EngineFilter
+)
+
+bool FOrakaiGenerationDeltaMigrationTest::RunTest(
+    const FString& Parameters
+)
+{
+    (void)Parameters;
+
+    constexpr int64 TestWorldSeed = -817263541;
+    constexpr uint32 OldGenerationVersion = 87650u;
+    constexpr uint32 NewGenerationVersion = OldGenerationVersion + 1;
+    const auto MakePath = [=](const uint32 GenerationVersion)
+    {
+        return FPaths::Combine(
+            FPaths::ProjectSavedDir(),
+            TEXT("Orakai"),
+            TEXT("Worlds"),
+            FString::Printf(
+                TEXT("world_%lld_v%u.delta"),
+                static_cast<long long>(TestWorldSeed),
+                GenerationVersion
+            )
+        );
+    };
+    const FString OldPath = MakePath(OldGenerationVersion);
+    const FString NewPath = MakePath(NewGenerationVersion);
+    IFileManager::Get().Delete(*OldPath, false, true);
+    IFileManager::Get().Delete(*NewPath, false, true);
+
+    {
+        FOrakaiLocalPersistenceBackend Writer;
+        Writer.Connect();
+        Writer.SetWorldConfig(TestWorldSeed, OldGenerationVersion);
+        Writer.SetInventoryQuantity(TEXT("Wood"), 11);
+
+        FOrakaiVoxelEdit PlacedBlock;
+        PlacedBlock.ChunkCoordinate = FIntVector(3, -2, 0);
+        PlacedBlock.LocalCoordinate = FIntVector(7, 9, 4);
+        PlacedBlock.MaterialId = 6;
+        Writer.RecordVoxelEdit(PlacedBlock);
+        Writer.Disconnect();
+    }
+
+    {
+        FOrakaiLocalPersistenceBackend MigratingReader;
+        MigratingReader.Connect();
+        MigratingReader.SetWorldConfig(TestWorldSeed, NewGenerationVersion);
+        TestEqual(
+            TEXT("Inventory survives a generated-baseline version change"),
+            MigratingReader.GetInventoryQuantity(TEXT("Wood")),
+            11
+        );
+
+        TArray<FOrakaiVoxelEdit> VoxelEdits;
+        MigratingReader.GetVoxelEditsForChunk(
+            FIntVector(3, -2, 0),
+            VoxelEdits
+        );
+        TestEqual(
+            TEXT("Placed blocks survive a generated-baseline version change"),
+            VoxelEdits.Num(),
+            1
+        );
+        MigratingReader.Disconnect();
+    }
+
+    TestTrue(
+        TEXT("Migration writes a delta store for the new generation"),
+        IFileManager::Get().FileExists(*NewPath)
+    );
+    TestTrue(
+        TEXT("Migration retains the older recovery file"),
+        IFileManager::Get().FileExists(*OldPath)
+    );
+
+    IFileManager::Get().Delete(*OldPath, false, true);
+    IFileManager::Get().Delete(*NewPath, false, true);
+    return true;
+}
+
 #endif

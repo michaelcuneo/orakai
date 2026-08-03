@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 5: natural terrain form, hierarchical waterways and the
-    // climate-driven biome field change the deterministic generated baseline.
-    static constexpr uint32 CurrentGenerationVersion = 5;
+    // Bumped to 6: sparse, seeded geological landmarks change the generated
+    // terrain baseline and must invalidate version-five chunk caches.
+    static constexpr uint32 CurrentGenerationVersion = 6;
 
     int64 World = 1;
     int32 Terrain = 0;

@@ -349,6 +349,13 @@ void FOrakaiLocalPersistenceBackend::GetWorldObjectsForChunk(
 
 FString FOrakaiLocalPersistenceBackend::GetStorePath() const
 {
+    return GetStorePathForGenerationVersion(GenerationVersion);
+}
+
+FString FOrakaiLocalPersistenceBackend::GetStorePathForGenerationVersion(
+    const uint32 InGenerationVersion
+) const
+{
     return FPaths::Combine(
         FPaths::ProjectSavedDir(),
         TEXT("Orakai"),
@@ -356,7 +363,7 @@ FString FOrakaiLocalPersistenceBackend::GetStorePath() const
         FString::Printf(
             TEXT("world_%lld_v%u.delta"),
             static_cast<long long>(WorldSeed),
-            GenerationVersion
+            InGenerationVersion
         )
     );
 }
@@ -374,9 +381,86 @@ bool FOrakaiLocalPersistenceBackend::Load()
     TimeSinceLastMutation = 0.0f;
 
     TArray<uint8> Bytes;
-    if (!FFileHelper::LoadFileToArray(Bytes, *GetStorePath()))
+    FString LoadPath = GetStorePath();
+    bool bMigratingOlderGeneration = false;
+
+    if (!FFileHelper::LoadFileToArray(Bytes, *LoadPath))
     {
-        return true;
+        const FString WorldsDirectory = FPaths::GetPath(LoadPath);
+        const FString CandidatePattern = FPaths::Combine(
+            WorldsDirectory,
+            FString::Printf(
+                TEXT("world_%lld_v*.delta"),
+                static_cast<long long>(WorldSeed)
+            )
+        );
+        TArray<FString> CandidateFileNames;
+        IFileManager::Get().FindFiles(
+            CandidateFileNames,
+            *CandidatePattern,
+            true,
+            false
+        );
+
+        uint32 BestOlderVersion = 0;
+        const FString ExpectedPrefix = FString::Printf(
+            TEXT("world_%lld"),
+            static_cast<long long>(WorldSeed)
+        );
+        for (const FString& CandidateFileName : CandidateFileNames)
+        {
+            FString Prefix;
+            FString VersionText;
+            const FString BaseName = FPaths::GetBaseFilename(
+                CandidateFileName
+            );
+
+            if (
+                !BaseName.Split(
+                    TEXT("_v"),
+                    &Prefix,
+                    &VersionText,
+                    ESearchCase::CaseSensitive,
+                    ESearchDir::FromEnd
+                ) ||
+                Prefix != ExpectedPrefix ||
+                VersionText.IsEmpty()
+            )
+            {
+                continue;
+            }
+
+            const uint64 ParsedVersion = FCString::Strtoui64(
+                *VersionText,
+                nullptr,
+                10
+            );
+
+            if (
+                ParsedVersion >= GenerationVersion ||
+                ParsedVersion <= BestOlderVersion ||
+                ParsedVersion > MAX_uint32
+            )
+            {
+                continue;
+            }
+
+            BestOlderVersion = static_cast<uint32>(ParsedVersion);
+        }
+
+        if (BestOlderVersion > 0)
+        {
+            LoadPath = GetStorePathForGenerationVersion(BestOlderVersion);
+            bMigratingOlderGeneration = FFileHelper::LoadFileToArray(
+                Bytes,
+                *LoadPath
+            );
+        }
+
+        if (Bytes.IsEmpty())
+        {
+            return true;
+        }
     }
 
     FMemoryReader Reader(Bytes, true);
@@ -394,10 +478,10 @@ bool FOrakaiLocalPersistenceBackend::Load()
         StoredVersion < OrakaiLocalPersistence::FirstSupportedVersion ||
         StoredVersion > OrakaiLocalPersistence::Version ||
         StoredSeed != WorldSeed ||
-        StoredGenerationVersion != GenerationVersion
+        StoredGenerationVersion > GenerationVersion
     )
     {
-        UE_LOG(LogOrakaiPersistence, Warning, TEXT("Refused incompatible local delta store: %s"), *GetStorePath());
+        UE_LOG(LogOrakaiPersistence, Warning, TEXT("Refused incompatible local delta store: %s"), *LoadPath);
         return false;
     }
 
@@ -488,7 +572,29 @@ bool FOrakaiLocalPersistenceBackend::Load()
         }
     }
 
-    return !Reader.IsError();
+    const bool bLoaded = !Reader.IsError();
+
+    if (
+        bLoaded &&
+        (
+            bMigratingOlderGeneration ||
+            StoredGenerationVersion != GenerationVersion
+        )
+    )
+    {
+        bDirty = true;
+        TimeSinceLastMutation = 0.0f;
+        UE_LOG(
+            LogOrakaiPersistence,
+            Display,
+            TEXT("Migrating local delta store from generation %u to %u: %s"),
+            StoredGenerationVersion,
+            GenerationVersion,
+            *LoadPath
+        );
+    }
+
+    return bLoaded;
 }
 
 bool FOrakaiLocalPersistenceBackend::Save() const

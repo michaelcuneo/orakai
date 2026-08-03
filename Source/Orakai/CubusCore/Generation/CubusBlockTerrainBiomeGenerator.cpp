@@ -6,6 +6,8 @@
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Generation/CubusBiomeField.h"
 #include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
+#include "CubusCore/Generation/CubusGenerationSeeds.h"
+#include "CubusCore/Generation/CubusLandmarkField.h"
 
 void FCubusBlockTerrainBiomeGenerator::Apply(
     FCubusBlockChunkData& Chunk,
@@ -36,6 +38,19 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
             BiomeSeed,
             RiverSeed
         );
+    const FCubusLandmarkFieldSettings LandmarkSettings =
+        FCubusLandmarkField::MakeSettings(
+            GeologyProfile,
+            Chunk.GetGenerationSeeds().Terrain
+        );
+    const int32 TerrainOffsetX =
+        (FCubusGenerationSeeds::DomainOffsetX(
+            Chunk.GetGenerationSeeds().Terrain
+        ) / Cubus::ChunkSize) * Cubus::ChunkSize;
+    const int32 TerrainOffsetY =
+        (FCubusGenerationSeeds::DomainOffsetY(
+            Chunk.GetGenerationSeeds().Terrain
+        ) / Cubus::ChunkSize) * Cubus::ChunkSize;
 
     int32 PlainsCount = 0;
     int32 ForestCount = 0;
@@ -137,22 +152,38 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
                 LocalSlope,
                 BiomeSettings
             );
-            const int32 SelectedMaterialId = BiomeSample.SurfaceMaterialId;
+            const FCubusLandmarkSample LandmarkSample =
+                FCubusLandmarkField::Sample(
+                    static_cast<float>(WorldX + TerrainOffsetX),
+                    static_cast<float>(WorldY + TerrainOffsetY),
+                    LandmarkSettings
+                );
+            const bool bIsLandmark = LandmarkSample.IsInside();
+            const int32 SelectedMaterialId = bIsLandmark
+                ? FMath::Max(1, LandmarkSettings.SurfaceMaterialId)
+                : BiomeSample.SurfaceMaterialId;
 
-            switch (BiomeSample.DominantBiome)
+            if (bIsLandmark)
             {
-                case ECubusBiomeKind::Forest:
-                    ++ForestCount;
-                    break;
-                case ECubusBiomeKind::Rocky:
-                    ++RockyCount;
-                    break;
-                case ECubusBiomeKind::Wetland:
-                    ++WetlandCount;
-                    break;
-                default:
-                    ++PlainsCount;
-                    break;
+                ++RockyCount;
+            }
+            else
+            {
+                switch (BiomeSample.DominantBiome)
+                {
+                    case ECubusBiomeKind::Forest:
+                        ++ForestCount;
+                        break;
+                    case ECubusBiomeKind::Rocky:
+                        ++RockyCount;
+                        break;
+                    case ECubusBiomeKind::Wetland:
+                        ++WetlandCount;
+                        break;
+                    default:
+                        ++PlainsCount;
+                        break;
+                }
             }
 
             FCubusBlockVoxel* SurfaceVoxel = Chunk.GetVoxel(

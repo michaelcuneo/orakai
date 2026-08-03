@@ -6,6 +6,8 @@
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Data/CubusVegetationInstance.h"
 #include "CubusCore/Generation/CubusBiomeField.h"
+#include "CubusCore/Generation/CubusGenerationSeeds.h"
+#include "CubusCore/Generation/CubusLandmarkField.h"
 
 namespace CubusVegetationType
 {
@@ -40,6 +42,19 @@ void FCubusBlockVegetationGenerator::Generate(
             Chunk.GetGenerationSeeds().Biomes,
             Chunk.GetGenerationSeeds().Rivers
         );
+    const FCubusLandmarkFieldSettings LandmarkSettings =
+        FCubusLandmarkField::MakeSettings(
+            GeologyProfile,
+            Chunk.GetGenerationSeeds().Terrain
+        );
+    const int32 TerrainOffsetX =
+        (FCubusGenerationSeeds::DomainOffsetX(
+            Chunk.GetGenerationSeeds().Terrain
+        ) / Cubus::ChunkSize) * Cubus::ChunkSize;
+    const int32 TerrainOffsetY =
+        (FCubusGenerationSeeds::DomainOffsetY(
+            Chunk.GetGenerationSeeds().Terrain
+        ) / Cubus::ChunkSize) * Cubus::ChunkSize;
 
     int32 CountsByType[CubusVegetationType::Count] = {};
 
@@ -86,6 +101,18 @@ void FCubusBlockVegetationGenerator::Generate(
             const int32 WorldX = BaseX + LocalX;
             const int32 WorldY = BaseY + LocalY;
             const int32 WorldZ = BaseZ + SurfaceLocalZ + 1;
+            const FCubusLandmarkSample LandmarkSample =
+                FCubusLandmarkField::Sample(
+                    static_cast<float>(WorldX + TerrainOffsetX),
+                    static_cast<float>(WorldY + TerrainOffsetY),
+                    LandmarkSettings
+                );
+
+            if (LandmarkSample.IsInside())
+            {
+                continue;
+            }
+
             const int32 WestSurface = FindSurfaceLocalZ(
                 Chunk,
                 FMath::Max(0, LocalX - 1),

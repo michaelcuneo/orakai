@@ -56,6 +56,7 @@ private:
     bool Load();
     bool Save() const;
     FString GetStorePath() const;
+    FString GetStorePathForGenerationVersion(uint32 InGenerationVersion) const;
     void MarkDirty();
     void IndexWorldObject(const FOrakaiWorldObjectRecord& Record);
     void UnindexWorldObject(const FOrakaiWorldObjectRecord& Record);

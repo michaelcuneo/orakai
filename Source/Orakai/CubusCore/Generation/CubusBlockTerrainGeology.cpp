@@ -6,12 +6,32 @@
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Generation/CubusBlockTerrainRiverGenerator.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
+#include "CubusCore/Generation/CubusLandmarkField.h"
 
 namespace CubusBlockTerrainGeology
 {
     int32 WholeChunkOffset(const int32 VoxelOffset)
     {
         return (VoxelOffset / Cubus::ChunkSize) * Cubus::ChunkSize;
+    }
+
+    void SetLandmarkVoxel(
+        FCubusBlockChunkData& Chunk,
+        const int32 LocalX,
+        const int32 LocalY,
+        const int32 LocalZ,
+        const int32 MaterialId
+    )
+    {
+        FCubusBlockVoxel* Voxel = Chunk.GetVoxel(LocalX, LocalY, LocalZ);
+
+        if (Voxel == nullptr)
+        {
+            return;
+        }
+
+        Voxel->MaterialId = FMath::Max(1, MaterialId);
+        Voxel->SetWater(false);
     }
 }
 
@@ -107,11 +127,91 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
         return;
     }
 
-    FCubusBlockTerrainRiverGenerator::Apply(Chunk, GeologyProfile);
-
+    const FCubusLandmarkFieldSettings LandmarkSettings =
+        FCubusLandmarkField::MakeSettings(
+            GeologyProfile,
+            Seeds.Terrain
+        );
     const int32 BaseX = OriginalCoordinate.X * Cubus::ChunkSize;
     const int32 BaseY = OriginalCoordinate.Y * Cubus::ChunkSize;
     const int32 BaseZ = OriginalCoordinate.Z * Cubus::ChunkSize;
+
+    if (LandmarkSettings.bEnabled)
+    {
+        for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
+        {
+            const int32 WorldY = BaseY + LocalY;
+
+            for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
+            {
+                const int32 WorldX = BaseX + LocalX;
+                const int32 BaseSurfaceWorldZ = SampleTerrainHeight(
+                    WorldX + TerrainOffsetX,
+                    WorldY + TerrainOffsetY,
+                    BaseHeight,
+                    ContinentAmplitude,
+                    ContinentFrequency,
+                    HillAmplitude,
+                    HillFrequency,
+                    DetailAmplitude,
+                    DetailFrequency,
+                    RidgeAmplitude,
+                    RidgeFrequency,
+                    ValleyDepth,
+                    ValleyFrequency,
+                    ValleyWidth,
+                    ValleyFalloff,
+                    ValleyWarpAmplitude,
+                    ValleyWarpFrequency,
+                    RegionFrequency,
+                    PlainsThreshold,
+                    PlainsBlend,
+                    MountainThreshold,
+                    MountainBlend
+                );
+                const FCubusLandmarkSample LandmarkSample =
+                    FCubusLandmarkField::Sample(
+                        static_cast<float>(WorldX + TerrainOffsetX),
+                        static_cast<float>(WorldY + TerrainOffsetY),
+                        LandmarkSettings
+                    );
+
+                if (!LandmarkSample.IsInside())
+                {
+                    continue;
+                }
+
+                const int32 LandmarkSurfaceWorldZ =
+                    BaseSurfaceWorldZ +
+                    FMath::RoundToInt(LandmarkSample.HeightOffset);
+
+                for (int32 LocalZ = 0; LocalZ < Cubus::ChunkSize; ++LocalZ)
+                {
+                    const int32 WorldZ = BaseZ + LocalZ;
+
+                    if (
+                        WorldZ < BaseSurfaceWorldZ ||
+                        WorldZ > LandmarkSurfaceWorldZ
+                    )
+                    {
+                        continue;
+                    }
+
+                    CubusBlockTerrainGeology::SetLandmarkVoxel(
+                        Chunk,
+                        LocalX,
+                        LocalY,
+                        LocalZ,
+                        WorldZ == LandmarkSurfaceWorldZ
+                            ? LandmarkSettings.SurfaceMaterialId
+                            : RockMaterialId
+                    );
+                }
+            }
+        }
+    }
+
+    FCubusBlockTerrainRiverGenerator::Apply(Chunk, GeologyProfile);
 
     for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
     {
@@ -120,7 +220,7 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
         for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
         {
             const int32 WorldX = BaseX + LocalX;
-            const int32 SurfaceWorldZ = SampleTerrainHeight(
+            const int32 BaseSurfaceWorldZ = SampleTerrainHeight(
                 WorldX + TerrainOffsetX,
                 WorldY + TerrainOffsetY,
                 BaseHeight,
@@ -144,6 +244,15 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
                 MountainThreshold,
                 MountainBlend
             );
+            const FCubusLandmarkSample LandmarkSample =
+                FCubusLandmarkField::Sample(
+                    static_cast<float>(WorldX + TerrainOffsetX),
+                    static_cast<float>(WorldY + TerrainOffsetY),
+                    LandmarkSettings
+                );
+            const int32 SurfaceWorldZ =
+                BaseSurfaceWorldZ +
+                FMath::RoundToInt(LandmarkSample.HeightOffset);
 
             for (int32 LocalZ = 0; LocalZ < Cubus::ChunkSize; ++LocalZ)
             {
@@ -291,6 +400,11 @@ void FCubusBlockTerrainGenerator::CarveCaves(
     const int32 CaveOffsetX = FCubusGenerationSeeds::DomainOffsetX(Seeds.Caves);
     const int32 CaveOffsetY = FCubusGenerationSeeds::DomainOffsetY(Seeds.Caves);
     const int32 CaveOffsetZ = FCubusGenerationSeeds::DomainOffsetZ(Seeds.Caves);
+    const FCubusLandmarkFieldSettings LandmarkSettings =
+        FCubusLandmarkField::MakeSettings(
+            GeologyProfile,
+            Seeds.Terrain
+        );
 
     const int32 MinimumWorldZ = FMath::Min(
         GeologyProfile->CaveMinimumWorldZ,
@@ -319,7 +433,7 @@ void FCubusBlockTerrainGenerator::CarveCaves(
         for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
         {
             const int32 WorldX = BaseX + LocalX;
-            const int32 SurfaceWorldZ = SampleTerrainHeight(
+            const int32 BaseSurfaceWorldZ = SampleTerrainHeight(
                 WorldX + TerrainOffsetX,
                 WorldY + TerrainOffsetY,
                 BaseHeight,
@@ -343,6 +457,15 @@ void FCubusBlockTerrainGenerator::CarveCaves(
                 MountainThreshold,
                 MountainBlend
             );
+            const FCubusLandmarkSample LandmarkSample =
+                FCubusLandmarkField::Sample(
+                    static_cast<float>(WorldX + TerrainOffsetX),
+                    static_cast<float>(WorldY + TerrainOffsetY),
+                    LandmarkSettings
+                );
+            const int32 SurfaceWorldZ =
+                BaseSurfaceWorldZ +
+                FMath::RoundToInt(LandmarkSample.HeightOffset);
 
             for (int32 LocalZ = 0; LocalZ < Cubus::ChunkSize; ++LocalZ)
             {
