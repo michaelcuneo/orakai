@@ -2,7 +2,9 @@
 
 #include "CoreMinimal.h"
 
+#include "CubusCore/Generation/CubusBiomeField.h"
 #include "CubusCore/Generation/CubusDensityField.h"
+#include "CubusCore/Generation/CubusTerrainForm.h"
 
 /**
  * Plain, immutable-at-build-time settings for the native terrain density
@@ -76,6 +78,9 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float RockSlopeThreshold = 1.25f;
     float SnowMinimumHeight = 34.0f;
     float SurfaceMaterialDepth = 2.0f;
+    float RockMaterialDepth = 7.0f;
+
+    FCubusBiomeFieldSettings BiomeSettings;
 };
 
 /**
@@ -119,6 +124,7 @@ private:
     };
 
     FCubusTerrainDensitySettings Settings;
+    FCubusTerrainFormSettings TerrainFormSettings;
 
     mutable TMap<FIntPoint, float> HeightCache;
     mutable TMap<FIntPoint, FColumnData> ColumnCache;

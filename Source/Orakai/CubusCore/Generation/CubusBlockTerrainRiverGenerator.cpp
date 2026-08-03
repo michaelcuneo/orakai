@@ -4,8 +4,8 @@
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
+#include "CubusCore/Generation/CubusBiomeField.h"
 #include "CubusCore/Generation/CubusBlockTerrainBiomeGenerator.h"
-#include "CubusCore/Generation/CubusGenerationSeeds.h"
 
 void FCubusBlockTerrainRiverGenerator::Apply(
     FCubusBlockChunkData& Chunk,
@@ -23,8 +23,12 @@ void FCubusBlockTerrainRiverGenerator::Apply(
         const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
         const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
         const int32 RiverSeed = Chunk.GetGenerationSeeds().Rivers;
-        const int32 RiverOffsetX = FCubusGenerationSeeds::DomainOffsetX(RiverSeed);
-        const int32 RiverOffsetY = FCubusGenerationSeeds::DomainOffsetY(RiverSeed);
+        const FCubusBiomeFieldSettings RiverSettings =
+            FCubusBiomeField::MakeSettings(
+                GeologyProfile,
+                Chunk.GetGenerationSeeds().Biomes,
+                RiverSeed
+            );
 
         const float ChannelWidth = FMath::Clamp(
             GeologyProfile->RiverChannelWidth,
@@ -63,10 +67,10 @@ void FCubusBlockTerrainRiverGenerator::Apply(
             for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
             {
                 const int32 WorldX = BaseX + LocalX;
-                const float RiverDistance = SampleRiverDistance(
-                    WorldX + RiverOffsetX,
-                    WorldY + RiverOffsetY,
-                    GeologyProfile
+                const float RiverDistance = FCubusBiomeField::SampleRiverDistance(
+                    static_cast<float>(WorldX),
+                    static_cast<float>(WorldY),
+                    RiverSettings
                 );
 
                 if (RiverDistance >= ValleyWidth)
@@ -230,49 +234,6 @@ void FCubusBlockTerrainRiverGenerator::Apply(
     FCubusBlockTerrainBiomeGenerator::Apply(
         Chunk,
         GeologyProfile
-    );
-}
-
-float FCubusBlockTerrainRiverGenerator::SampleRiverDistance(
-    const int32 WorldX,
-    const int32 WorldY,
-    const UCubusGeologyProfile* GeologyProfile
-)
-{
-    const float RiverFrequency = FMath::Max(
-        0.000001f,
-        GeologyProfile->RiverFrequency
-    );
-    const float WarpFrequency = FMath::Max(
-        0.000001f,
-        GeologyProfile->RiverWarpFrequency
-    );
-    const float WarpAmplitude = FMath::Max(
-        0.0f,
-        GeologyProfile->RiverWarpAmplitude
-    );
-
-    const float WarpX = FMath::PerlinNoise2D(
-        FVector2D(
-            static_cast<double>(WorldX) * WarpFrequency,
-            static_cast<double>(WorldY) * WarpFrequency
-        )
-    ) * WarpAmplitude;
-
-    const float WarpY = FMath::PerlinNoise2D(
-        FVector2D(
-            static_cast<double>(WorldX + 7919) * WarpFrequency,
-            static_cast<double>(WorldY - 3571) * WarpFrequency
-        )
-    ) * WarpAmplitude;
-
-    return FMath::Abs(
-        FMath::PerlinNoise2D(
-            FVector2D(
-                (static_cast<double>(WorldX) + WarpX) * RiverFrequency,
-                (static_cast<double>(WorldY) + WarpY) * RiverFrequency
-            )
-        )
     );
 }
 

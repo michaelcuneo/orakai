@@ -497,6 +497,13 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
             Seeds.Caves
         );
 
+    DensitySettings.BiomeSettings =
+        FCubusBiomeField::MakeSettings(
+            GeologyProfile.Get(),
+            Seeds.Biomes,
+            Seeds.Rivers
+        );
+
     if (IsValid(GeologyProfile.Get()))
     {
         DensitySettings.bGenerateRivers =

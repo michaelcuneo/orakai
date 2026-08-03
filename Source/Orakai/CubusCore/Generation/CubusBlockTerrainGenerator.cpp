@@ -3,6 +3,7 @@
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
+#include "CubusCore/Generation/CubusTerrainForm.h"
 
 namespace CubusBlockTerrainGenerator
 {
@@ -74,6 +75,53 @@ void FCubusBlockTerrainGenerator::GenerateFlatTerrain(
     const int32 ChunkWorldBaseZ =
         ChunkCoordinate.Z *
         Cubus::ChunkSize;
+
+    constexpr int32 HeightBorder = 1;
+    constexpr int32 HeightGridSize = Cubus::ChunkSize + HeightBorder * 2;
+    TArray<int32> SurfaceHeights;
+    SurfaceHeights.SetNumUninitialized(HeightGridSize * HeightGridSize);
+    const auto HeightIndex = [=](const int32 LocalX, const int32 LocalY)
+    {
+        return
+            (LocalY + HeightBorder) * HeightGridSize +
+            (LocalX + HeightBorder);
+    };
+
+    for (int32 SampleY = -HeightBorder;
+         SampleY < Cubus::ChunkSize + HeightBorder;
+         ++SampleY)
+    {
+        for (int32 SampleX = -HeightBorder;
+             SampleX < Cubus::ChunkSize + HeightBorder;
+             ++SampleX)
+        {
+            SurfaceHeights[HeightIndex(SampleX, SampleY)] =
+                SampleTerrainHeight(
+                    ChunkWorldBaseX + SampleX,
+                    ChunkWorldBaseY + SampleY,
+                    BaseHeight,
+                    ContinentAmplitude,
+                    ContinentFrequency,
+                    HillAmplitude,
+                    HillFrequency,
+                    DetailAmplitude,
+                    DetailFrequency,
+                    RidgeAmplitude,
+                    RidgeFrequency,
+                    ValleyDepth,
+                    ValleyFrequency,
+                    ValleyWidth,
+                    ValleyFalloff,
+                    ValleyWarpAmplitude,
+                    ValleyWarpFrequency,
+                    RegionFrequency,
+                    PlainsThreshold,
+                    PlainsBlend,
+                    MountainThreshold,
+                    MountainBlend
+                );
+        }
+    }
 
     for (
         int32 LocalZ = 0;
@@ -174,77 +222,35 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
         ++LocalY
     )
     {
-        const int32 WorldY =
-            ChunkWorldBaseY +
-            LocalY;
-
         for (
             int32 LocalX = 0;
             LocalX < Cubus::ChunkSize;
             ++LocalX
         )
         {
-            const int32 WorldX =
-                ChunkWorldBaseX +
-                LocalX;
-
             const int32 SurfaceWorldZ =
-                SampleTerrainHeight(
-                    WorldX,
-                    WorldY,
-                    BaseHeight,
-                    ContinentAmplitude,
-                    ContinentFrequency,
-                    HillAmplitude,
-                    HillFrequency,
-                    DetailAmplitude,
-                    DetailFrequency,
-                    RidgeAmplitude,
-                    RidgeFrequency,
-                    ValleyDepth,
-                    ValleyFrequency,
-                    ValleyWidth,
-                    ValleyFalloff,
-                    ValleyWarpAmplitude,
-                    ValleyWarpFrequency,
-                    RegionFrequency,
-                    PlainsThreshold,
-                    PlainsBlend,
-                    MountainThreshold,
-                    MountainBlend
-                );
+                SurfaceHeights[HeightIndex(LocalX, LocalY)];
+            const float GradientX = static_cast<float>(
+                SurfaceHeights[HeightIndex(LocalX + 1, LocalY)] -
+                SurfaceHeights[HeightIndex(LocalX - 1, LocalY)]
+            ) * 0.5f;
+            const float GradientY = static_cast<float>(
+                SurfaceHeights[HeightIndex(LocalX, LocalY + 1)] -
+                SurfaceHeights[HeightIndex(LocalX, LocalY - 1)]
+            ) * 0.5f;
+            const float Slope = FMath::Sqrt(
+                GradientX * GradientX + GradientY * GradientY
+            );
 
-            const int32 SelectedSurfaceMaterialId =
-                SelectSurfaceMaterial(
-                    WorldX,
-                    WorldY,
-                    SurfaceWorldZ,
-                    BaseHeight,
-                    ContinentAmplitude,
-                    ContinentFrequency,
-                    HillAmplitude,
-                    HillFrequency,
-                    DetailAmplitude,
-                    DetailFrequency,
-                    RidgeAmplitude,
-                    RidgeFrequency,
-                    ValleyDepth,
-                    ValleyFrequency,
-                    ValleyWidth,
-                    ValleyFalloff,
-                    ValleyWarpAmplitude,
-                    ValleyWarpFrequency,
-                    RegionFrequency,
-                    PlainsThreshold,
-                    PlainsBlend,
-                    MountainThreshold,
-                    MountainBlend,
-                    SurfaceMaterialId,
-                    RockMaterialId,
-                    SnowMaterialId,
-                    RockSlopeThreshold,
-                    SnowMinimumHeight
-                );
+            int32 SelectedSurfaceMaterialId = FMath::Max(1, SurfaceMaterialId);
+            if (Slope >= FMath::Max(0.0f, RockSlopeThreshold))
+            {
+                SelectedSurfaceMaterialId = FMath::Max(1, RockMaterialId);
+            }
+            else if (SurfaceWorldZ >= SnowMinimumHeight)
+            {
+                SelectedSurfaceMaterialId = FMath::Max(1, SnowMaterialId);
+            }
 
                 const int32 SafeWaterMaterialId =
                     FMath::Max(
@@ -323,141 +329,35 @@ int32 FCubusBlockTerrainGenerator::SampleTerrainHeight(
     const float MountainBlend
 )
 {
-    const FTerrainRegionWeights RegionWeights =
-        SampleTerrainRegions(
-            WorldX,
-            WorldY,
-            RegionFrequency,
-            PlainsThreshold,
-            PlainsBlend,
-            MountainThreshold,
-            MountainBlend
-        );
+    FCubusTerrainFormSettings Settings;
+    Settings.BaseHeight = static_cast<float>(BaseHeight);
+    Settings.ContinentAmplitude = ContinentAmplitude;
+    Settings.ContinentFrequency = ContinentFrequency;
+    Settings.HillAmplitude = HillAmplitude;
+    Settings.HillFrequency = HillFrequency;
+    Settings.DetailAmplitude = DetailAmplitude;
+    Settings.DetailFrequency = DetailFrequency;
+    Settings.RidgeAmplitude = RidgeAmplitude;
+    Settings.RidgeFrequency = RidgeFrequency;
+    Settings.ValleyDepth = ValleyDepth;
+    Settings.ValleyFrequency = ValleyFrequency;
+    Settings.ValleyWidth = ValleyWidth;
+    Settings.ValleyFalloff = ValleyFalloff;
+    Settings.ValleyWarpAmplitude = ValleyWarpAmplitude;
+    Settings.ValleyWarpFrequency = ValleyWarpFrequency;
+    Settings.RegionFrequency = RegionFrequency;
+    Settings.PlainsThreshold = PlainsThreshold;
+    Settings.PlainsBlend = PlainsBlend;
+    Settings.MountainThreshold = MountainThreshold;
+    Settings.MountainBlend = MountainBlend;
 
-    const float ContinentNoise =
-        SampleNoise(
-            WorldX,
-            WorldY,
-            ContinentFrequency
-        );
-
-    const float HillNoise =
-        SampleNoise(
-            WorldX + 1823,
-            WorldY - 917,
-            HillFrequency
-        );
-
-    const float DetailNoise =
-        SampleNoise(
-            WorldX - 431,
-            WorldY + 2671,
-            DetailFrequency
-        );
-
-    const float RidgeNoise =
-        SampleRidgedNoise(
-            WorldX + 911,
-            WorldY + 1511,
-            RidgeFrequency
-        );
-
-    const float ValleyMask =
-        SampleValleyMask(
-            WorldX - 1379,
-            WorldY + 733,
-            ValleyFrequency,
-            ValleyWidth,
-            ValleyFalloff,
-            ValleyWarpAmplitude,
-            ValleyWarpFrequency
-        );
-
-    const float PlainsInfluence =
-        RegionWeights.Plains;
-
-    const float RollingInfluence =
-        RegionWeights.Rolling;
-
-    const float MountainInfluence =
-        RegionWeights.Mountains;
-
-    const float ContinentStrength =
-        0.35f *
-            PlainsInfluence +
-        0.75f *
-            RollingInfluence +
-        1.0f *
-            MountainInfluence;
-
-    const float HillStrength =
-        0.10f *
-            PlainsInfluence +
-        1.0f *
-            RollingInfluence +
-        0.65f *
-            MountainInfluence;
-
-    const float DetailStrength =
-        0.15f *
-            PlainsInfluence +
-        0.55f *
-            RollingInfluence +
-        1.0f *
-            MountainInfluence;
-
-    const float RidgeStrength =
-        0.0f *
-            PlainsInfluence +
-        0.20f *
-            RollingInfluence +
-        1.0f *
-            MountainInfluence;
-
-    const float ValleyStrength =
-        0.35f *
-            PlainsInfluence +
-        0.75f *
-            RollingInfluence +
-        1.0f *
-            MountainInfluence;
-
-    const float HeightOffset =
-        ContinentNoise *
-            FMath::Max(
-                0.0f,
-                ContinentAmplitude
-            ) *
-            ContinentStrength +
-        HillNoise *
-            FMath::Max(
-                0.0f,
-                HillAmplitude
-            ) *
-            HillStrength +
-        DetailNoise *
-            FMath::Max(
-                0.0f,
-                DetailAmplitude
-            ) *
-            DetailStrength +
-        RidgeNoise *
-            FMath::Max(
-                0.0f,
-                RidgeAmplitude
-            ) *
-            RidgeStrength -
-        ValleyMask *
-            FMath::Max(
-                0.0f,
-                ValleyDepth
-            ) *
-            ValleyStrength;
-
-    return BaseHeight +
-        FMath::RoundToInt(
-            HeightOffset
-        );
+    return FMath::RoundToInt(
+        FCubusTerrainForm::Sample(
+            static_cast<float>(WorldX),
+            static_cast<float>(WorldY),
+            Settings
+        ).Height
+    );
 }
 
 int32 FCubusBlockTerrainGenerator::SelectSurfaceMaterial(

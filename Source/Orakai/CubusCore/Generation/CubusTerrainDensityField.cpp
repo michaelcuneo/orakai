@@ -107,6 +107,31 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(
         FMath::Max(0.0f, Settings.RockSlopeThreshold);
     Settings.SurfaceMaterialDepth =
         FMath::Max(0.01f, Settings.SurfaceMaterialDepth);
+    Settings.RockMaterialDepth = FMath::Max(
+        Settings.SurfaceMaterialDepth,
+        Settings.RockMaterialDepth
+    );
+
+    TerrainFormSettings.BaseHeight = Settings.BaseHeight;
+    TerrainFormSettings.ContinentAmplitude = Settings.ContinentAmplitude;
+    TerrainFormSettings.ContinentFrequency = Settings.ContinentFrequency;
+    TerrainFormSettings.HillAmplitude = Settings.HillAmplitude;
+    TerrainFormSettings.HillFrequency = Settings.HillFrequency;
+    TerrainFormSettings.DetailAmplitude = Settings.DetailAmplitude;
+    TerrainFormSettings.DetailFrequency = Settings.DetailFrequency;
+    TerrainFormSettings.RidgeAmplitude = Settings.RidgeAmplitude;
+    TerrainFormSettings.RidgeFrequency = Settings.RidgeFrequency;
+    TerrainFormSettings.ValleyDepth = Settings.ValleyDepth;
+    TerrainFormSettings.ValleyFrequency = Settings.ValleyFrequency;
+    TerrainFormSettings.ValleyWidth = Settings.ValleyWidth;
+    TerrainFormSettings.ValleyFalloff = Settings.ValleyFalloff;
+    TerrainFormSettings.ValleyWarpAmplitude = Settings.ValleyWarpAmplitude;
+    TerrainFormSettings.ValleyWarpFrequency = Settings.ValleyWarpFrequency;
+    TerrainFormSettings.RegionFrequency = Settings.RegionFrequency;
+    TerrainFormSettings.PlainsThreshold = Settings.PlainsThreshold;
+    TerrainFormSettings.PlainsBlend = Settings.PlainsBlend;
+    TerrainFormSettings.MountainThreshold = Settings.MountainThreshold;
+    TerrainFormSettings.MountainBlend = Settings.MountainBlend;
 
     HeightCache.Reserve(1600);
     ColumnCache.Reserve(1600);
@@ -153,10 +178,18 @@ FCubusDensitySample FCubusTerrainDensityField::Sample(
         Column.SurfaceSampleZ -
         static_cast<float>(GlobalSampleCoordinate.Z);
 
-    Result.MaterialId =
-        DepthBelowSurface <= Settings.SurfaceMaterialDepth
-            ? Column.SurfaceMaterialId
-            : Settings.SubsurfaceMaterialId;
+    if (DepthBelowSurface <= Settings.SurfaceMaterialDepth)
+    {
+        Result.MaterialId = Column.SurfaceMaterialId;
+    }
+    else if (DepthBelowSurface >= Settings.RockMaterialDepth)
+    {
+        Result.MaterialId = Settings.RockMaterialId;
+    }
+    else
+    {
+        Result.MaterialId = Settings.SubsurfaceMaterialId;
+    }
 
     return Result;
 }
@@ -179,85 +212,11 @@ float FCubusTerrainDensityField::SampleSurfaceVoxelHeight(
         WorldY +
         static_cast<float>(Settings.TerrainOffsetY);
 
-    const FTerrainRegionWeights RegionWeights =
-        SampleTerrainRegions(TerrainX, TerrainY);
-
-    const float ContinentNoise =
-        SampleNoise2D(
-            TerrainX,
-            TerrainY,
-            Settings.ContinentFrequency
-        );
-
-    const float HillNoise =
-        SampleNoise2D(
-            TerrainX + 1823.0f,
-            TerrainY - 917.0f,
-            Settings.HillFrequency
-        );
-
-    const float DetailNoise =
-        SampleNoise2D(
-            TerrainX - 431.0f,
-            TerrainY + 2671.0f,
-            Settings.DetailFrequency
-        );
-
-    const float RidgeNoise =
-        SampleRidgedNoise(
-            TerrainX + 911.0f,
-            TerrainY + 1511.0f,
-            Settings.RidgeFrequency
-        );
-
-    const float ValleyMask =
-        SampleValleyMask(
-            TerrainX - 1379.0f,
-            TerrainY + 733.0f
-        );
-
-    const float ContinentStrength =
-        0.35f * RegionWeights.Plains +
-        0.75f * RegionWeights.Rolling +
-        1.00f * RegionWeights.Mountains;
-
-    const float HillStrength =
-        0.10f * RegionWeights.Plains +
-        1.00f * RegionWeights.Rolling +
-        0.65f * RegionWeights.Mountains;
-
-    const float DetailStrength =
-        0.15f * RegionWeights.Plains +
-        0.55f * RegionWeights.Rolling +
-        1.00f * RegionWeights.Mountains;
-
-    const float RidgeStrength =
-        0.00f * RegionWeights.Plains +
-        0.20f * RegionWeights.Rolling +
-        1.00f * RegionWeights.Mountains;
-
-    const float ValleyStrength =
-        0.35f * RegionWeights.Plains +
-        0.75f * RegionWeights.Rolling +
-        1.00f * RegionWeights.Mountains;
-
-    const float BaseSurfaceHeight =
-        Settings.BaseHeight +
-        ContinentNoise *
-            Settings.ContinentAmplitude *
-            ContinentStrength +
-        HillNoise *
-            Settings.HillAmplitude *
-            HillStrength +
-        DetailNoise *
-            Settings.DetailAmplitude *
-            DetailStrength +
-        RidgeNoise *
-            Settings.RidgeAmplitude *
-            RidgeStrength -
-        ValleyMask *
-            Settings.ValleyDepth *
-            ValleyStrength;
+    const float BaseSurfaceHeight = FCubusTerrainForm::Sample(
+        TerrainX,
+        TerrainY,
+        TerrainFormSettings
+    ).Height;
 
     return ApplyRiverLowering(
         BaseSurfaceHeight,
@@ -366,6 +325,16 @@ FCubusTerrainDensityField::GetColumnData(
     {
         Column.SurfaceMaterialId =
             Settings.SnowMaterialId;
+    }
+    else if (Settings.BiomeSettings.bEnabled)
+    {
+        Column.SurfaceMaterialId = FCubusBiomeField::Sample(
+            static_cast<float>(WorldSampleX) - 0.5f,
+            static_cast<float>(WorldSampleY) - 0.5f,
+            Column.SurfaceVoxelHeight,
+            Column.Slope,
+            Settings.BiomeSettings
+        ).SurfaceMaterialId;
     }
     else
     {
@@ -574,36 +543,17 @@ float FCubusTerrainDensityField::SampleRiverDistance(
     const float WorldY
 ) const
 {
-    const float RiverX =
-        WorldX +
-        static_cast<float>(Settings.RiverOffsetX);
-
-    const float RiverY =
-        WorldY +
-        static_cast<float>(Settings.RiverOffsetY);
-
-    const float WarpX =
-        SampleNoise2D(
-            RiverX,
-            RiverY,
-            Settings.RiverWarpFrequency
-        ) *
-        Settings.RiverWarpAmplitude;
-
-    const float WarpY =
-        SampleNoise2D(
-            RiverX + 7919.0f,
-            RiverY - 3571.0f,
-            Settings.RiverWarpFrequency
-        ) *
-        Settings.RiverWarpAmplitude;
-
-    return FMath::Abs(
-        SampleNoise2D(
-            RiverX + WarpX,
-            RiverY + WarpY,
-            Settings.RiverFrequency
-        )
+    FCubusBiomeFieldSettings RiverSettings = Settings.BiomeSettings;
+    RiverSettings.bGenerateRivers = Settings.bGenerateRivers;
+    RiverSettings.RiverFrequency = Settings.RiverFrequency;
+    RiverSettings.RiverWarpAmplitude = Settings.RiverWarpAmplitude;
+    RiverSettings.RiverWarpFrequency = Settings.RiverWarpFrequency;
+    RiverSettings.RiverOffsetX = Settings.RiverOffsetX;
+    RiverSettings.RiverOffsetY = Settings.RiverOffsetY;
+    return FCubusBiomeField::SampleRiverDistance(
+        WorldX,
+        WorldY,
+        RiverSettings
     );
 }
 

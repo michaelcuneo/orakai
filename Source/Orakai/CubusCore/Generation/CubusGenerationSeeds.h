@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 4: generated chunk caches are now baseline-only and all
-    // player-authored terrain/foliage changes live in a separate delta store.
-    static constexpr uint32 CurrentGenerationVersion = 4;
+    // Bumped to 5: natural terrain form, hierarchical waterways and the
+    // climate-driven biome field change the deterministic generated baseline.
+    static constexpr uint32 CurrentGenerationVersion = 5;
 
     int64 World = 1;
     int32 Terrain = 0;

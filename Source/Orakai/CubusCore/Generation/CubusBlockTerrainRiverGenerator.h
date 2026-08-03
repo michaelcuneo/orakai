@@ -17,12 +17,6 @@ public:
     );
 
 private:
-    static float SampleRiverDistance(
-        int32 WorldX,
-        int32 WorldY,
-        const UCubusGeologyProfile* GeologyProfile
-    );
-
     static float SmoothStep(
         float EdgeMinimum,
         float EdgeMaximum,

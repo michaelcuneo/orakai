@@ -302,4 +302,47 @@ bool FCubusTerrainDensityCaveTest::RunTest(
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusTerrainDensityLayeringTest,
+    "Orakai.Cubus.Density.NativeTerrain.MaterialLayers",
+    EAutomationTestFlags::EditorContext |
+    EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusTerrainDensityLayeringTest::RunTest(
+    const FString& Parameters
+)
+{
+    (void)Parameters;
+
+    FCubusTerrainDensitySettings Settings;
+    Settings.bUseHeightTerrain = false;
+    Settings.FlatSurfaceWorldZ = 10.0f;
+    Settings.SurfaceMaterialId = 11;
+    Settings.SubsurfaceMaterialId = 17;
+    Settings.RockMaterialId = 23;
+    Settings.SurfaceMaterialDepth = 2.0f;
+    Settings.RockMaterialDepth = 5.0f;
+
+    const FCubusTerrainDensityField DensityField(Settings);
+
+    TestEqual(
+        TEXT("The exposed density surface uses the surface material"),
+        DensityField.Sample(FIntVector(0, 0, 10)).MaterialId,
+        11
+    );
+    TestEqual(
+        TEXT("Shallow density terrain uses the soil/subsurface material"),
+        DensityField.Sample(FIntVector(0, 0, 8)).MaterialId,
+        17
+    );
+    TestEqual(
+        TEXT("Deep density terrain resolves to rock"),
+        DensityField.Sample(FIntVector(0, 0, 5)).MaterialId,
+        23
+    );
+
+    return true;
+}
+
 #endif

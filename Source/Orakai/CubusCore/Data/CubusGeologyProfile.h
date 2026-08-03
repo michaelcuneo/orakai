@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CubusCore/Data/CubusBiomeTypes.h"
 #include "Engine/DataAsset.h"
 
 #include "CubusGeologyProfile.generated.h"
@@ -118,6 +119,13 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes")
     int32 WetlandSurfaceMaterialId = 8;
+
+    /**
+     * Optional client-authored biome list. When empty, the four legacy
+     * plains/forest/rocky/wetland definitions above remain authoritative.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes|Definitions")
+    TArray<FCubusBiomeDefinition> BiomeDefinitions;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float ForestTreeDensity = 0.025f;
