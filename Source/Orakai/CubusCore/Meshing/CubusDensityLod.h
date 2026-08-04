@@ -2,7 +2,14 @@
 
 #include "CoreMinimal.h"
 
-/** Pure density-LOD scale rules shared by streaming, chunks and meshing. */
+/**
+ * Density-LOD scale rules shared by streaming, chunks and meshing.
+ *
+ * Adaptive subdivision is temporarily disabled because the current fine-grid
+ * path produces disconnected horizontal isosurfaces. Canonical one-sample-per-
+ * voxel meshing is the last known-good runtime path and remains authoritative
+ * until continuous fine sampling and transition handling are rebuilt safely.
+ */
 class ORAKAI_API FCubusDensityLod
 {
 public:
@@ -10,24 +17,8 @@ public:
         const int32 RequestedSubdivisions
     )
     {
-        const int32 Supported[] = { 1, 2, 4, 10 };
-        int32 Best = 1;
-        int32 BestError = MAX_int32;
-
-        for (const int32 Candidate : Supported)
-        {
-            const int32 Error = FMath::Abs(
-                Candidate - RequestedSubdivisions
-            );
-
-            if (Error < BestError)
-            {
-                BestError = Error;
-                Best = Candidate;
-            }
-        }
-
-        return Best;
+        (void)RequestedSubdivisions;
+        return 1;
     }
 
     static int32 ResolveSubdivisionsForSpacing(
@@ -35,35 +26,9 @@ public:
         const float TargetSampleSpacing
     )
     {
-        const float SafeVoxelSize =
-            FMath::Max(1.0f, CanonicalVoxelSize);
-        const float SafeTargetSpacing = FMath::Clamp(
-            TargetSampleSpacing,
-            1.0f,
-            SafeVoxelSize
-        );
-        const int32 Supported[] = { 1, 2, 4, 10 };
-
-        int32 Best = 1;
-        float BestError = MAX_flt;
-
-        for (const int32 Candidate : Supported)
-        {
-            const float CandidateSpacing =
-                SafeVoxelSize /
-                static_cast<float>(Candidate);
-            const float Error = FMath::Abs(
-                CandidateSpacing - SafeTargetSpacing
-            );
-
-            if (Error < BestError)
-            {
-                BestError = Error;
-                Best = Candidate;
-            }
-        }
-
-        return Best;
+        (void)CanonicalVoxelSize;
+        (void)TargetSampleSpacing;
+        return 1;
     }
 
     static float GetSampleSpacing(
@@ -71,11 +36,8 @@ public:
         const int32 SubdivisionsPerVoxel
     )
     {
-        return
-            FMath::Max(1.0f, CanonicalVoxelSize) /
-            static_cast<float>(
-                NormalizeSubdivisions(SubdivisionsPerVoxel)
-            );
+        (void)SubdivisionsPerVoxel;
+        return FMath::Max(1.0f, CanonicalVoxelSize);
     }
 
     static int32 ChunkDistance(
