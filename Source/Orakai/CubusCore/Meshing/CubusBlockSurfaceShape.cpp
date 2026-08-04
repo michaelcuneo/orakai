@@ -28,6 +28,102 @@ namespace CubusBlockSurfaceShape
     {
         return !IsRenderableSolid(Voxel, MaterialRegistry);
     }
+
+    bool MatchesRampPattern(
+        const FCubusBlockChunkNeighborhood& Neighborhood,
+        const UCubusMaterialRegistry* MaterialRegistry,
+        const int32 X,
+        const int32 Y,
+        const int32 Z,
+        const FIntVector& Uphill,
+        const FIntVector& Downhill
+    )
+    {
+        const FCubusBlockVoxel* Current = Neighborhood.GetVoxel(X, Y, Z);
+        const FCubusBlockVoxel* Above = Neighborhood.GetVoxel(X, Y, Z + 1);
+        const FCubusBlockVoxel* Below = Neighborhood.GetVoxel(X, Y, Z - 1);
+        const FCubusBlockVoxel* UphillVoxel = Neighborhood.GetVoxel(
+            X + Uphill.X,
+            Y + Uphill.Y,
+            Z
+        );
+        const FCubusBlockVoxel* DownhillVoxel = Neighborhood.GetVoxel(
+            X + Downhill.X,
+            Y + Downhill.Y,
+            Z
+        );
+        const FCubusBlockVoxel* DownhillSupport = Neighborhood.GetVoxel(
+            X + Downhill.X,
+            Y + Downhill.Y,
+            Z - 1
+        );
+
+        return
+            IsRenderableSolid(Current, MaterialRegistry) &&
+            IsEmptyForTerrain(Above, MaterialRegistry) &&
+            IsRenderableSolid(Below, MaterialRegistry) &&
+            IsRenderableSolid(UphillVoxel, MaterialRegistry) &&
+            IsEmptyForTerrain(DownhillVoxel, MaterialRegistry) &&
+            IsRenderableSolid(DownhillSupport, MaterialRegistry);
+    }
+
+    bool HasCompatibleSideNeighbours(
+        const FCubusBlockChunkNeighborhood& Neighborhood,
+        const UCubusMaterialRegistry* MaterialRegistry,
+        const int32 X,
+        const int32 Y,
+        const int32 Z,
+        const FIntVector& Uphill,
+        const FIntVector& Downhill
+    )
+    {
+        const FIntVector SideAxis =
+            Uphill.X != 0
+                ? FIntVector(0, 1, 0)
+                : FIntVector(1, 0, 0);
+
+        const FIntVector SideOffsets[] =
+        {
+            SideAxis,
+            -SideAxis
+        };
+
+        for (const FIntVector& SideOffset : SideOffsets)
+        {
+            const int32 SideX = X + SideOffset.X;
+            const int32 SideY = Y + SideOffset.Y;
+            const int32 SideZ = Z;
+
+            const FCubusBlockVoxel* SideVoxel =
+                Neighborhood.GetVoxel(SideX, SideY, SideZ);
+
+            if (!IsRenderableSolid(SideVoxel, MaterialRegistry))
+            {
+                continue;
+            }
+
+            // A solid side neighbour causes the ramp mesher to cull the shared
+            // side triangle. That is safe only when the neighbour resolves to
+            // the same ramp profile. Cubes and differently oriented ramps
+            // leave the unused triangular half visibly open.
+            if (
+                !MatchesRampPattern(
+                    Neighborhood,
+                    MaterialRegistry,
+                    SideX,
+                    SideY,
+                    SideZ,
+                    Uphill,
+                    Downhill
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }
 
 FCubusBlockSurfaceClassification FCubusBlockSurfaceClassifier::Classify(
@@ -39,19 +135,6 @@ FCubusBlockSurfaceClassification FCubusBlockSurfaceClassifier::Classify(
 )
 {
     FCubusBlockSurfaceClassification Result;
-
-    const FCubusBlockVoxel* Current = Neighborhood.GetVoxel(X, Y, Z);
-    const FCubusBlockVoxel* Above = Neighborhood.GetVoxel(X, Y, Z + 1);
-    const FCubusBlockVoxel* Below = Neighborhood.GetVoxel(X, Y, Z - 1);
-
-    if (
-        !CubusBlockSurfaceShape::IsRenderableSolid(Current, MaterialRegistry) ||
-        !CubusBlockSurfaceShape::IsEmptyForTerrain(Above, MaterialRegistry) ||
-        !CubusBlockSurfaceShape::IsRenderableSolid(Below, MaterialRegistry)
-    )
-    {
-        return Result;
-    }
 
     struct FRampCandidate
     {
@@ -89,28 +172,25 @@ FCubusBlockSurfaceClassification FCubusBlockSurfaceClassifier::Classify(
 
     for (const FRampCandidate& Candidate : Candidates)
     {
-        const FCubusBlockVoxel* UphillVoxel = Neighborhood.GetVoxel(
-            X + Candidate.Uphill.X,
-            Y + Candidate.Uphill.Y,
-            Z
-        );
-
-        const FCubusBlockVoxel* DownhillVoxel = Neighborhood.GetVoxel(
-            X + Candidate.Downhill.X,
-            Y + Candidate.Downhill.Y,
-            Z
-        );
-
-        const FCubusBlockVoxel* DownhillSupport = Neighborhood.GetVoxel(
-            X + Candidate.Downhill.X,
-            Y + Candidate.Downhill.Y,
-            Z - 1
-        );
-
         if (
-            CubusBlockSurfaceShape::IsRenderableSolid(UphillVoxel, MaterialRegistry) &&
-            CubusBlockSurfaceShape::IsEmptyForTerrain(DownhillVoxel, MaterialRegistry) &&
-            CubusBlockSurfaceShape::IsRenderableSolid(DownhillSupport, MaterialRegistry)
+            CubusBlockSurfaceShape::MatchesRampPattern(
+                Neighborhood,
+                MaterialRegistry,
+                X,
+                Y,
+                Z,
+                Candidate.Uphill,
+                Candidate.Downhill
+            ) &&
+            CubusBlockSurfaceShape::HasCompatibleSideNeighbours(
+                Neighborhood,
+                MaterialRegistry,
+                X,
+                Y,
+                Z,
+                Candidate.Uphill,
+                Candidate.Downhill
+            )
         )
         {
             ++MatchCount;
@@ -118,8 +198,9 @@ FCubusBlockSurfaceClassification FCubusBlockSurfaceClassifier::Classify(
         }
     }
 
-    // Junctions and diagonal transitions need dedicated corner templates.
-    // Until those exist, preserving the cube is safer than guessing.
+    // Junctions, incompatible side profiles and diagonal transitions need
+    // dedicated corner templates. Preserve the cube until those templates
+    // exist so the generated surface always remains closed.
     if (MatchCount == 1)
     {
         Result.Shape = MatchedShape;
