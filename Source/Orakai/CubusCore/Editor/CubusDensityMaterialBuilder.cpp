@@ -8,7 +8,10 @@
 #include "Factories/MaterialFactoryNew.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialExpressionConstant.h"
-#include "Materials/MaterialExpressionConstant3Vector.h"
+#include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionTextureObjectParameter.h"
+#include "Materials/MaterialExpressionWorldPosition.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -42,6 +45,18 @@ namespace CubusDensityMaterialBuilder
     {
         Input.Expression = Expression;
         Input.OutputIndex = OutputIndex;
+    }
+
+    void AddCustomInput(
+        UMaterialExpressionCustom* Custom,
+        const TCHAR* Name,
+        UMaterialExpression* Expression
+    )
+    {
+        FCustomInput Input;
+        Input.InputName = FName(Name);
+        Connect(Input.Input, Expression);
+        Custom->Inputs.Add(Input);
     }
 
     UMaterial* FindOrCreateMaterial()
@@ -95,6 +110,21 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
         return nullptr;
     }
 
+    UTexture* BaseColorArrayAsset = LoadObject<UTexture>(
+        nullptr,
+        TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityBaseColor.TA_CubusDensityBaseColor")
+    );
+
+    if (!IsValid(BaseColorArrayAsset))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("Build TA_CubusDensityBaseColor before building M_CubusDensityPBR.")
+        );
+        return nullptr;
+    }
+
     Material->Modify();
     Material->PreEditChange(nullptr);
     UMaterialEditingLibrary::DeleteAllMaterialExpressions(Material);
@@ -104,20 +134,52 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
     Material->bUseMaterialAttributes = false;
     Material->bTangentSpaceNormal = true;
 
-    UMaterialExpressionConstant3Vector* BaseColor =
-        AddExpression<UMaterialExpressionConstant3Vector>(Material, -400, -250);
-    BaseColor->Constant = FLinearColor(0.18f, 0.42f, 0.08f, 1.0f);
+    UMaterialExpressionWorldPosition* WorldPosition =
+        AddExpression<UMaterialExpressionWorldPosition>(Material, -900, -250);
+
+    UMaterialExpressionTextureObjectParameter* BaseColorArray =
+        AddExpression<UMaterialExpressionTextureObjectParameter>(Material, -900, 0);
+    BaseColorArray->ParameterName = TEXT("DensityBaseColorArray");
+    BaseColorArray->Texture = BaseColorArrayAsset;
+    BaseColorArray->SamplerType = SAMPLERTYPE_Color;
+
+    UMaterialExpressionScalarParameter* WorldScale =
+        AddExpression<UMaterialExpressionScalarParameter>(Material, -900, 200);
+    WorldScale->ParameterName = TEXT("CubusBaseColorWorldScale");
+    WorldScale->DefaultValue = 0.01f;
+
+    UMaterialExpressionScalarParameter* GrassSlice =
+        AddExpression<UMaterialExpressionScalarParameter>(Material, -900, 350);
+    GrassSlice->ParameterName = TEXT("CubusGrassArraySlice");
+    GrassSlice->DefaultValue = 1.0f;
+
+    UMaterialExpressionCustom* BaseColor =
+        AddExpression<UMaterialExpressionCustom>(Material, -350, -150);
+    BaseColor->Description = TEXT("Cubus Grass Base Color Array Test");
+    BaseColor->OutputType = CMOT_Float3;
+    BaseColor->Code = TEXT(R"(
+float2 uv = WorldPosition.xy * max(WorldScale, 0.000001);
+return Texture2DArraySample(
+    BaseColorArray,
+    BaseColorArraySampler,
+    float3(uv, floor(GrassSlice + 0.5))
+).rgb;
+)");
+    AddCustomInput(BaseColor, TEXT("WorldPosition"), WorldPosition);
+    AddCustomInput(BaseColor, TEXT("BaseColorArray"), BaseColorArray);
+    AddCustomInput(BaseColor, TEXT("WorldScale"), WorldScale);
+    AddCustomInput(BaseColor, TEXT("GrassSlice"), GrassSlice);
 
     UMaterialExpressionConstant* Roughness =
-        AddExpression<UMaterialExpressionConstant>(Material, -400, 0);
+        AddExpression<UMaterialExpressionConstant>(Material, -350, 100);
     Roughness->R = 0.8f;
 
     UMaterialExpressionConstant* AmbientOcclusion =
-        AddExpression<UMaterialExpressionConstant>(Material, -400, 150);
+        AddExpression<UMaterialExpressionConstant>(Material, -350, 250);
     AmbientOcclusion->R = 1.0f;
 
     UMaterialExpressionConstant* Metallic =
-        AddExpression<UMaterialExpressionConstant>(Material, -400, 300);
+        AddExpression<UMaterialExpressionConstant>(Material, -350, 400);
     Metallic->R = 0.0f;
 
     UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
@@ -131,7 +193,7 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
     UE_LOG(
         LogTemp,
         Warning,
-        TEXT("Built diagnostic Cubus density material: constant green, two-sided, no arrays, no custom HLSL and no normal override.")
+        TEXT("Built Cubus density material stage 1: Grass base-color array slice 1 with planar world projection only.")
     );
 
     return Material;
