@@ -4,6 +4,7 @@
 #include "Engine/DataAsset.h"
 
 #include "CubusCore/Data/CubusMaterialDefinition.h"
+#include "CubusCore/Data/CubusTerrainSurfaceLayers.h"
 
 #include "CubusMaterialRegistry.generated.h"
 
@@ -24,6 +25,15 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Materials|Density")
     TObjectPtr<UMaterialInterface> DensityMaterial = nullptr;
+
+    /**
+     * Global layered-surface controls for the unified density material.
+     * Edit these directly on OrakaiMaterialLibrary, then press Build Density
+     * Material to rebuild the generated master material if its graph changed.
+     * Runtime scalar changes are applied whenever the density MID is recreated.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Materials|Density|Surface Layers", meta = (ShowOnlyInnerProperties))
+    FCubusTerrainSurfaceLayerSettings TerrainSurfaceLayers;
 
     /** Slice index is the voxel MaterialId. Slice zero is reserved for air. */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Materials|Density|GPU")
@@ -108,6 +118,7 @@ private:
     void RebuildDensityMaterialDataTexture() const;
     void BindDensityGpuResources(UMaterialInstanceDynamic* RuntimeMaterial) const;
     void ApplyWeatherParameters(UMaterialInstanceDynamic* RuntimeMaterial) const;
+    void ApplyTerrainSurfaceLayerParameters(UMaterialInstanceDynamic* RuntimeMaterial) const;
 
     mutable TMap<int32, int32> MaterialIndexById;
     mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>> RuntimeMaterialById;
