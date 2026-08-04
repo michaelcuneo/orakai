@@ -18,10 +18,10 @@ enum class ECubusBlockSurfaceShape : uint8
     RampPositiveY,
     RampNegativeY,
 
-    CornerHighNegativeXNegativeY,
-    CornerHighNegativeXPositiveY,
-    CornerHighPositiveXNegativeY,
-    CornerHighPositiveXPositiveY
+    CornerLowNegativeXNegativeY,
+    CornerLowNegativeXPositiveY,
+    CornerLowPositiveXNegativeY,
+    CornerLowPositiveXPositiveY
 };
 
 struct ORAKAI_API FCubusBlockSurfaceClassification
@@ -49,7 +49,7 @@ struct ORAKAI_API FCubusBlockSurfaceClassification
 };
 
 /**
- * Classifies exposed, supported solid cells as ramps or convex corner wedges.
+ * Classifies exposed, supported solid cells as ramps or inverse corner cuts.
  * Ambiguous patterns remain cubes, but every returned non-cube shape has a
  * closed mesh template and does not depend on neighbouring faces for sealing.
  */
