@@ -207,17 +207,17 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
     Material->bTangentSpaceNormal = false;
 
     UMaterialExpressionWorldPosition* WorldPosition =
-        AddExpression<UMaterialExpressionWorldPosition>(Material, -1450, -620);
+        AddExpression<UMaterialExpressionWorldPosition>(Material, -1500, -650);
 
     UMaterialExpressionVertexNormalWS* VertexNormal =
-        AddExpression<UMaterialExpressionVertexNormalWS>(Material, -1450, -440);
+        AddExpression<UMaterialExpressionVertexNormalWS>(Material, -1500, -470);
 
     UMaterialExpressionTextureCoordinate* MaterialPalette =
-        AddExpression<UMaterialExpressionTextureCoordinate>(Material, -1450, -260);
+        AddExpression<UMaterialExpressionTextureCoordinate>(Material, -1500, -290);
     MaterialPalette->CoordinateIndex = 0;
 
     UMaterialExpressionVertexColor* MaterialWeights =
-        AddExpression<UMaterialExpressionVertexColor>(Material, -1450, -80);
+        AddExpression<UMaterialExpressionVertexColor>(Material, -1500, -110);
 
     UMaterialExpressionTextureObjectParameter* BaseColorArray =
         AddTextureArray(
@@ -225,8 +225,8 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
             TEXT("DensityBaseColorArray"),
             BaseColorArrayAsset,
             SAMPLERTYPE_Color,
-            -1450,
-            120
+            -1500,
+            100
         );
 
     UMaterialExpressionTextureObjectParameter* NormalArray =
@@ -235,10 +235,9 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
             TEXT("DensityNormalArray"),
             NormalArrayAsset,
             SAMPLERTYPE_Normal,
-            -1450,
-            300
+            -1500,
+            280
         );
-    (void)NormalArray;
 
     UMaterialExpressionTextureObjectParameter* OrmArray =
         AddTextureArray(
@@ -246,22 +245,22 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
             TEXT("DensityORMArray"),
             OrmArrayAsset,
             SAMPLERTYPE_LinearColor,
-            -1450,
-            480
+            -1500,
+            460
         );
 
     UMaterialExpressionScalarParameter* WorldScale =
-        AddExpression<UMaterialExpressionScalarParameter>(Material, -1450, 680);
+        AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 660);
     WorldScale->ParameterName = TEXT("CubusBaseColorWorldScale");
     WorldScale->DefaultValue = 0.01f;
 
     UMaterialExpressionScalarParameter* BlendSharpness =
-        AddExpression<UMaterialExpressionScalarParameter>(Material, -1450, 840);
+        AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 820);
     BlendSharpness->ParameterName = TEXT("CubusTriplanarBlendSharpness");
     BlendSharpness->DefaultValue = 4.0f;
 
     UMaterialExpressionScalarParameter* PackingBase =
-        AddExpression<UMaterialExpressionScalarParameter>(Material, -1450, 1000);
+        AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 980);
     PackingBase->ParameterName = TEXT("DensityMaterialIdPackingBase");
     PackingBase->DefaultValue = 4096.0f;
 
@@ -297,8 +296,28 @@ projectionWeights /= max(
 );
 )");
 
+    auto AddSharedInputs = [
+        WorldPosition,
+        VertexNormal,
+        MaterialPalette,
+        MaterialWeights,
+        WorldScale,
+        BlendSharpness,
+        PackingBase
+    ](UMaterialExpressionCustom* Custom)
+    {
+        AddCustomInput(Custom, TEXT("WorldPosition"), WorldPosition);
+        AddCustomInput(Custom, TEXT("VertexNormal"), VertexNormal);
+        AddCustomInput(Custom, TEXT("MaterialPalette"), MaterialPalette);
+        AddCustomInput(Custom, TEXT("MaterialWeightsRgb"), MaterialWeights, 0);
+        AddCustomInput(Custom, TEXT("MaterialWeightA"), MaterialWeights, 4);
+        AddCustomInput(Custom, TEXT("WorldScale"), WorldScale);
+        AddCustomInput(Custom, TEXT("BlendSharpness"), BlendSharpness);
+        AddCustomInput(Custom, TEXT("MaterialIdPackingBase"), PackingBase);
+    };
+
     UMaterialExpressionCustom* BaseColor =
-        AddExpression<UMaterialExpressionCustom>(Material, -500, -500);
+        AddExpression<UMaterialExpressionCustom>(Material, -560, -560);
     BaseColor->Description = TEXT("Cubus Density Palette Triplanar Base Color");
     BaseColor->OutputType = CMOT_Float3;
     BaseColor->Code = FString(SharedCode) + TEXT(R"(
@@ -326,28 +345,95 @@ for (int materialIndex = 0; materialIndex < 4; ++materialIndex)
         float3(WorldPosition.xy * scale, slice)
     ).rgb;
 
-    float3 triplanar =
+    result += (
         sampleX * projectionWeights.x +
         sampleY * projectionWeights.y +
-        sampleZ * projectionWeights.z;
-
-    result += triplanar * materialWeight;
+        sampleZ * projectionWeights.z
+    ) * materialWeight;
 }
 
 return result;
 )");
-    AddCustomInput(BaseColor, TEXT("WorldPosition"), WorldPosition);
-    AddCustomInput(BaseColor, TEXT("VertexNormal"), VertexNormal);
-    AddCustomInput(BaseColor, TEXT("MaterialPalette"), MaterialPalette);
-    AddCustomInput(BaseColor, TEXT("MaterialWeightsRgb"), MaterialWeights, 0);
-    AddCustomInput(BaseColor, TEXT("MaterialWeightA"), MaterialWeights, 4);
+    AddSharedInputs(BaseColor);
     AddCustomInput(BaseColor, TEXT("BaseColorArray"), BaseColorArray);
-    AddCustomInput(BaseColor, TEXT("WorldScale"), WorldScale);
-    AddCustomInput(BaseColor, TEXT("BlendSharpness"), BlendSharpness);
-    AddCustomInput(BaseColor, TEXT("MaterialIdPackingBase"), PackingBase);
+
+    UMaterialExpressionCustom* WorldNormal =
+        AddExpression<UMaterialExpressionCustom>(Material, -560, -80);
+    WorldNormal->Description = TEXT("Cubus Density Palette Triplanar World Normal");
+    WorldNormal->OutputType = CMOT_Float3;
+    WorldNormal->Code = FString(SharedCode) + TEXT(R"(
+float3 result = 0.0;
+float signX = geometryNormal.x < 0.0 ? -1.0 : 1.0;
+float signY = geometryNormal.y < 0.0 ? -1.0 : 1.0;
+float signZ = geometryNormal.z < 0.0 ? -1.0 : 1.0;
+
+[unroll]
+for (int materialIndex = 0; materialIndex < 4; ++materialIndex)
+{
+    float slice = materialIds[materialIndex];
+    float materialWeight = blendWeights[materialIndex];
+
+    float2 encodedX = Texture2DArraySample(
+        NormalArray,
+        NormalArraySampler,
+        float3(WorldPosition.yz * scale, slice)
+    ).rg * 2.0 - 1.0;
+    float2 encodedY = Texture2DArraySample(
+        NormalArray,
+        NormalArraySampler,
+        float3(WorldPosition.xz * scale, slice)
+    ).rg * 2.0 - 1.0;
+    float2 encodedZ = Texture2DArraySample(
+        NormalArray,
+        NormalArraySampler,
+        float3(WorldPosition.xy * scale, slice)
+    ).rg * 2.0 - 1.0;
+
+    float3 tangentX = float3(
+        encodedX,
+        sqrt(saturate(1.0 - dot(encodedX, encodedX)))
+    );
+    float3 tangentY = float3(
+        encodedY,
+        sqrt(saturate(1.0 - dot(encodedY, encodedY)))
+    );
+    float3 tangentZ = float3(
+        encodedZ,
+        sqrt(saturate(1.0 - dot(encodedZ, encodedZ)))
+    );
+
+    float3 normalX = float3(
+        tangentX.z * signX,
+        tangentX.x,
+        tangentX.y
+    );
+    float3 normalY = float3(
+        tangentY.x,
+        tangentY.z * signY,
+        tangentY.y
+    );
+    float3 normalZ = float3(
+        tangentZ.x,
+        tangentZ.y,
+        tangentZ.z * signZ
+    );
+
+    float3 materialNormal = normalize(
+        normalX * projectionWeights.x +
+        normalY * projectionWeights.y +
+        normalZ * projectionWeights.z
+    );
+
+    result += materialNormal * materialWeight;
+}
+
+return normalize(result);
+)");
+    AddSharedInputs(WorldNormal);
+    AddCustomInput(WorldNormal, TEXT("NormalArray"), NormalArray);
 
     UMaterialExpressionCustom* Orm =
-        AddExpression<UMaterialExpressionCustom>(Material, -500, 180);
+        AddExpression<UMaterialExpressionCustom>(Material, -560, 400);
     Orm->Description = TEXT("Cubus Density Palette Triplanar ORM");
     Orm->OutputType = CMOT_Float3;
     Orm->Code = FString(SharedCode) + TEXT(R"(
@@ -375,36 +461,28 @@ for (int materialIndex = 0; materialIndex < 4; ++materialIndex)
         float3(WorldPosition.xy * scale, slice)
     ).rgb;
 
-    float3 triplanar =
+    result += (
         sampleX * projectionWeights.x +
         sampleY * projectionWeights.y +
-        sampleZ * projectionWeights.z;
-
-    result += triplanar * materialWeight;
+        sampleZ * projectionWeights.z
+    ) * materialWeight;
 }
 
 return result;
 )");
-    AddCustomInput(Orm, TEXT("WorldPosition"), WorldPosition);
-    AddCustomInput(Orm, TEXT("VertexNormal"), VertexNormal);
-    AddCustomInput(Orm, TEXT("MaterialPalette"), MaterialPalette);
-    AddCustomInput(Orm, TEXT("MaterialWeightsRgb"), MaterialWeights, 0);
-    AddCustomInput(Orm, TEXT("MaterialWeightA"), MaterialWeights, 4);
+    AddSharedInputs(Orm);
     AddCustomInput(Orm, TEXT("OrmArray"), OrmArray);
-    AddCustomInput(Orm, TEXT("WorldScale"), WorldScale);
-    AddCustomInput(Orm, TEXT("BlendSharpness"), BlendSharpness);
-    AddCustomInput(Orm, TEXT("MaterialIdPackingBase"), PackingBase);
 
     UMaterialExpressionComponentMask* AmbientOcclusion =
-        AddMask(Material, Orm, true, false, false, -100, 180);
+        AddMask(Material, Orm, true, false, false, -100, 390);
     UMaterialExpressionComponentMask* Roughness =
-        AddMask(Material, Orm, false, true, false, -100, 320);
+        AddMask(Material, Orm, false, true, false, -100, 520);
     UMaterialExpressionComponentMask* Metallic =
-        AddMask(Material, Orm, false, false, true, -100, 460);
+        AddMask(Material, Orm, false, false, true, -100, 650);
 
     UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
     Connect(Data->BaseColor, BaseColor);
-    Connect(Data->Normal, VertexNormal);
+    Connect(Data->Normal, WorldNormal);
     Connect(Data->AmbientOcclusion, AmbientOcclusion);
     Connect(Data->Roughness, Roughness);
     Connect(Data->Metallic, Metallic);
@@ -415,8 +493,8 @@ return result;
         LogTemp,
         Warning,
         TEXT(
-            "Built Cubus density material stage 4: decoded UV0 material "
-            "palette and blended BaseColor/ORM by vertex RGBA weights."
+            "Built Cubus density material stage 4: decoded UV0 palette and "
+            "blended triplanar BaseColor, world-space Normal and ORM."
         )
     );
 
