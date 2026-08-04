@@ -164,15 +164,33 @@ namespace CubusMaterialRegistryEditor
             return;
         }
 
+        if (bFallback)
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("%s slice %d (%s) -> %s [NEUTRAL FALLBACK] | %dx%d format=%d compression=%d sRGB=%s"),
+                AssetName,
+                Slice,
+                *MaterialLabel,
+                *Texture->GetPathName(),
+                Texture->Source.GetSizeX(),
+                Texture->Source.GetSizeY(),
+                static_cast<int32>(Texture->Source.GetFormat()),
+                static_cast<int32>(Texture->CompressionSettings),
+                Texture->SRGB ? TEXT("true") : TEXT("false")
+            );
+            return;
+        }
+
         UE_LOG(
             LogTemp,
-            bFallback ? Warning : Display,
-            TEXT("%s slice %d (%s) -> %s%s | %dx%d format=%d compression=%d sRGB=%s"),
+            Display,
+            TEXT("%s slice %d (%s) -> %s | %dx%d format=%d compression=%d sRGB=%s"),
             AssetName,
             Slice,
             *MaterialLabel,
             *Texture->GetPathName(),
-            bFallback ? TEXT(" [NEUTRAL FALLBACK]") : TEXT(""),
             Texture->Source.GetSizeX(),
             Texture->Source.GetSizeY(),
             static_cast<int32>(Texture->Source.GetFormat()),
