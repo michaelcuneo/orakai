@@ -11,15 +11,8 @@ class FCubusBlockChunkData;
 class UCubusMaterialRegistry;
 struct FCubusBlockChunkNeighborhood;
 
-/**
- * Generated mesh data grouped by voxel material ID.
- */
 using FCubusMaterialMeshMap = TMap<int32, FCubusMeshData>;
 
-/**
- * Generates block voxel geometry, including neighbour-derived geological
- * surface shapes for exposed natural terrain.
- */
 class ORAKAI_API FCubusBlockMesher
 {
 public:
@@ -58,15 +51,10 @@ private:
         int32 FaceIndex
     );
 
-    static int32 AddRamp(
+    static int32 AddShapedVoxel(
         FCubusMeshData& MeshData,
-        const FCubusBlockChunkNeighborhood& Neighborhood,
-        const UCubusMaterialRegistry* MaterialRegistry,
         const FVector& VoxelCentre,
         float HalfVoxelSize,
-        int32 X,
-        int32 Y,
-        int32 Z,
         ECubusBlockSurfaceShape Shape
     );
 };
