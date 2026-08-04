@@ -16,6 +16,32 @@
 #if WITH_EDITOR
 namespace CubusMaterialRegistryEditor
 {
+    constexpr uint64 MaximumArraySourceBytes = 512ull * 1024ull * 1024ull;
+
+    uint64 EstimateArraySourceBytes(
+        const UTexture2D* Texture,
+        const int32 SliceCount
+    )
+    {
+        if (!IsValid(Texture) || SliceCount <= 0)
+        {
+            return 0;
+        }
+
+        const uint64 Width = static_cast<uint64>(
+            FMath::Max(Texture->Source.GetSizeX(), 1)
+        );
+        const uint64 Height = static_cast<uint64>(
+            FMath::Max(Texture->Source.GetSizeY(), 1)
+        );
+
+        // Texture-array source assembly expands common source formats to at
+        // least four bytes per pixel before compression. This deliberately
+        // ignores mip overhead, so the guard remains a conservative lower
+        // bound rather than pretending the operation is cheaper than it is.
+        return Width * Height * 4ull * static_cast<uint64>(SliceCount);
+    }
+
     UTexture2DArray* FindOrCreateArray(
         const TCHAR* PackagePath,
         const TCHAR* AssetName,
@@ -214,6 +240,52 @@ namespace CubusMaterialRegistryEditor
             return nullptr;
         }
 
+        const int32 SliceCount = MaximumMaterialId + 1;
+        const uint64 EstimatedBytes = EstimateArraySourceBytes(
+            Fallback,
+            SliceCount
+        );
+
+        if (EstimatedBytes > MaximumArraySourceBytes)
+        {
+            UTexture2DArray* Existing =
+                LoadObject<UTexture2DArray>(nullptr, PackagePath);
+            const double EstimatedMiB =
+                static_cast<double>(EstimatedBytes) / (1024.0 * 1024.0);
+            const double BudgetMiB =
+                static_cast<double>(MaximumArraySourceBytes) /
+                (1024.0 * 1024.0);
+
+            if (IsValid(Existing))
+            {
+                UE_LOG(
+                    LogTemp,
+                    Warning,
+                    TEXT("Skipped rebuilding %s: %d slices at %dx%d would require at least %.1f MiB of contiguous source memory (budget %.1f MiB). Reusing the last saved array."),
+                    AssetName,
+                    SliceCount,
+                    Fallback->Source.GetSizeX(),
+                    Fallback->Source.GetSizeY(),
+                    EstimatedMiB,
+                    BudgetMiB
+                );
+                return Existing;
+            }
+
+            UE_LOG(
+                LogTemp,
+                Error,
+                TEXT("Unable to build %s: %d slices at %dx%d would require at least %.1f MiB of contiguous source memory (budget %.1f MiB), and no previous array exists to reuse."),
+                AssetName,
+                SliceCount,
+                Fallback->Source.GetSizeX(),
+                Fallback->Source.GetSizeY(),
+                EstimatedMiB,
+                BudgetMiB
+            );
+            return nullptr;
+        }
+
         bool bCreated = false;
         UTexture2DArray* Array = FindOrCreateArray(
             PackagePath,
@@ -228,9 +300,9 @@ namespace CubusMaterialRegistryEditor
 
         Array->Modify();
         Array->SourceTextures.Reset();
-        Array->SourceTextures.SetNum(MaximumMaterialId + 1);
+        Array->SourceTextures.SetNum(SliceCount);
 
-        for (int32 Slice = 0; Slice <= MaximumMaterialId; ++Slice)
+        for (int32 Slice = 0; Slice < SliceCount; ++Slice)
         {
             Array->SourceTextures[Slice] = Fallback;
         }
