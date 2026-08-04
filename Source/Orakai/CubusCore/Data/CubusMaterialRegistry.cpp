@@ -26,23 +26,6 @@ namespace CubusMaterialRegistry
         }
     }
 
-    void ApplyBlockSurface(
-        UMaterialInstanceDynamic* RuntimeMaterial,
-        const TCHAR* Prefix,
-        const FCubusBlockSurfaceTextures& Surface,
-        const FCubusBlockSurfaceTextures& Fallback
-    )
-    {
-        const FCubusBlockSurfaceTextures& Resolved =
-            Surface.HasAnyTexture() ? Surface : Fallback;
-        const FString P(Prefix);
-
-        ApplyTextureIfValid(RuntimeMaterial, FName(P + TEXT("BaseColor")), Resolved.BaseColor.Get());
-        ApplyTextureIfValid(RuntimeMaterial, FName(P + TEXT("Normal")), Resolved.Normal.Get());
-        ApplyTextureIfValid(RuntimeMaterial, FName(P + TEXT("ORM")), Resolved.ORM.Get());
-        ApplyTextureIfValid(RuntimeMaterial, FName(P + TEXT("Height")), Resolved.Height.Get());
-    }
-
     FFloat16Color MakeDataColor(
         const float R,
         const float G,
@@ -107,70 +90,7 @@ UMaterialInterface* UCubusMaterialRegistry::ResolveRuntimeMaterial(
         return ResolveUnifiedDensityRuntimeMaterial();
     }
 
-    const FCubusMaterialDefinition* Definition =
-        FindMaterialDefinition(MaterialIdOrDensityKey);
-
-    if (Definition == nullptr || !Definition->UsesPbrTextures())
-    {
-        return ResolveMaterial(MaterialIdOrDensityKey);
-    }
-
-    if (const TWeakObjectPtr<UMaterialInstanceDynamic>* Existing =
-        RuntimeMaterialById.Find(MaterialIdOrDensityKey))
-    {
-        if (Existing->IsValid())
-        {
-            return Existing->Get();
-        }
-    }
-
-    UMaterialInterface* ParentMaterial = ResolveMaterial(MaterialIdOrDensityKey);
-    if (!IsValid(ParentMaterial))
-    {
-        return nullptr;
-    }
-
-    UMaterialInstanceDynamic* RuntimeMaterial =
-        UMaterialInstanceDynamic::Create(
-            ParentMaterial,
-            const_cast<UCubusMaterialRegistry*>(this)
-        );
-
-    if (!IsValid(RuntimeMaterial))
-    {
-        return ParentMaterial;
-    }
-
-    CubusMaterialRegistry::ApplyBlockSurface(
-        RuntimeMaterial,
-        TEXT("Side"),
-        Definition->SideSurface,
-        Definition->SideSurface
-    );
-    CubusMaterialRegistry::ApplyBlockSurface(
-        RuntimeMaterial,
-        TEXT("Top"),
-        Definition->TopSurface,
-        Definition->SideSurface
-    );
-    CubusMaterialRegistry::ApplyBlockSurface(
-        RuntimeMaterial,
-        TEXT("Bottom"),
-        Definition->BottomSurface,
-        Definition->SideSurface
-    );
-
-    RuntimeMaterial->SetScalarParameterValue(TEXT("TextureScale"), FMath::Max(0.01f, Definition->TextureScale));
-    RuntimeMaterial->SetScalarParameterValue(TEXT("HeightStrength"), FMath::Max(0.0f, Definition->HeightStrength));
-    RuntimeMaterial->SetScalarParameterValue(TEXT("SideTopBlendStart"), FMath::Clamp(Definition->SideTopBlendStart, 0.0f, 1.0f));
-    RuntimeMaterial->SetScalarParameterValue(TEXT("SideTopBlendSharpness"), FMath::Max(0.01f, Definition->SideTopBlendSharpness));
-    RuntimeMaterial->SetVectorParameterValue(TEXT("Tint"), Definition->Tint);
-    RuntimeMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), Definition->EmissiveColor);
-    RuntimeMaterial->SetScalarParameterValue(TEXT("EmissiveStrength"), FMath::Max(0.0f, Definition->EmissiveStrength));
-    ApplyWeatherParameters(RuntimeMaterial);
-
-    RuntimeMaterialById.Add(MaterialIdOrDensityKey, RuntimeMaterial);
-    return RuntimeMaterial;
+    return ResolveMaterial(MaterialIdOrDensityKey);
 }
 
 void UCubusMaterialRegistry::ApplyWeatherParameters(
@@ -196,71 +116,6 @@ void UCubusMaterialRegistry::ApplyWeatherParameters(
     );
 }
 
-void UCubusMaterialRegistry::ApplyTerrainSurfaceLayerParameters(
-    UMaterialInstanceDynamic* RuntimeMaterial
-) const
-{
-    if (!IsValid(RuntimeMaterial))
-    {
-        return;
-    }
-
-    const FCubusTerrainSurfaceLayerSettings& Layers = TerrainSurfaceLayers;
-
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusMacroWorldSize"),
-        FMath::Max(1.0f, Layers.MacroWorldSize)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusMacroColourStrength"),
-        FMath::Clamp(Layers.MacroColourStrength, 0.0f, 1.0f)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusMacroRoughnessStrength"),
-        FMath::Clamp(Layers.MacroRoughnessStrength, 0.0f, 1.0f)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusGrassMinimumNormalZ"),
-        FMath::Clamp(Layers.GrassMinimumNormalZ, 0.0f, 1.0f)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusRockMaximumNormalZ"),
-        FMath::Clamp(Layers.RockMaximumNormalZ, 0.0f, 1.0f)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusSlopeBlendWidth"),
-        FMath::Max(0.001f, Layers.SlopeBlendWidth)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusSandMaximumWorldHeight"),
-        Layers.SandMaximumWorldHeight
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusSnowMinimumWorldHeight"),
-        Layers.SnowMinimumWorldHeight
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusHeightBlendWidth"),
-        FMath::Max(1.0f, Layers.HeightBlendWidth)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusMicroWorldSize"),
-        FMath::Max(1.0f, Layers.MicroWorldSize)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusMicroNormalStrength"),
-        FMath::Max(0.0f, Layers.MicroNormalStrength)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusMicroHeightStrength"),
-        FMath::Clamp(Layers.MicroHeightStrength, 0.0f, 1.0f)
-    );
-    RuntimeMaterial->SetScalarParameterValue(
-        TEXT("CubusMicroRoughnessStrength"),
-        FMath::Clamp(Layers.MicroRoughnessStrength, 0.0f, 1.0f)
-    );
-}
-
 void UCubusMaterialRegistry::SetWeatherMaterialState(
     const float Wetness,
     const float WetDarkening,
@@ -281,19 +136,6 @@ void UCubusMaterialRegistry::SetWeatherMaterialState(
     WeatherWetness = NewWetness;
     WeatherWetDarkening = NewWetDarkening;
     WeatherWetRoughness = NewWetRoughness;
-
-    for (const TPair<int32, TWeakObjectPtr<UMaterialInstanceDynamic>>& Pair :
-         RuntimeMaterialById)
-    {
-        ApplyWeatherParameters(Pair.Value.Get());
-    }
-
-    for (const TPair<int32, TWeakObjectPtr<UMaterialInstanceDynamic>>& Pair :
-         DensityRuntimeMaterialByKey)
-    {
-        ApplyWeatherParameters(Pair.Value.Get());
-    }
-
     ApplyWeatherParameters(UnifiedDensityRuntimeMaterial.Get());
 }
 
@@ -368,10 +210,10 @@ void UCubusMaterialRegistry::RebuildDensityMaterialDataTexture() const
             FMath::Max(0.0f, Surface.DetailNormalStrength)
         );
         Pixels[Width * 3 + Id] = CubusMaterialRegistry::MakeDataColor(
-            Definition.EmissiveColor.R,
-            Definition.EmissiveColor.G,
-            Definition.EmissiveColor.B,
-            FMath::Max(0.0f, Definition.EmissiveStrength)
+            Surface.EmissiveColor.R,
+            Surface.EmissiveColor.G,
+            Surface.EmissiveColor.B,
+            FMath::Max(0.0f, Surface.EmissiveStrength)
         );
     }
 
@@ -419,7 +261,6 @@ void UCubusMaterialRegistry::BindDensityGpuResources(
         TEXT("DensityMaterialIdPackingBase"),
         static_cast<float>(FCubusDensityMesher::MaterialIdPackingBase)
     );
-    ApplyTerrainSurfaceLayerParameters(RuntimeMaterial);
 }
 
 UMaterialInterface* UCubusMaterialRegistry::ResolveUnifiedDensityRuntimeMaterial() const
@@ -481,17 +322,15 @@ void UCubusMaterialRegistry::ValidateRegistry()
 {
     if (!IsValid(DefaultMaterial.Get()))
     {
-        UE_LOG(LogTemp, Error, TEXT("Cubus material registry has no valid DefaultMaterial."));
+        UE_LOG(LogTemp, Warning, TEXT("Cubus terrain material library has no fallback material."));
     }
 
     if (!IsValid(DensityMaterial.Get()))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cubus material registry has no DensityMaterial."));
+        UE_LOG(LogTemp, Warning, TEXT("Cubus terrain material library has no generated terrain material."));
     }
 
     bLookupCacheDirty = true;
-    RuntimeMaterialById.Reset();
-    DensityRuntimeMaterialByKey.Reset();
     UnifiedDensityRuntimeMaterial.Reset();
     DensityMaterialDataTexture = nullptr;
     RebuildLookupCache();
@@ -505,21 +344,10 @@ void UCubusMaterialRegistry::ValidateRegistry()
             UE_LOG(
                 LogTemp,
                 Error,
-                TEXT("Density material '%s' uses ID %d. Unified density rendering supports IDs 1-%d."),
+                TEXT("Terrain material '%s' uses ID %d. Unified terrain rendering supports IDs 1-%d."),
                 *Definition.Name.ToString(),
                 Definition.MaterialId,
                 FCubusDensityMesher::MaximumDensityMaterialId
-            );
-        }
-
-        if (Definition.bRenderable && !IsValid(Definition.Material.Get()))
-        {
-            UE_LOG(
-                LogTemp,
-                Warning,
-                TEXT("Renderable Cubus material '%s' using ID %d has no block material asset."),
-                *Definition.Name.ToString(),
-                Definition.MaterialId
             );
         }
 
@@ -528,7 +356,7 @@ void UCubusMaterialRegistry::ValidateRegistry()
             UE_LOG(
                 LogTemp,
                 Warning,
-                TEXT("Solid Cubus material '%s' using ID %d has no density surface textures."),
+                TEXT("Solid terrain material '%s' using ID %d has no terrain surface textures."),
                 *Definition.Name.ToString(),
                 Definition.MaterialId
             );
@@ -536,24 +364,24 @@ void UCubusMaterialRegistry::ValidateRegistry()
 
         if (UsedIds.Contains(Definition.MaterialId))
         {
-            UE_LOG(LogTemp, Error, TEXT("Cubus material registry contains duplicate ID %d."), Definition.MaterialId);
+            UE_LOG(LogTemp, Error, TEXT("Cubus terrain material library contains duplicate ID %d."), Definition.MaterialId);
         }
         UsedIds.Add(Definition.MaterialId);
 
         if (Definition.MaterialId == 0 && Definition.State != ECubusMatterState::Empty)
         {
-            UE_LOG(LogTemp, Error, TEXT("Cubus material ID 0 must use the Empty state."));
+            UE_LOG(LogTemp, Error, TEXT("Terrain material ID 0 must use the Empty state."));
         }
 
         if (Definition.State == ECubusMatterState::Empty && Definition.bRenderable)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Empty material '%s' is marked renderable."), *Definition.Name.ToString());
+            UE_LOG(LogTemp, Warning, TEXT("Empty terrain material '%s' is marked renderable."), *Definition.Name.ToString());
         }
     }
 
     if (!UsedIds.Contains(0))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cubus material registry has no definition for Air using ID 0."));
+        UE_LOG(LogTemp, Warning, TEXT("Cubus terrain material library has no Air definition using ID 0."));
     }
 
     RebuildDensityMaterialDataTexture();
@@ -563,8 +391,6 @@ void UCubusMaterialRegistry::PostLoad()
 {
     Super::PostLoad();
     bLookupCacheDirty = true;
-    RuntimeMaterialById.Reset();
-    DensityRuntimeMaterialByKey.Reset();
     UnifiedDensityRuntimeMaterial.Reset();
     DensityMaterialDataTexture = nullptr;
     RebuildLookupCache();
@@ -594,8 +420,6 @@ void UCubusMaterialRegistry::PostEditChangeProperty(
 {
     Super::PostEditChangeProperty(PropertyChangedEvent);
     bLookupCacheDirty = true;
-    RuntimeMaterialById.Reset();
-    DensityRuntimeMaterialByKey.Reset();
     UnifiedDensityRuntimeMaterial.Reset();
     DensityMaterialDataTexture = nullptr;
     RebuildLookupCache();
