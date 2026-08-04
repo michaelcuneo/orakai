@@ -4,20 +4,11 @@
 
 #include "CubusTerrainSurfaceLayers.generated.h"
 
-/**
- * Shared terrain-layer controls consumed by density materials, deterministic
- * clutter placement and larger geological feature placement.
- *
- * Keeping these values together prevents the shader, vegetation generator and
- * feature generator from independently inventing incompatible slope, height
- * and noise thresholds.
- */
 USTRUCT(BlueprintType)
 struct ORAKAI_API FCubusTerrainSurfaceLayerSettings
 {
     GENERATED_BODY()
 
-    /** 10-50 metre colour/soil variation in world space. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Macro", meta = (ClampMin = "500.0", UIMin = "1000.0", UIMax = "5000.0", Units = "cm"))
     float MacroWorldSize = 2000.0f;
 
@@ -27,7 +18,6 @@ struct ORAKAI_API FCubusTerrainSurfaceLayerSettings
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Macro", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MacroRoughnessStrength = 0.12f;
 
-    /** Surface classification. Z-up normals above GrassMinimumNormalZ are flat enough for soil/grass. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Classification", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float GrassMinimumNormalZ = 0.72f;
 
@@ -46,7 +36,6 @@ struct ORAKAI_API FCubusTerrainSurfaceLayerSettings
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Classification", meta = (ClampMin = "1.0", Units = "cm"))
     float HeightBlendWidth = 400.0f;
 
-    /** Centimetre-scale normals, height and grit. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Micro", meta = (ClampMin = "1.0", UIMin = "4.0", UIMax = "100.0", Units = "cm"))
     float MicroWorldSize = 12.5f;
 
@@ -59,7 +48,6 @@ struct ORAKAI_API FCubusTerrainSurfaceLayerSettings
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Micro", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MicroRoughnessStrength = 0.18f;
 
-    /** Small instanced ground clutter. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Clutter", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float GrassClutterDensity = 0.18f;
 
@@ -75,7 +63,6 @@ struct ORAKAI_API FCubusTerrainSurfaceLayerSettings
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Clutter", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float ClutterMaximumSlopeNormalZ = 0.62f;
 
-    /** Sparse larger meshes: cliffs, boulders, outcrops and fallen logs. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Features", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float BoulderDensity = 0.008f;
 
@@ -92,7 +79,6 @@ struct ORAKAI_API FCubusTerrainSurfaceLayerSettings
     float CliffMaximumNormalZ = 0.42f;
 };
 
-/** Normalized masks evaluated identically for materials and placement. */
 struct ORAKAI_API FCubusTerrainSurfaceLayerMasks
 {
     float Flat = 0.0f;
@@ -107,3 +93,10 @@ struct ORAKAI_API FCubusTerrainSurfaceLayerMasks
     float Outcrop = 0.0f;
     float FallenLog = 0.0f;
 };
+
+ORAKAI_API FCubusTerrainSurfaceLayerMasks EvaluateCubusTerrainSurfaceLayers(
+    const FCubusTerrainSurfaceLayerSettings& Settings,
+    const FVector& WorldPosition,
+    const FVector& WorldNormal,
+    int32 WorldSeed
+);
