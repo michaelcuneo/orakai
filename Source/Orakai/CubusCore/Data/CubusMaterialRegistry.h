@@ -95,6 +95,9 @@ public:
     )
     void BuildDensityMaterial();
 
+    /** Transitional editor entrypoint retained until old callers are removed. */
+    void BuildWeatherResponsiveMaterials();
+
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Terrain Materials")
     void ValidateRegistry();
 
@@ -113,6 +116,10 @@ private:
     void ApplyWeatherParameters(UMaterialInstanceDynamic* RuntimeMaterial) const;
 
     mutable TMap<int32, int32> MaterialIndexById;
+
+    /** Hidden compatibility caches used only by the legacy editor rebuild path. */
+    mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>> RuntimeMaterialById;
+    mutable TMap<int32, TWeakObjectPtr<UMaterialInstanceDynamic>> DensityRuntimeMaterialByKey;
     mutable TWeakObjectPtr<UMaterialInstanceDynamic> UnifiedDensityRuntimeMaterial;
 
     mutable float WeatherWetness = 0.0f;
