@@ -18,14 +18,12 @@ public:
     static constexpr int32 UnifiedDensityMaterialKey = -1;
 
     /**
-     * Density material IDs are packed in pairs into UV0. Procedural-mesh UVs
-     * do not preserve the low bits of large values such as 12289, so the
-     * packing range must stay below 1024 to remain integer-exact in the GPU
-     * vertex format. IDs 1-31 cover the terrain registry while keeping every
-     * packed pair lossless.
+     * Two 12-bit IDs are packed into each UV component. 4095 therefore is the
+     * largest density material ID that remains exactly representable after
+     * conversion to the procedural mesh GPU vertex format.
      */
-    static constexpr int32 MaximumDensityMaterialId = 31;
-    static constexpr int32 MaterialIdPackingBase = 32;
+    static constexpr int32 MaximumDensityMaterialId = 4095;
+    static constexpr int32 MaterialIdPackingBase = 4096;
 
     static void BuildChunk(
         const FCubusDensitySamplingBuffer& DensityBuffer,
