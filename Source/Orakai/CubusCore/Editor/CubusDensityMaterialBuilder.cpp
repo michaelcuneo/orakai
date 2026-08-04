@@ -207,12 +207,11 @@ float h1 = Texture2DArraySample(HeightArray, HeightArraySampler, float3(p1.yz, i
 float h2 = Texture2DArraySample(HeightArray, HeightArraySampler, float3(p2.yz, id2)).r * axes2.x + Texture2DArraySample(HeightArray, HeightArraySampler, float3(p2.xz, id2)).r * axes2.y + Texture2DArraySample(HeightArray, HeightArraySampler, float3(p2.xy, id2)).r * axes2.z;
 float h3 = Texture2DArraySample(HeightArray, HeightArraySampler, float3(p3.yz, id3)).r * axes3.x + Texture2DArraySample(HeightArray, HeightArraySampler, float3(p3.xz, id3)).r * axes3.y + Texture2DArraySample(HeightArray, HeightArraySampler, float3(p3.xy, id3)).r * axes3.z;
 
-float globalHeightScale = max(GlobalHeightStrength, 0.0) / 0.25;
 float4 blendWeights = vertexWeights * exp2(float4(
-    (h0 - 0.5) * projection0.b * projection0.a * globalHeightScale,
-    (h1 - 0.5) * projection1.b * projection1.a * globalHeightScale,
-    (h2 - 0.5) * projection2.b * projection2.a * globalHeightScale,
-    (h3 - 0.5) * projection3.b * projection3.a * globalHeightScale
+    (h0 - 0.5) * projection0.b * projection0.a,
+    (h1 - 0.5) * projection1.b * projection1.a,
+    (h2 - 0.5) * projection2.b * projection2.a,
+    (h3 - 0.5) * projection3.b * projection3.a
 ));
 blendWeights /= max(dot(blendWeights, 1.0.xxxx), 0.0001);
 )");
@@ -228,8 +227,7 @@ blendWeights /= max(dot(blendWeights, 1.0.xxxx), 0.0001);
         UMaterialExpression* HeightArray,
         UMaterialExpression* MaterialData,
         UMaterialExpression* MaterialTableWidth,
-        UMaterialExpression* MaterialIdPackingBase,
-        UMaterialExpression* GlobalHeightStrength
+        UMaterialExpression* MaterialIdPackingBase
     )
     {
         AddCustomInput(Node, TEXT("WorldPosition"), WorldPosition);
@@ -241,7 +239,6 @@ blendWeights /= max(dot(blendWeights, 1.0.xxxx), 0.0001);
         AddCustomInput(Node, TEXT("MaterialData"), MaterialData);
         AddCustomInput(Node, TEXT("MaterialTableWidth"), MaterialTableWidth);
         AddCustomInput(Node, TEXT("MaterialIdPackingBase"), MaterialIdPackingBase);
-        AddCustomInput(Node, TEXT("GlobalHeightStrength"), GlobalHeightStrength);
     }
 }
 
@@ -285,34 +282,26 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
     Material->bUseMaterialAttributes = false;
     Material->bTangentSpaceNormal = false;
 
-    UMaterialExpressionWorldPosition* WorldPosition = AddExpression<UMaterialExpressionWorldPosition>(Material, -3600, -900);
-    UMaterialExpressionVertexNormalWS* VertexNormal = AddExpression<UMaterialExpressionVertexNormalWS>(Material, -3600, -700);
-    UMaterialExpressionCameraPositionWS* CameraPosition = AddExpression<UMaterialExpressionCameraPositionWS>(Material, -3600, -500);
-    UMaterialExpressionTextureCoordinate* PackedIds = AddExpression<UMaterialExpressionTextureCoordinate>(Material, -3600, -300);
+    UMaterialExpressionWorldPosition* WorldPosition = AddExpression<UMaterialExpressionWorldPosition>(Material, -3400, -900);
+    UMaterialExpressionVertexNormalWS* VertexNormal = AddExpression<UMaterialExpressionVertexNormalWS>(Material, -3400, -700);
+    UMaterialExpressionCameraPositionWS* CameraPosition = AddExpression<UMaterialExpressionCameraPositionWS>(Material, -3400, -500);
+    UMaterialExpressionTextureCoordinate* PackedIds = AddExpression<UMaterialExpressionTextureCoordinate>(Material, -3400, -300);
     PackedIds->CoordinateIndex = 0;
-    UMaterialExpressionVertexColor* VertexWeights = AddExpression<UMaterialExpressionVertexColor>(Material, -3600, -100);
+    UMaterialExpressionVertexColor* VertexWeights = AddExpression<UMaterialExpressionVertexColor>(Material, -3400, -100);
 
-    UMaterialExpressionTextureObjectParameter* BaseColorArray = TextureObject(Material, TEXT("DensityBaseColorArray"), BaseColorArrayAsset, SAMPLERTYPE_Color, -3200, -1100);
-    UMaterialExpressionTextureObjectParameter* NormalArray = TextureObject(Material, TEXT("DensityNormalArray"), NormalArrayAsset, SAMPLERTYPE_Normal, -3200, -900);
-    UMaterialExpressionTextureObjectParameter* OrmArray = TextureObject(Material, TEXT("DensityORMArray"), OrmArrayAsset, SAMPLERTYPE_LinearColor, -3200, -700);
-    UMaterialExpressionTextureObjectParameter* HeightArray = TextureObject(Material, TEXT("DensityHeightArray"), HeightArrayAsset, SAMPLERTYPE_LinearColor, -3200, -500);
-    UMaterialExpressionTextureObjectParameter* MacroArray = TextureObject(Material, TEXT("DensityMacroColorArray"), MacroArrayAsset, SAMPLERTYPE_Color, -3200, -300);
-    UMaterialExpressionTextureObjectParameter* DetailArray = TextureObject(Material, TEXT("DensityDetailNormalArray"), DetailArrayAsset, SAMPLERTYPE_Normal, -3200, -100);
-    UMaterialExpressionTextureObjectParameter* MaterialData = TextureObject(Material, TEXT("DensityMaterialData"), DefaultData, SAMPLERTYPE_LinearColor, -3200, 100);
+    UMaterialExpressionTextureObjectParameter* BaseColorArray = TextureObject(Material, TEXT("DensityBaseColorArray"), BaseColorArrayAsset, SAMPLERTYPE_Color, -3000, -1100);
+    UMaterialExpressionTextureObjectParameter* NormalArray = TextureObject(Material, TEXT("DensityNormalArray"), NormalArrayAsset, SAMPLERTYPE_Normal, -3000, -900);
+    UMaterialExpressionTextureObjectParameter* OrmArray = TextureObject(Material, TEXT("DensityORMArray"), OrmArrayAsset, SAMPLERTYPE_LinearColor, -3000, -700);
+    UMaterialExpressionTextureObjectParameter* HeightArray = TextureObject(Material, TEXT("DensityHeightArray"), HeightArrayAsset, SAMPLERTYPE_LinearColor, -3000, -500);
+    UMaterialExpressionTextureObjectParameter* MacroArray = TextureObject(Material, TEXT("DensityMacroColorArray"), MacroArrayAsset, SAMPLERTYPE_Color, -3000, -300);
+    UMaterialExpressionTextureObjectParameter* DetailArray = TextureObject(Material, TEXT("DensityDetailNormalArray"), DetailArrayAsset, SAMPLERTYPE_Normal, -3000, -100);
+    UMaterialExpressionTextureObjectParameter* MaterialData = TextureObject(Material, TEXT("DensityMaterialData"), DefaultData, SAMPLERTYPE_LinearColor, -3000, 100);
 
-    UMaterialExpressionScalarParameter* TableWidth = Scalar(Material, TEXT("DensityMaterialTableWidth"), 2.0f, -2900, 250);
-    UMaterialExpressionScalarParameter* PackingBase = Scalar(Material, TEXT("DensityMaterialIdPackingBase"), 4096.0f, -2900, 400);
-    UMaterialExpressionScalarParameter* WeatherWetness = Scalar(Material, TEXT("CubusWeatherWetness"), 0.0f, -2900, 550);
-    UMaterialExpressionScalarParameter* WeatherWetDarkening = Scalar(Material, TEXT("CubusWeatherWetDarkening"), 0.65f, -2900, 700);
-    UMaterialExpressionScalarParameter* WeatherWetRoughness = Scalar(Material, TEXT("CubusWeatherWetRoughness"), 0.12f, -2900, 850);
-
-    UMaterialExpressionScalarParameter* MacroWorldSize = Scalar(Material, TEXT("CubusMacroWorldSize"), 2000.0f, -2500, 250);
-    UMaterialExpressionScalarParameter* MacroColourStrength = Scalar(Material, TEXT("CubusMacroColourStrength"), 0.22f, -2500, 400);
-    UMaterialExpressionScalarParameter* MacroRoughnessStrength = Scalar(Material, TEXT("CubusMacroRoughnessStrength"), 0.12f, -2500, 550);
-    UMaterialExpressionScalarParameter* MicroWorldSize = Scalar(Material, TEXT("CubusMicroWorldSize"), 12.5f, -2500, 700);
-    UMaterialExpressionScalarParameter* MicroNormalStrength = Scalar(Material, TEXT("CubusMicroNormalStrength"), 0.35f, -2500, 850);
-    UMaterialExpressionScalarParameter* MicroHeightStrength = Scalar(Material, TEXT("CubusMicroHeightStrength"), 0.25f, -2500, 1000);
-    UMaterialExpressionScalarParameter* MicroRoughnessStrength = Scalar(Material, TEXT("CubusMicroRoughnessStrength"), 0.18f, -2500, 1150);
+    UMaterialExpressionScalarParameter* TableWidth = Scalar(Material, TEXT("DensityMaterialTableWidth"), 2.0f, -2700, 300);
+    UMaterialExpressionScalarParameter* PackingBase = Scalar(Material, TEXT("DensityMaterialIdPackingBase"), 4096.0f, -2700, 450);
+    UMaterialExpressionScalarParameter* WeatherWetness = Scalar(Material, TEXT("CubusWeatherWetness"), 0.0f, -2700, 600);
+    UMaterialExpressionScalarParameter* WeatherWetDarkening = Scalar(Material, TEXT("CubusWeatherWetDarkening"), 0.65f, -2700, 750);
+    UMaterialExpressionScalarParameter* WeatherWetRoughness = Scalar(Material, TEXT("CubusWeatherWetRoughness"), 0.12f, -2700, 900);
 
     const FString Common = CommonKernelCode();
 
@@ -325,24 +314,19 @@ float4 detail0 = Texture2DSampleLevel(MaterialData, MaterialDataSampler, float2(
 float4 detail1 = Texture2DSampleLevel(MaterialData, MaterialDataSampler, float2((id1 + 0.5) / MaterialTableWidth, 0.625), 0);
 float4 detail2 = Texture2DSampleLevel(MaterialData, MaterialDataSampler, float2((id2 + 0.5) / MaterialTableWidth, 0.625), 0);
 float4 detail3 = Texture2DSampleLevel(MaterialData, MaterialDataSampler, float2((id3 + 0.5) / MaterialTableWidth, 0.625), 0);
-float macroScale = 1.0 / max(MacroWorldSize, 1.0);
-float3 macroPosition = WorldPosition * macroScale;
-#define CUBUS_BASE_COLOR(ID,P,AX,TINT) ((Texture2DArraySample(BaseColorArray, BaseColorArraySampler, float3(P.yz, ID)).rgb * AX.x + Texture2DArraySample(BaseColorArray, BaseColorArraySampler, float3(P.xz, ID)).rgb * AX.y + Texture2DArraySample(BaseColorArray, BaseColorArraySampler, float3(P.xy, ID)).rgb * AX.z) * TINT.rgb)
-#define CUBUS_MACRO_COLOR(ID,AX) (Texture2DArraySample(MacroArray, MacroArraySampler, float3(macroPosition.yz, ID)).rgb * AX.x + Texture2DArraySample(MacroArray, MacroArraySampler, float3(macroPosition.xz, ID)).rgb * AX.y + Texture2DArraySample(MacroArray, MacroArraySampler, float3(macroPosition.xy, ID)).rgb * AX.z)
-float3 c0 = CUBUS_BASE_COLOR(id0, p0, axes0, tint0) * lerp(1.0.xxx, CUBUS_MACRO_COLOR(id0, axes0) * 2.0, saturate(detail0.g + MacroColourStrength));
-float3 c1 = CUBUS_BASE_COLOR(id1, p1, axes1, tint1) * lerp(1.0.xxx, CUBUS_MACRO_COLOR(id1, axes1) * 2.0, saturate(detail1.g + MacroColourStrength));
-float3 c2 = CUBUS_BASE_COLOR(id2, p2, axes2, tint2) * lerp(1.0.xxx, CUBUS_MACRO_COLOR(id2, axes2) * 2.0, saturate(detail2.g + MacroColourStrength));
-float3 c3 = CUBUS_BASE_COLOR(id3, p3, axes3, tint3) * lerp(1.0.xxx, CUBUS_MACRO_COLOR(id3, axes3) * 2.0, saturate(detail3.g + MacroColourStrength));
+#define CUBUS_COLOR(ID,P,AX,TINT,DET) ((Texture2DArraySample(BaseColorArray, BaseColorArraySampler, float3(P.yz, ID)).rgb * AX.x + Texture2DArraySample(BaseColorArray, BaseColorArraySampler, float3(P.xz, ID)).rgb * AX.y + Texture2DArraySample(BaseColorArray, BaseColorArraySampler, float3(P.xy, ID)).rgb * AX.z) * TINT.rgb * lerp(1.0.xxx, (Texture2DArraySample(MacroArray, MacroArraySampler, float3((WorldPosition * DET.r).yz, ID)).rgb * AX.x + Texture2DArraySample(MacroArray, MacroArraySampler, float3((WorldPosition * DET.r).xz, ID)).rgb * AX.y + Texture2DArraySample(MacroArray, MacroArraySampler, float3((WorldPosition * DET.r).xy, ID)).rgb * AX.z) * 2.0, saturate(DET.g)))
+float3 c0 = CUBUS_COLOR(id0, p0, axes0, tint0, detail0);
+float3 c1 = CUBUS_COLOR(id1, p1, axes1, tint1, detail1);
+float3 c2 = CUBUS_COLOR(id2, p2, axes2, tint2, detail2);
+float3 c3 = CUBUS_COLOR(id3, p3, axes3, tint3, detail3);
 float3 dryColor = c0 * blendWeights.r + c1 * blendWeights.g + c2 * blendWeights.b + c3 * blendWeights.a;
 return dryColor * lerp(1.0, saturate(WeatherWetDarkening), saturate(WeatherWetness));
 )");
 
-    UMaterialExpressionCustom* ColorKernel = Custom(Material, TEXT("Cubus Layered Density Color"), ColorCode, CMOT_Float3, -1400, -500);
-    AddCommonInputs(ColorKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase, MicroHeightStrength);
+    UMaterialExpressionCustom* ColorKernel = Custom(Material, TEXT("Cubus Four-Way Density Color"), ColorCode, CMOT_Float3, -1400, -500);
+    AddCommonInputs(ColorKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase);
     AddCustomInput(ColorKernel, TEXT("BaseColorArray"), BaseColorArray);
     AddCustomInput(ColorKernel, TEXT("MacroArray"), MacroArray);
-    AddCustomInput(ColorKernel, TEXT("MacroWorldSize"), MacroWorldSize);
-    AddCustomInput(ColorKernel, TEXT("MacroColourStrength"), MacroColourStrength);
     AddCustomInput(ColorKernel, TEXT("WeatherWetness"), WeatherWetness);
     AddCustomInput(ColorKernel, TEXT("WeatherWetDarkening"), WeatherWetDarkening);
 
@@ -358,50 +342,34 @@ float3 n1 = CUBUS_WORLD_NORMAL(NormalArray, NormalArraySampler, id1, p1, axes1);
 float3 n2 = CUBUS_WORLD_NORMAL(NormalArray, NormalArraySampler, id2, p2, axes2);
 float3 n3 = CUBUS_WORLD_NORMAL(NormalArray, NormalArraySampler, id3, p3, axes3);
 float fade = saturate(1.0 - distance(WorldPosition, CameraPosition) / 30000.0);
-float microScale = 1.0 / max(MicroWorldSize, 1.0);
-float3 q = WorldPosition * microScale;
-float3 dn0 = CUBUS_WORLD_NORMAL(DetailArray, DetailArraySampler, id0, q, axes0);
-float3 dn1 = CUBUS_WORLD_NORMAL(DetailArray, DetailArraySampler, id1, q, axes1);
-float3 dn2 = CUBUS_WORLD_NORMAL(DetailArray, DetailArraySampler, id2, q, axes2);
-float3 dn3 = CUBUS_WORLD_NORMAL(DetailArray, DetailArraySampler, id3, q, axes3);
-float globalNormalScale = max(MicroNormalStrength, 0.0) / 0.35;
-n0 = normalize(lerp(n0, normalize(n0 + dn0 * d0.a * globalNormalScale), fade));
-n1 = normalize(lerp(n1, normalize(n1 + dn1 * d1.a * globalNormalScale), fade));
-n2 = normalize(lerp(n2, normalize(n2 + dn2 * d2.a * globalNormalScale), fade));
-n3 = normalize(lerp(n3, normalize(n3 + dn3 * d3.a * globalNormalScale), fade));
+float3 q0 = WorldPosition * d0.b; float3 q1 = WorldPosition * d1.b; float3 q2 = WorldPosition * d2.b; float3 q3 = WorldPosition * d3.b;
+float3 dn0 = CUBUS_WORLD_NORMAL(DetailArray, DetailArraySampler, id0, q0, axes0);
+float3 dn1 = CUBUS_WORLD_NORMAL(DetailArray, DetailArraySampler, id1, q1, axes1);
+float3 dn2 = CUBUS_WORLD_NORMAL(DetailArray, DetailArraySampler, id2, q2, axes2);
+float3 dn3 = CUBUS_WORLD_NORMAL(DetailArray, DetailArraySampler, id3, q3, axes3);
+n0 = normalize(lerp(n0, normalize(n0 + dn0 * d0.a), fade));
+n1 = normalize(lerp(n1, normalize(n1 + dn1 * d1.a), fade));
+n2 = normalize(lerp(n2, normalize(n2 + dn2 * d2.a), fade));
+n3 = normalize(lerp(n3, normalize(n3 + dn3 * d3.a), fade));
 return normalize(n0 * blendWeights.r + n1 * blendWeights.g + n2 * blendWeights.b + n3 * blendWeights.a);
 )");
 
-    UMaterialExpressionCustom* NormalKernel = Custom(Material, TEXT("Cubus Layered Density Normal"), NormalCode, CMOT_Float3, -1400, 0);
-    AddCommonInputs(NormalKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase, MicroHeightStrength);
+    UMaterialExpressionCustom* NormalKernel = Custom(Material, TEXT("Cubus Four-Way Density Normal"), NormalCode, CMOT_Float3, -1400, 0);
+    AddCommonInputs(NormalKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase);
     AddCustomInput(NormalKernel, TEXT("NormalArray"), NormalArray);
     AddCustomInput(NormalKernel, TEXT("DetailArray"), DetailArray);
-    AddCustomInput(NormalKernel, TEXT("MicroWorldSize"), MicroWorldSize);
-    AddCustomInput(NormalKernel, TEXT("MicroNormalStrength"), MicroNormalStrength);
 
     FString OrmCode = Common + TEXT(R"(
 #define CUBUS_ORM(ID,P,AX) (Texture2DArraySample(OrmArray, OrmArraySampler, float3(P.yz, ID)).rgb * AX.x + Texture2DArraySample(OrmArray, OrmArraySampler, float3(P.xz, ID)).rgb * AX.y + Texture2DArraySample(OrmArray, OrmArraySampler, float3(P.xy, ID)).rgb * AX.z)
 float3 o0 = CUBUS_ORM(id0, p0, axes0); float3 o1 = CUBUS_ORM(id1, p1, axes1); float3 o2 = CUBUS_ORM(id2, p2, axes2); float3 o3 = CUBUS_ORM(id3, p3, axes3);
 float3 orm = o0 * blendWeights.r + o1 * blendWeights.g + o2 * blendWeights.b + o3 * blendWeights.a;
-float macroScale = 1.0 / max(MacroWorldSize, 1.0);
-float3 mp = WorldPosition * macroScale;
-#define CUBUS_MACRO_LUMA(ID,AX) dot(Texture2DArraySample(MacroArray, MacroArraySampler, float3(mp.yz, ID)).rgb * AX.x + Texture2DArraySample(MacroArray, MacroArraySampler, float3(mp.xz, ID)).rgb * AX.y + Texture2DArraySample(MacroArray, MacroArraySampler, float3(mp.xy, ID)).rgb * AX.z, float3(0.299, 0.587, 0.114))
-float macroLuma = CUBUS_MACRO_LUMA(id0, axes0) * blendWeights.r + CUBUS_MACRO_LUMA(id1, axes1) * blendWeights.g + CUBUS_MACRO_LUMA(id2, axes2) * blendWeights.b + CUBUS_MACRO_LUMA(id3, axes3) * blendWeights.a;
-float3 microCell = floor(WorldPosition / max(MicroWorldSize, 1.0));
-float microNoise = frac(sin(dot(microCell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
-orm.g = saturate(orm.g + (macroLuma - 0.5) * 2.0 * MacroRoughnessStrength + (microNoise - 0.5) * 2.0 * MicroRoughnessStrength);
 orm.g = lerp(orm.g, saturate(WeatherWetRoughness), saturate(WeatherWetness));
 return orm;
 )");
 
-    UMaterialExpressionCustom* OrmKernel = Custom(Material, TEXT("Cubus Layered Density ORM"), OrmCode, CMOT_Float3, -1400, 500);
-    AddCommonInputs(OrmKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase, MicroHeightStrength);
+    UMaterialExpressionCustom* OrmKernel = Custom(Material, TEXT("Cubus Four-Way Density ORM"), OrmCode, CMOT_Float3, -1400, 500);
+    AddCommonInputs(OrmKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase);
     AddCustomInput(OrmKernel, TEXT("OrmArray"), OrmArray);
-    AddCustomInput(OrmKernel, TEXT("MacroArray"), MacroArray);
-    AddCustomInput(OrmKernel, TEXT("MacroWorldSize"), MacroWorldSize);
-    AddCustomInput(OrmKernel, TEXT("MacroRoughnessStrength"), MacroRoughnessStrength);
-    AddCustomInput(OrmKernel, TEXT("MicroWorldSize"), MicroWorldSize);
-    AddCustomInput(OrmKernel, TEXT("MicroRoughnessStrength"), MicroRoughnessStrength);
     AddCustomInput(OrmKernel, TEXT("WeatherWetness"), WeatherWetness);
     AddCustomInput(OrmKernel, TEXT("WeatherWetRoughness"), WeatherWetRoughness);
 
@@ -414,7 +382,7 @@ return e0.rgb * e0.a * blendWeights.r + e1.rgb * e1.a * blendWeights.g + e2.rgb 
 )");
 
     UMaterialExpressionCustom* EmissiveKernel = Custom(Material, TEXT("Cubus Four-Way Density Emissive"), EmissiveCode, CMOT_Float3, -1400, 900);
-    AddCommonInputs(EmissiveKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase, MicroHeightStrength);
+    AddCommonInputs(EmissiveKernel, WorldPosition, VertexNormal, CameraPosition, PackedIds, VertexWeights, HeightArray, MaterialData, TableWidth, PackingBase);
 
     UMaterialExpressionComponentMask* AmbientOcclusion = Mask(Material, OrmKernel, true, false, false, -900, 420);
     UMaterialExpressionComponentMask* Roughness = Mask(Material, OrmKernel, false, true, false, -900, 540);
@@ -433,7 +401,7 @@ return e0.rgb * e0.a * blendWeights.r + e1.rgb * e1.a * blendWeights.g + e2.rgb 
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Built layered Cubus density material with global macro, height blend and micro detail controls.")
+        TEXT("Built unified Cubus density material: texture arrays, four local material slots and one draw section per chunk.")
     );
 
     return Material;
