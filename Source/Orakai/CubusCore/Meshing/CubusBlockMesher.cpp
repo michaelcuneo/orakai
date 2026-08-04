@@ -34,12 +34,33 @@ namespace CubusBlockMesher
             MaterialRegistry->IsRenderableSolid(Voxel->MaterialId);
     }
 
-    const FCubusBlockVoxel* ResolveAxisNeighbourVoxel(
+    FCubusBlockVoxel ResolveBlockSample(
         const FCubusBlockChunkNeighborhood& Neighborhood,
-        const FIntVector& LocalCoordinate,
-        const int32 Axis
+        const UCubusMaterialRegistry* MaterialRegistry,
+        const FIntVector& LocalCoordinate
     )
     {
+        const FCubusBlockVoxel* DirectVoxel =
+            Neighborhood.GetVoxel(
+                LocalCoordinate.X,
+                LocalCoordinate.Y,
+                LocalCoordinate.Z
+            );
+
+        if (DirectVoxel != nullptr)
+        {
+            return IsRenderableSolid(DirectVoxel, MaterialRegistry)
+                ? *DirectVoxel
+                : MakeEmptyVoxel();
+        }
+
+        // Marching Cubes needs edge and corner halo samples that the legacy
+        // six-face neighbourhood cannot address directly. Reconstruct those
+        // samples from every available axis/plane projection. This is the
+        // conservative version used before the material hardening pass and it
+        // deliberately favours solid occupancy to prevent visible seam holes.
+        TArray<const FCubusBlockVoxel*, TInlineAllocator<7>> Candidates;
+
         const int32 ClampedX = FMath::Clamp(
             LocalCoordinate.X,
             0,
@@ -56,127 +77,54 @@ namespace CubusBlockMesher
             Cubus::ChunkSize - 1
         );
 
-        if (Axis == 0)
-        {
-            if (LocalCoordinate.X < 0 && Neighborhood.NegativeX != nullptr)
-            {
-                return Neighborhood.NegativeX->GetVoxel(
-                    Cubus::ChunkSize + LocalCoordinate.X,
-                    ClampedY,
-                    ClampedZ
-                );
-            }
-
-            if (
-                LocalCoordinate.X >= Cubus::ChunkSize &&
-                Neighborhood.PositiveX != nullptr
-            )
-            {
-                return Neighborhood.PositiveX->GetVoxel(
-                    LocalCoordinate.X - Cubus::ChunkSize,
-                    ClampedY,
-                    ClampedZ
-                );
-            }
-        }
-        else if (Axis == 1)
-        {
-            if (LocalCoordinate.Y < 0 && Neighborhood.NegativeY != nullptr)
-            {
-                return Neighborhood.NegativeY->GetVoxel(
-                    ClampedX,
-                    Cubus::ChunkSize + LocalCoordinate.Y,
-                    ClampedZ
-                );
-            }
-
-            if (
-                LocalCoordinate.Y >= Cubus::ChunkSize &&
-                Neighborhood.PositiveY != nullptr
-            )
-            {
-                return Neighborhood.PositiveY->GetVoxel(
-                    ClampedX,
-                    LocalCoordinate.Y - Cubus::ChunkSize,
-                    ClampedZ
-                );
-            }
-        }
-        else
-        {
-            if (LocalCoordinate.Z < 0 && Neighborhood.NegativeZ != nullptr)
-            {
-                return Neighborhood.NegativeZ->GetVoxel(
-                    ClampedX,
-                    ClampedY,
-                    Cubus::ChunkSize + LocalCoordinate.Z
-                );
-            }
-
-            if (
-                LocalCoordinate.Z >= Cubus::ChunkSize &&
-                Neighborhood.PositiveZ != nullptr
-            )
-            {
-                return Neighborhood.PositiveZ->GetVoxel(
-                    ClampedX,
-                    ClampedY,
-                    LocalCoordinate.Z - Cubus::ChunkSize
-                );
-            }
-        }
-
-        return nullptr;
-    }
-
-    FCubusBlockVoxel ResolveBlockSample(
-        const FCubusBlockChunkNeighborhood& Neighborhood,
-        const UCubusMaterialRegistry* MaterialRegistry,
-        const FIntVector& LocalCoordinate
-    )
-    {
-        if (
-            LocalCoordinate.X >= 0 &&
-            LocalCoordinate.X < Cubus::ChunkSize &&
-            LocalCoordinate.Y >= 0 &&
-            LocalCoordinate.Y < Cubus::ChunkSize &&
-            LocalCoordinate.Z >= 0 &&
-            LocalCoordinate.Z < Cubus::ChunkSize
-        )
-        {
-            const FCubusBlockVoxel* DirectVoxel =
-                Neighborhood.Centre->GetVoxel(LocalCoordinate);
-
-            return IsRenderableSolid(DirectVoxel, MaterialRegistry)
-                ? *DirectVoxel
-                : MakeEmptyVoxel();
-        }
-
-        TArray<const FCubusBlockVoxel*, TInlineAllocator<4>> Candidates;
-
-        for (int32 Axis = 0; Axis < 3; ++Axis)
-        {
-            if (
-                const FCubusBlockVoxel* AxisVoxel =
-                    ResolveAxisNeighbourVoxel(
-                        Neighborhood,
-                        LocalCoordinate,
-                        Axis
-                    )
-            )
-            {
-                Candidates.Add(AxisVoxel);
-            }
-        }
-
-        const FIntVector ClampedCoordinate(
-            FMath::Clamp(LocalCoordinate.X, 0, Cubus::ChunkSize - 1),
-            FMath::Clamp(LocalCoordinate.Y, 0, Cubus::ChunkSize - 1),
-            FMath::Clamp(LocalCoordinate.Z, 0, Cubus::ChunkSize - 1)
-        );
-
         Candidates.Add(
-            Neighborhood.Centre->GetVoxel(ClampedCoordinate)
+            Neighborhood.GetVoxel(
+                LocalCoordinate.X,
+                ClampedY,
+                ClampedZ
+            )
+        );
+        Candidates.Add(
+            Neighborhood.GetVoxel(
+                ClampedX,
+                LocalCoordinate.Y,
+                ClampedZ
+            )
+        );
+        Candidates.Add(
+            Neighborhood.GetVoxel(
+                ClampedX,
+                ClampedY,
+                LocalCoordinate.Z
+            )
+        );
+        Candidates.Add(
+            Neighborhood.GetVoxel(
+                LocalCoordinate.X,
+                LocalCoordinate.Y,
+                ClampedZ
+            )
+        );
+        Candidates.Add(
+            Neighborhood.GetVoxel(
+                LocalCoordinate.X,
+                ClampedY,
+                LocalCoordinate.Z
+            )
+        );
+        Candidates.Add(
+            Neighborhood.GetVoxel(
+                ClampedX,
+                LocalCoordinate.Y,
+                LocalCoordinate.Z
+            )
+        );
+        Candidates.Add(
+            Neighborhood.GetVoxel(
+                ClampedX,
+                ClampedY,
+                ClampedZ
+            )
         );
 
         TMap<int32, int32> SolidVotesByMaterial;
@@ -190,7 +138,7 @@ namespace CubusBlockMesher
                 ++SolidVoteCount;
                 ++SolidVotesByMaterial.FindOrAdd(Candidate->MaterialId);
             }
-            else
+            else if (Candidate != nullptr)
             {
                 ++EmptyVoteCount;
             }
