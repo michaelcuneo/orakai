@@ -7,9 +7,8 @@
 #include "AssetToolsModule.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "MaterialEditingLibrary.h"
-#include "Materials/MaterialExpressionCustom.h"
-#include "Materials/MaterialExpressionScalarParameter.h"
-#include "Materials/MaterialExpressionVertexNormalWS.h"
+#include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -43,33 +42,6 @@ namespace CubusDensityMaterialBuilder
     {
         Input.Expression = Expression;
         Input.OutputIndex = OutputIndex;
-    }
-
-    UMaterialExpressionScalarParameter* Scalar(
-        UMaterial* Material,
-        const FName Name,
-        const float Value,
-        const int32 X,
-        const int32 Y
-    )
-    {
-        UMaterialExpressionScalarParameter* Node =
-            AddExpression<UMaterialExpressionScalarParameter>(Material, X, Y);
-        Node->ParameterName = Name;
-        Node->DefaultValue = Value;
-        return Node;
-    }
-
-    void AddCustomInput(
-        UMaterialExpressionCustom* Custom,
-        const TCHAR* Name,
-        UMaterialExpression* Expression
-    )
-    {
-        FCustomInput Input;
-        Input.InputName = FName(Name);
-        Connect(Input.Input, Expression);
-        Custom->Inputs.Add(Input);
     }
 
     UMaterial* FindOrCreateMaterial()
@@ -128,42 +100,28 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
     UMaterialEditingLibrary::DeleteAllMaterialExpressions(Material);
     Material->BlendMode = BLEND_Opaque;
     Material->SetShadingModel(MSM_DefaultLit);
-    Material->TwoSided = false;
+    Material->TwoSided = true;
     Material->bUseMaterialAttributes = false;
-    Material->bTangentSpaceNormal = false;
+    Material->bTangentSpaceNormal = true;
 
-    UMaterialExpressionVertexNormalWS* VertexNormal =
-        AddExpression<UMaterialExpressionVertexNormalWS>(Material, -900, -250);
+    UMaterialExpressionConstant3Vector* BaseColor =
+        AddExpression<UMaterialExpressionConstant3Vector>(Material, -400, -250);
+    BaseColor->Constant = FLinearColor(0.18f, 0.42f, 0.08f, 1.0f);
 
-    UMaterialExpressionScalarParameter* Wetness =
-        Scalar(Material, TEXT("CubusWeatherWetness"), 0.0f, -900, 100);
-    UMaterialExpressionScalarParameter* WetDarkening =
-        Scalar(Material, TEXT("CubusWeatherWetDarkening"), 0.65f, -900, 250);
-    UMaterialExpressionScalarParameter* Roughness =
-        Scalar(Material, TEXT("CubusRecoveryRoughness"), 0.82f, -400, 150);
-    UMaterialExpressionScalarParameter* AmbientOcclusion =
-        Scalar(Material, TEXT("CubusRecoveryAmbientOcclusion"), 1.0f, -400, 300);
-    UMaterialExpressionScalarParameter* Metallic =
-        Scalar(Material, TEXT("CubusRecoveryMetallic"), 0.0f, -400, 450);
+    UMaterialExpressionConstant* Roughness =
+        AddExpression<UMaterialExpressionConstant>(Material, -400, 0);
+    Roughness->R = 0.8f;
 
-    UMaterialExpressionCustom* BaseColor =
-        AddExpression<UMaterialExpressionCustom>(Material, -350, -250);
-    BaseColor->Description = TEXT("Cubus Safe Density Recovery Color");
-    BaseColor->OutputType = CMOT_Float3;
-    BaseColor->Code = TEXT(R"(
-float slope = saturate(abs(VertexNormal.z));
-float3 cliffColor = float3(0.22, 0.19, 0.15);
-float3 groundColor = float3(0.20, 0.31, 0.14);
-float3 dryColor = lerp(cliffColor, groundColor, smoothstep(0.45, 0.82, slope));
-return dryColor * lerp(1.0, saturate(WetDarkening), saturate(Wetness));
-)");
-    AddCustomInput(BaseColor, TEXT("VertexNormal"), VertexNormal);
-    AddCustomInput(BaseColor, TEXT("Wetness"), Wetness);
-    AddCustomInput(BaseColor, TEXT("WetDarkening"), WetDarkening);
+    UMaterialExpressionConstant* AmbientOcclusion =
+        AddExpression<UMaterialExpressionConstant>(Material, -400, 150);
+    AmbientOcclusion->R = 1.0f;
+
+    UMaterialExpressionConstant* Metallic =
+        AddExpression<UMaterialExpressionConstant>(Material, -400, 300);
+    Metallic->R = 0.0f;
 
     UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
     Connect(Data->BaseColor, BaseColor);
-    Connect(Data->Normal, VertexNormal);
     Connect(Data->Roughness, Roughness);
     Connect(Data->AmbientOcclusion, AmbientOcclusion);
     Connect(Data->Metallic, Metallic);
@@ -173,7 +131,7 @@ return dryColor * lerp(1.0, saturate(WetDarkening), saturate(Wetness));
     UE_LOG(
         LogTemp,
         Warning,
-        TEXT("Built safe Cubus density recovery material without texture-array sampling.")
+        TEXT("Built diagnostic Cubus density material: constant green, two-sided, no arrays, no custom HLSL and no normal override.")
     );
 
     return Material;
