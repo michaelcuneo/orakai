@@ -4,49 +4,33 @@
 
 #include "CubusTerrainSurfaceLayers.generated.h"
 
+/**
+ * Terrain-wide distribution rules. These settings decide where terrain
+ * materials and surface objects may appear; they do not control the visual
+ * appearance of an individual material.
+ */
 USTRUCT(BlueprintType)
 struct ORAKAI_API FCubusTerrainSurfaceLayerSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Macro", meta = (ClampMin = "500.0", UIMin = "1000.0", UIMax = "5000.0", Units = "cm"))
-    float MacroWorldSize = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Macro", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MacroColourStrength = 0.22f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Macro", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MacroRoughnessStrength = 0.12f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Classification", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Distribution", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float GrassMinimumNormalZ = 0.72f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Classification", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Distribution", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float RockMaximumNormalZ = 0.58f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Classification", meta = (ClampMin = "0.001", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Distribution", meta = (ClampMin = "0.001", ClampMax = "1.0"))
     float SlopeBlendWidth = 0.12f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Classification", meta = (ClampMin = "0.0", Units = "cm"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Distribution", meta = (ClampMin = "0.0", Units = "cm"))
     float SandMaximumWorldHeight = 400.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Classification", meta = (ClampMin = "0.0", Units = "cm"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Distribution", meta = (ClampMin = "0.0", Units = "cm"))
     float SnowMinimumWorldHeight = 6000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Classification", meta = (ClampMin = "1.0", Units = "cm"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material Distribution", meta = (ClampMin = "1.0", Units = "cm"))
     float HeightBlendWidth = 400.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Micro", meta = (ClampMin = "1.0", UIMin = "4.0", UIMax = "100.0", Units = "cm"))
-    float MicroWorldSize = 12.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Micro", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float MicroNormalStrength = 0.35f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Micro", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MicroHeightStrength = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Micro", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MicroRoughnessStrength = 0.18f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Clutter", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float GrassClutterDensity = 0.18f;
@@ -85,7 +69,6 @@ struct ORAKAI_API FCubusTerrainSurfaceLayerMasks
     float Steep = 0.0f;
     float Sand = 0.0f;
     float Snow = 0.0f;
-    float Macro = 0.0f;
     float GrassClutter = 0.0f;
     float StoneClutter = 0.0f;
     float OrganicClutter = 0.0f;
