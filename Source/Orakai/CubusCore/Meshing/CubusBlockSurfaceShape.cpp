@@ -82,10 +82,16 @@ namespace CubusBlockSurfaceShape
                 ? FIntVector(0, 1, 0)
                 : FIntVector(1, 0, 0);
 
-        const FIntVector SideOffsets[] =
+        const FIntVector OppositeSideAxis(
+            -SideAxis.X,
+            -SideAxis.Y,
+            -SideAxis.Z
+        );
+
+        const FIntVector SideOffsets[2] =
         {
             SideAxis,
-            -SideAxis
+            OppositeSideAxis
         };
 
         for (const FIntVector& SideOffset : SideOffsets)
