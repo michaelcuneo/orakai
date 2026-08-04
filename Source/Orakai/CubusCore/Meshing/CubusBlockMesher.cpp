@@ -256,6 +256,142 @@ int32 FCubusBlockMesher::AddShapedVoxel(
         CornerCount
     };
 
+    static const FVector2D CornerOffsets[CornerCount] =
+    {
+        FVector2D(-1.0f, -1.0f),
+        FVector2D(-1.0f, 1.0f),
+        FVector2D(1.0f, 1.0f),
+        FVector2D(1.0f, -1.0f)
+    };
+
+    int32 CutCorner = INDEX_NONE;
+
+    switch (Shape)
+    {
+        case ECubusBlockSurfaceShape::CornerLowNegativeXNegativeY:
+            CutCorner = NegativeXNegativeY;
+            break;
+
+        case ECubusBlockSurfaceShape::CornerLowNegativeXPositiveY:
+            CutCorner = NegativeXPositiveY;
+            break;
+
+        case ECubusBlockSurfaceShape::CornerLowPositiveXPositiveY:
+            CutCorner = PositiveXPositiveY;
+            break;
+
+        case ECubusBlockSurfaceShape::CornerLowPositiveXNegativeY:
+            CutCorner = PositiveXNegativeY;
+            break;
+
+        default:
+            break;
+    }
+
+    const float TopSelector =
+        CubusBlockMesher::GetMaterialSelector(
+            CubusBlockMesher::PositiveZ
+        );
+
+    const float SideSelector =
+        CubusBlockMesher::GetMaterialSelector(
+            CubusBlockMesher::PositiveX
+        );
+
+    const float BottomSelector =
+        CubusBlockMesher::GetMaterialSelector(
+            CubusBlockMesher::NegativeZ
+        );
+
+    if (CutCorner != INDEX_NONE)
+    {
+        FVector BottomVertices[CornerCount];
+        FVector TopVertices[CornerCount];
+
+        for (int32 CornerIndex = 0; CornerIndex < CornerCount; ++CornerIndex)
+        {
+            const FVector HorizontalOffset(
+                CornerOffsets[CornerIndex].X * HalfVoxelSize,
+                CornerOffsets[CornerIndex].Y * HalfVoxelSize,
+                0.0f
+            );
+
+            BottomVertices[CornerIndex] =
+                VoxelCentre +
+                HorizontalOffset -
+                FVector::UpVector * HalfVoxelSize;
+
+            TopVertices[CornerIndex] =
+                VoxelCentre +
+                HorizontalOffset +
+                FVector::UpVector * HalfVoxelSize;
+        }
+
+        int32 RetainedCorners[3];
+        int32 RetainedCount = 0;
+
+        for (int32 CornerIndex = 0; CornerIndex < CornerCount; ++CornerIndex)
+        {
+            if (CornerIndex != CutCorner)
+            {
+                RetainedCorners[RetainedCount++] = CornerIndex;
+            }
+        }
+
+        check(RetainedCount == 3);
+
+        AddTriangle(
+            MeshData,
+            TopVertices[RetainedCorners[0]],
+            TopVertices[RetainedCorners[1]],
+            TopVertices[RetainedCorners[2]],
+            FVector::UpVector,
+            TopSelector
+        );
+
+        AddTriangle(
+            MeshData,
+            BottomVertices[RetainedCorners[2]],
+            BottomVertices[RetainedCorners[1]],
+            BottomVertices[RetainedCorners[0]],
+            -FVector::UpVector,
+            BottomSelector
+        );
+
+        int32 GeneratedFaceCount = 2;
+
+        for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
+        {
+            const int32 StartCorner = RetainedCorners[EdgeIndex];
+            const int32 EndCorner =
+                RetainedCorners[(EdgeIndex + 1) % 3];
+
+            const FVector EdgeDirection =
+                TopVertices[EndCorner] -
+                TopVertices[StartCorner];
+
+            const FVector OutwardNormal(
+                -EdgeDirection.Y,
+                EdgeDirection.X,
+                0.0f
+            );
+
+            AddFace(
+                MeshData,
+                BottomVertices[StartCorner],
+                TopVertices[StartCorner],
+                TopVertices[EndCorner],
+                BottomVertices[EndCorner],
+                OutwardNormal.GetSafeNormal(),
+                SideSelector
+            );
+
+            ++GeneratedFaceCount;
+        }
+
+        return GeneratedFaceCount;
+    }
+
     bool bHighCorners[CornerCount] =
     {
         false,
@@ -286,49 +422,9 @@ int32 FCubusBlockMesher::AddShapedVoxel(
             bHighCorners[PositiveXPositiveY] = true;
             break;
 
-        case ECubusBlockSurfaceShape::CornerLowNegativeXNegativeY:
-            for (int32 Index = 0; Index < CornerCount; ++Index)
-            {
-                bHighCorners[Index] = true;
-            }
-            bHighCorners[NegativeXNegativeY] = false;
-            break;
-
-        case ECubusBlockSurfaceShape::CornerLowNegativeXPositiveY:
-            for (int32 Index = 0; Index < CornerCount; ++Index)
-            {
-                bHighCorners[Index] = true;
-            }
-            bHighCorners[NegativeXPositiveY] = false;
-            break;
-
-        case ECubusBlockSurfaceShape::CornerLowPositiveXNegativeY:
-            for (int32 Index = 0; Index < CornerCount; ++Index)
-            {
-                bHighCorners[Index] = true;
-            }
-            bHighCorners[PositiveXNegativeY] = false;
-            break;
-
-        case ECubusBlockSurfaceShape::CornerLowPositiveXPositiveY:
-            for (int32 Index = 0; Index < CornerCount; ++Index)
-            {
-                bHighCorners[Index] = true;
-            }
-            bHighCorners[PositiveXPositiveY] = false;
-            break;
-
         default:
             return 0;
     }
-
-    static const FVector2D CornerOffsets[CornerCount] =
-    {
-        FVector2D(-1.0f, -1.0f),
-        FVector2D(-1.0f, 1.0f),
-        FVector2D(1.0f, 1.0f),
-        FVector2D(1.0f, -1.0f)
-    };
 
     FVector BottomVertices[CornerCount];
     FVector TopVertices[CornerCount];
@@ -356,10 +452,6 @@ int32 FCubusBlockMesher::AddShapedVoxel(
     }
 
     int32 GeneratedFaceCount = 0;
-    const float TopSelector =
-        CubusBlockMesher::GetMaterialSelector(
-            CubusBlockMesher::PositiveZ
-        );
 
     auto AddTopTriangle =
         [&](const int32 A, const int32 B, const int32 C)
@@ -443,11 +535,6 @@ int32 FCubusBlockMesher::AddShapedVoxel(
         }
     };
 
-    const float SideSelector =
-        CubusBlockMesher::GetMaterialSelector(
-            CubusBlockMesher::PositiveX
-        );
-
     for (const FSideDefinition& Side : Sides)
     {
         const bool bStartHigh = bHighCorners[Side.StartCorner];
@@ -502,10 +589,8 @@ int32 FCubusBlockMesher::AddShapedVoxel(
         BottomVertices[NegativeXNegativeY],
         BottomVertices[PositiveXNegativeY],
         BottomVertices[PositiveXPositiveY],
-        FVector(0.0f, 0.0f, -1.0f),
-        CubusBlockMesher::GetMaterialSelector(
-            CubusBlockMesher::NegativeZ
-        )
+        -FVector::UpVector,
+        BottomSelector
     );
 
     ++GeneratedFaceCount;
