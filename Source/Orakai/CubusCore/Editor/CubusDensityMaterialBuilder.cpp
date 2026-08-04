@@ -11,6 +11,7 @@
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
+#include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
@@ -130,56 +131,86 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
     UMaterialEditingLibrary::DeleteAllMaterialExpressions(Material);
     Material->BlendMode = BLEND_Opaque;
     Material->SetShadingModel(MSM_DefaultLit);
-    Material->TwoSided = true;
+    Material->TwoSided = false;
     Material->bUseMaterialAttributes = false;
     Material->bTangentSpaceNormal = true;
 
     UMaterialExpressionWorldPosition* WorldPosition =
-        AddExpression<UMaterialExpressionWorldPosition>(Material, -900, -250);
+        AddExpression<UMaterialExpressionWorldPosition>(Material, -1000, -300);
+
+    UMaterialExpressionVertexNormalWS* VertexNormal =
+        AddExpression<UMaterialExpressionVertexNormalWS>(Material, -1000, -120);
 
     UMaterialExpressionTextureObjectParameter* BaseColorArray =
-        AddExpression<UMaterialExpressionTextureObjectParameter>(Material, -900, 0);
+        AddExpression<UMaterialExpressionTextureObjectParameter>(Material, -1000, 80);
     BaseColorArray->ParameterName = TEXT("DensityBaseColorArray");
     BaseColorArray->Texture = BaseColorArrayAsset;
     BaseColorArray->SamplerType = SAMPLERTYPE_Color;
 
     UMaterialExpressionScalarParameter* WorldScale =
-        AddExpression<UMaterialExpressionScalarParameter>(Material, -900, 200);
+        AddExpression<UMaterialExpressionScalarParameter>(Material, -1000, 260);
     WorldScale->ParameterName = TEXT("CubusBaseColorWorldScale");
     WorldScale->DefaultValue = 0.01f;
 
     UMaterialExpressionScalarParameter* GrassSlice =
-        AddExpression<UMaterialExpressionScalarParameter>(Material, -900, 350);
+        AddExpression<UMaterialExpressionScalarParameter>(Material, -1000, 410);
     GrassSlice->ParameterName = TEXT("CubusGrassArraySlice");
     GrassSlice->DefaultValue = 1.0f;
 
+    UMaterialExpressionScalarParameter* BlendSharpness =
+        AddExpression<UMaterialExpressionScalarParameter>(Material, -1000, 560);
+    BlendSharpness->ParameterName = TEXT("CubusTriplanarBlendSharpness");
+    BlendSharpness->DefaultValue = 4.0f;
+
     UMaterialExpressionCustom* BaseColor =
-        AddExpression<UMaterialExpressionCustom>(Material, -350, -150);
-    BaseColor->Description = TEXT("Cubus Grass Base Color Array Test");
+        AddExpression<UMaterialExpressionCustom>(Material, -350, -180);
+    BaseColor->Description = TEXT("Cubus Grass Triplanar Base Color");
     BaseColor->OutputType = CMOT_Float3;
     BaseColor->Code = TEXT(R"(
-float2 uv = WorldPosition.xy * max(WorldScale, 0.000001);
-return Texture2DArraySample(
+float scale = max(WorldScale, 0.000001);
+float slice = floor(GrassSlice + 0.5);
+float sharpness = max(BlendSharpness, 1.0);
+
+float3 weights = pow(abs(normalize(VertexNormal)), sharpness);
+weights /= max(weights.x + weights.y + weights.z, 0.000001);
+
+float3 sampleX = Texture2DArraySample(
     BaseColorArray,
     BaseColorArraySampler,
-    float3(uv, floor(GrassSlice + 0.5))
+    float3(WorldPosition.yz * scale, slice)
 ).rgb;
+
+float3 sampleY = Texture2DArraySample(
+    BaseColorArray,
+    BaseColorArraySampler,
+    float3(WorldPosition.xz * scale, slice)
+).rgb;
+
+float3 sampleZ = Texture2DArraySample(
+    BaseColorArray,
+    BaseColorArraySampler,
+    float3(WorldPosition.xy * scale, slice)
+).rgb;
+
+return sampleX * weights.x + sampleY * weights.y + sampleZ * weights.z;
 )");
     AddCustomInput(BaseColor, TEXT("WorldPosition"), WorldPosition);
+    AddCustomInput(BaseColor, TEXT("VertexNormal"), VertexNormal);
     AddCustomInput(BaseColor, TEXT("BaseColorArray"), BaseColorArray);
     AddCustomInput(BaseColor, TEXT("WorldScale"), WorldScale);
     AddCustomInput(BaseColor, TEXT("GrassSlice"), GrassSlice);
+    AddCustomInput(BaseColor, TEXT("BlendSharpness"), BlendSharpness);
 
     UMaterialExpressionConstant* Roughness =
-        AddExpression<UMaterialExpressionConstant>(Material, -350, 100);
+        AddExpression<UMaterialExpressionConstant>(Material, -350, 120);
     Roughness->R = 0.8f;
 
     UMaterialExpressionConstant* AmbientOcclusion =
-        AddExpression<UMaterialExpressionConstant>(Material, -350, 250);
+        AddExpression<UMaterialExpressionConstant>(Material, -350, 270);
     AmbientOcclusion->R = 1.0f;
 
     UMaterialExpressionConstant* Metallic =
-        AddExpression<UMaterialExpressionConstant>(Material, -350, 400);
+        AddExpression<UMaterialExpressionConstant>(Material, -350, 420);
     Metallic->R = 0.0f;
 
     UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
@@ -193,7 +224,7 @@ return Texture2DArraySample(
     UE_LOG(
         LogTemp,
         Warning,
-        TEXT("Built Cubus density material stage 1: Grass base-color array slice 1 with planar world projection only.")
+        TEXT("Built Cubus density material stage 2: Grass base-color array slice 1 with world-space triplanar projection.")
     );
 
     return Material;
