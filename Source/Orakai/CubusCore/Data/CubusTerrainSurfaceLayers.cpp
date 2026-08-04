@@ -85,16 +85,21 @@ FCubusTerrainSurfaceLayerMasks EvaluateCubusTerrainSurfaceLayers(
 {
     FCubusTerrainSurfaceLayerMasks Result;
 
-    const float NormalZ = FMath::Clamp(WorldNormal.GetSafeNormal().Z, -1.0f, 1.0f);
+    const float NormalZ = FMath::Clamp(
+        static_cast<float>(WorldNormal.GetSafeNormal().Z),
+        -1.0f,
+        1.0f
+    );
+    const float WorldZ = static_cast<float>(WorldPosition.Z);
     const float SlopeWidth = FMath::Max(0.001f, Settings.SlopeBlendWidth);
 
-    Result.Flat = FMath::SmoothStep(
+    Result.Flat = FMath::SmoothStep<float>(
         Settings.GrassMinimumNormalZ - SlopeWidth,
         Settings.GrassMinimumNormalZ + SlopeWidth,
         NormalZ
     );
 
-    Result.Steep = 1.0f - FMath::SmoothStep(
+    Result.Steep = 1.0f - FMath::SmoothStep<float>(
         Settings.RockMaximumNormalZ - SlopeWidth,
         Settings.RockMaximumNormalZ + SlopeWidth,
         NormalZ
@@ -102,16 +107,16 @@ FCubusTerrainSurfaceLayerMasks EvaluateCubusTerrainSurfaceLayers(
 
     const float HeightWidth = FMath::Max(1.0f, Settings.HeightBlendWidth);
 
-    Result.Sand = 1.0f - FMath::SmoothStep(
+    Result.Sand = 1.0f - FMath::SmoothStep<float>(
         Settings.SandMaximumWorldHeight - HeightWidth,
         Settings.SandMaximumWorldHeight + HeightWidth,
-        WorldPosition.Z
+        WorldZ
     );
 
-    Result.Snow = FMath::SmoothStep(
+    Result.Snow = FMath::SmoothStep<float>(
         Settings.SnowMinimumWorldHeight - HeightWidth,
         Settings.SnowMinimumWorldHeight + HeightWidth,
-        WorldPosition.Z
+        WorldZ
     );
 
     Result.Macro = CubusTerrainSurfaceLayers::SmoothNoise2D(
