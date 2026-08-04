@@ -16,34 +16,21 @@ namespace CubusMaterialRegistryEditor
 {
     constexpr uint64 MaximumArraySourceBytes = 512ull * 1024ull * 1024ull;
 
-    uint64 EstimateArraySourceBytes(
-        const UTexture2D* Texture,
-        const int32 SliceCount
-    )
+    uint64 EstimateArraySourceBytes(const UTexture2D* Texture, const int32 SliceCount)
     {
         if (!IsValid(Texture) || SliceCount <= 0)
         {
             return 0;
         }
 
-        const uint64 Width = static_cast<uint64>(
-            FMath::Max(Texture->Source.GetSizeX(), 1)
-        );
-        const uint64 Height = static_cast<uint64>(
-            FMath::Max(Texture->Source.GetSizeY(), 1)
-        );
-
+        const uint64 Width = static_cast<uint64>(FMath::Max(Texture->Source.GetSizeX(), 1));
+        const uint64 Height = static_cast<uint64>(FMath::Max(Texture->Source.GetSizeY(), 1));
         return Width * Height * 4ull * static_cast<uint64>(SliceCount);
     }
 
-    UTexture2DArray* FindOrCreateArray(
-        const TCHAR* PackagePath,
-        const TCHAR* AssetName,
-        bool& bOutCreated
-    )
+    UTexture2DArray* FindOrCreateArray(const TCHAR* PackagePath, const TCHAR* AssetName, bool& bOutCreated)
     {
-        if (UTexture2DArray* Existing =
-            LoadObject<UTexture2DArray>(nullptr, PackagePath))
+        if (UTexture2DArray* Existing = LoadObject<UTexture2DArray>(nullptr, PackagePath))
         {
             bOutCreated = false;
             return Existing;
@@ -74,11 +61,10 @@ namespace CubusMaterialRegistryEditor
 
         Asset->MarkPackageDirty();
         UPackage* Package = Asset->GetOutermost();
-        const FString Filename =
-            FPackageName::LongPackageNameToFilename(
-                Package->GetName(),
-                FPackageName::GetAssetPackageExtension()
-            );
+        const FString Filename = FPackageName::LongPackageNameToFilename(
+            Package->GetName(),
+            FPackageName::GetAssetPackageExtension()
+        );
 
         FSavePackageArgs Args;
         Args.TopLevelFlags = RF_Public | RF_Standalone;
@@ -121,22 +107,9 @@ namespace CubusMaterialRegistryEditor
         Texture->Modify();
 
         TArray64<uint8> SourceData;
-        SourceData.Append(
-        {
-            Pixel.B,
-            Pixel.G,
-            Pixel.R,
-            Pixel.A
-        });
+        SourceData.Append({Pixel.B, Pixel.G, Pixel.R, Pixel.A});
 
-        Texture->Source.Init(
-            1,
-            1,
-            1,
-            1,
-            TSF_BGRA8,
-            SourceData.GetData()
-        );
+        Texture->Source.Init(1, 1, 1, 1, TSF_BGRA8, SourceData.GetData());
         Texture->SRGB = bSrgb;
         Texture->CompressionSettings = CompressionSettings;
         Texture->MipGenSettings = TMGS_NoMipmaps;
@@ -155,6 +128,59 @@ namespace CubusMaterialRegistryEditor
         return Texture;
     }
 
+    FString GetDefinitionLabel(const FCubusMaterialDefinition& Definition)
+    {
+        if (!Definition.DisplayName.IsEmpty())
+        {
+            return Definition.DisplayName.ToString();
+        }
+
+        if (!Definition.Name.IsNone())
+        {
+            return Definition.Name.ToString();
+        }
+
+        return FString::Printf(TEXT("Material %d"), Definition.MaterialId);
+    }
+
+    void LogTextureDetails(
+        const TCHAR* AssetName,
+        const int32 Slice,
+        const FString& MaterialLabel,
+        const UTexture2D* Texture,
+        const bool bFallback
+    )
+    {
+        if (!IsValid(Texture))
+        {
+            UE_LOG(
+                LogTemp,
+                Error,
+                TEXT("%s slice %d (%s) has no valid texture."),
+                AssetName,
+                Slice,
+                *MaterialLabel
+            );
+            return;
+        }
+
+        UE_LOG(
+            LogTemp,
+            bFallback ? Warning : Display,
+            TEXT("%s slice %d (%s) -> %s%s | %dx%d format=%d compression=%d sRGB=%s"),
+            AssetName,
+            Slice,
+            *MaterialLabel,
+            *Texture->GetPathName(),
+            bFallback ? TEXT(" [NEUTRAL FALLBACK]") : TEXT(""),
+            Texture->Source.GetSizeX(),
+            Texture->Source.GetSizeY(),
+            static_cast<int32>(Texture->Source.GetFormat()),
+            static_cast<int32>(Texture->CompressionSettings),
+            Texture->SRGB ? TEXT("true") : TEXT("false")
+        );
+    }
+
     template <typename TSelector>
     UTexture2DArray* BuildArray(
         const TArray<FCubusMaterialDefinition>& Materials,
@@ -167,7 +193,6 @@ namespace CubusMaterialRegistryEditor
     )
     {
         int32 MaximumMaterialId = 1;
-        UTexture2D* Fallback = nullptr;
 
         for (const FCubusMaterialDefinition& Definition : Materials)
         {
@@ -178,38 +203,31 @@ namespace CubusMaterialRegistryEditor
             }
 
             MaximumMaterialId = FMath::Max(MaximumMaterialId, Definition.MaterialId);
-            if (!IsValid(Fallback))
-            {
-                Fallback = Selector(Definition.DensitySurface);
-            }
         }
 
+        UTexture2D* Fallback = EngineFallback;
         if (!IsValid(Fallback))
         {
-            Fallback = EngineFallback;
-        }
-
-        if (!IsValid(Fallback))
-        {
-            UE_LOG(LogTemp, Error, TEXT("Unable to build %s: no fallback texture."), AssetName);
+            UE_LOG(LogTemp, Error, TEXT("Unable to build %s: no neutral fallback texture."), AssetName);
             return nullptr;
         }
 
-        const int32 SliceCount = MaximumMaterialId + 1;
-        const uint64 EstimatedBytes = EstimateArraySourceBytes(
-            Fallback,
-            SliceCount
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT("Building %s with neutral fallback %s."),
+            AssetName,
+            *Fallback->GetPathName()
         );
+
+        const int32 SliceCount = MaximumMaterialId + 1;
+        const uint64 EstimatedBytes = EstimateArraySourceBytes(Fallback, SliceCount);
 
         if (EstimatedBytes > MaximumArraySourceBytes)
         {
-            UTexture2DArray* Existing =
-                LoadObject<UTexture2DArray>(nullptr, PackagePath);
-            const double EstimatedMiB =
-                static_cast<double>(EstimatedBytes) / (1024.0 * 1024.0);
-            const double BudgetMiB =
-                static_cast<double>(MaximumArraySourceBytes) /
-                (1024.0 * 1024.0);
+            UTexture2DArray* Existing = LoadObject<UTexture2DArray>(nullptr, PackagePath);
+            const double EstimatedMiB = static_cast<double>(EstimatedBytes) / (1024.0 * 1024.0);
+            const double BudgetMiB = static_cast<double>(MaximumArraySourceBytes) / (1024.0 * 1024.0);
 
             if (IsValid(Existing))
             {
@@ -242,12 +260,7 @@ namespace CubusMaterialRegistryEditor
         }
 
         bool bCreated = false;
-        UTexture2DArray* Array = FindOrCreateArray(
-            PackagePath,
-            AssetName,
-            bCreated
-        );
-
+        UTexture2DArray* Array = FindOrCreateArray(PackagePath, AssetName, bCreated);
         if (!IsValid(Array))
         {
             return nullptr;
@@ -262,6 +275,7 @@ namespace CubusMaterialRegistryEditor
             Array->SourceTextures[Slice] = Fallback;
         }
 
+        TMap<int32, const FCubusMaterialDefinition*> DefinitionById;
         for (const FCubusMaterialDefinition& Definition : Materials)
         {
             if (Definition.MaterialId < 0 || Definition.MaterialId > MaximumMaterialId)
@@ -269,10 +283,26 @@ namespace CubusMaterialRegistryEditor
                 continue;
             }
 
-            if (UTexture2D* Texture = Selector(Definition.DensitySurface))
+            DefinitionById.Add(Definition.MaterialId, &Definition);
+
+            UTexture2D* Texture = Selector(Definition.DensitySurface);
+            if (IsValid(Texture))
             {
                 Array->SourceTextures[Definition.MaterialId] = Texture;
             }
+        }
+
+        for (int32 Slice = 0; Slice < SliceCount; ++Slice)
+        {
+            const FCubusMaterialDefinition* const* DefinitionPtr = DefinitionById.Find(Slice);
+            const FCubusMaterialDefinition* Definition = DefinitionPtr ? *DefinitionPtr : nullptr;
+            const FString Label = Definition
+                ? GetDefinitionLabel(*Definition)
+                : FString::Printf(TEXT("Unassigned ID %d"), Slice);
+            UTexture2D* ChosenTexture = Array->SourceTextures[Slice];
+            const bool bFallback = ChosenTexture == Fallback;
+
+            LogTextureDetails(AssetName, Slice, Label, ChosenTexture, bFallback);
         }
 
         Array->SRGB = bSrgb;
@@ -286,7 +316,7 @@ namespace CubusMaterialRegistryEditor
             UE_LOG(
                 LogTemp,
                 Error,
-                TEXT("Unable to build %s: every source texture must use compatible dimensions and source formats."),
+                TEXT("Unable to build %s: source textures are incompatible. Compare the per-slice dimensions, source format, compression and sRGB values logged above."),
                 AssetName
             );
             return nullptr;
@@ -301,6 +331,8 @@ namespace CubusMaterialRegistryEditor
         Array->PostEditChange();
         Array->UpdateResource();
         SaveAsset(Array);
+
+        UE_LOG(LogTemp, Display, TEXT("Built %s with %d slices."), AssetName, SliceCount);
         return Array;
     }
 }
@@ -421,9 +453,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         return;
     }
 
-    UMaterial* BuiltMaterial =
-        UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial();
-
+    UMaterial* BuiltMaterial = UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial();
     if (!IsValid(BuiltMaterial))
     {
         UE_LOG(LogTemp, Error, TEXT("Cubus material registry failed to build M_CubusDensityPBR."));
@@ -451,9 +481,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
 void UCubusMaterialRegistry::BuildWeatherResponsiveMaterials()
 {
 #if WITH_EDITOR
-    UMaterial* BlockMaterial =
-        UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial();
-
+    UMaterial* BlockMaterial = UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial();
     if (!IsValid(BlockMaterial))
     {
         UE_LOG(
