@@ -7,38 +7,51 @@ class UCubusMaterialRegistry;
 
 /**
  * Render-time shape selected from surrounding voxel occupancy.
- *
- * Shape is intentionally not stored in FCubusBlockVoxel. This keeps terrain
- * persistence block-based while allowing the mesher to reinterpret generated
- * natural terrain as slopes and corners.
+ * Shape is derived during meshing and is never persisted in voxel storage.
  */
 enum class ECubusBlockSurfaceShape : uint8
 {
     Cube = 0,
+
     RampPositiveX,
     RampNegativeX,
     RampPositiveY,
-    RampNegativeY
+    RampNegativeY,
+
+    CornerHighNegativeXNegativeY,
+    CornerHighNegativeXPositiveY,
+    CornerHighPositiveXNegativeY,
+    CornerHighPositiveXPositiveY
 };
 
 struct ORAKAI_API FCubusBlockSurfaceClassification
 {
     ECubusBlockSurfaceShape Shape = ECubusBlockSurfaceShape::Cube;
 
-    bool IsRamp() const
+    bool IsShaped() const
     {
         return Shape != ECubusBlockSurfaceShape::Cube;
+    }
+
+    bool IsRamp() const
+    {
+        return
+            Shape == ECubusBlockSurfaceShape::RampPositiveX ||
+            Shape == ECubusBlockSurfaceShape::RampNegativeX ||
+            Shape == ECubusBlockSurfaceShape::RampPositiveY ||
+            Shape == ECubusBlockSurfaceShape::RampNegativeY;
+    }
+
+    bool IsCorner() const
+    {
+        return IsShaped() && !IsRamp();
     }
 };
 
 /**
- * Classifies exposed solid terrain cells without modifying voxel storage.
- *
- * The first pass recognises one-cell height transitions. A ramp is emitted
- * only when the current voxel has an exposed top, solid support beneath it,
- * a solid continuation at the current level on the uphill side, and a
- * one-cell-lower solid surface on the downhill side. Ambiguous junctions
- * remain cubes until corner templates are introduced.
+ * Classifies exposed, supported solid cells as ramps or convex corner wedges.
+ * Ambiguous patterns remain cubes, but every returned non-cube shape has a
+ * closed mesh template and does not depend on neighbouring faces for sealing.
  */
 class ORAKAI_API FCubusBlockSurfaceClassifier
 {
