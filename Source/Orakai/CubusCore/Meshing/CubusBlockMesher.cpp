@@ -200,10 +200,6 @@ void FCubusBlockMesher::BuildChunk(
 
                             bRenderFace = !bNeighbourOccludesFace;
 
-                            // Shaped neighbours occupy only part of their
-                            // logical cube. Preserve horizontal cube faces so
-                            // a tapering neighbour can never reveal terrain
-                            // interior. Hidden overlap is preferable to holes.
                             if (
                                 !bRenderFace &&
                                 FaceIndex <= CubusBlockMesher::NegativeY
@@ -290,20 +286,36 @@ int32 FCubusBlockMesher::AddShapedVoxel(
             bHighCorners[PositiveXPositiveY] = true;
             break;
 
-        case ECubusBlockSurfaceShape::CornerHighNegativeXNegativeY:
-            bHighCorners[NegativeXNegativeY] = true;
+        case ECubusBlockSurfaceShape::CornerLowNegativeXNegativeY:
+            for (int32 Index = 0; Index < CornerCount; ++Index)
+            {
+                bHighCorners[Index] = true;
+            }
+            bHighCorners[NegativeXNegativeY] = false;
             break;
 
-        case ECubusBlockSurfaceShape::CornerHighNegativeXPositiveY:
-            bHighCorners[NegativeXPositiveY] = true;
+        case ECubusBlockSurfaceShape::CornerLowNegativeXPositiveY:
+            for (int32 Index = 0; Index < CornerCount; ++Index)
+            {
+                bHighCorners[Index] = true;
+            }
+            bHighCorners[NegativeXPositiveY] = false;
             break;
 
-        case ECubusBlockSurfaceShape::CornerHighPositiveXNegativeY:
-            bHighCorners[PositiveXNegativeY] = true;
+        case ECubusBlockSurfaceShape::CornerLowPositiveXNegativeY:
+            for (int32 Index = 0; Index < CornerCount; ++Index)
+            {
+                bHighCorners[Index] = true;
+            }
+            bHighCorners[PositiveXNegativeY] = false;
             break;
 
-        case ECubusBlockSurfaceShape::CornerHighPositiveXPositiveY:
-            bHighCorners[PositiveXPositiveY] = true;
+        case ECubusBlockSurfaceShape::CornerLowPositiveXPositiveY:
+            for (int32 Index = 0; Index < CornerCount; ++Index)
+            {
+                bHighCorners[Index] = true;
+            }
+            bHighCorners[PositiveXPositiveY] = false;
             break;
 
         default:
