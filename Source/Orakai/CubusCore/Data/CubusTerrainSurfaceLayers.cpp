@@ -15,43 +15,6 @@ namespace CubusTerrainSurfaceLayers
             static_cast<float>(0x01000000U);
     }
 
-    float SmoothNoise2D(
-        const FVector& WorldPosition,
-        const float WorldSize,
-        const int32 Salt
-    )
-    {
-        const float SafeWorldSize = FMath::Max(1.0f, WorldSize);
-        const FVector2D Coordinate(
-            WorldPosition.X / SafeWorldSize,
-            WorldPosition.Y / SafeWorldSize
-        );
-
-        const FIntPoint Cell(
-            FMath::FloorToInt(Coordinate.X),
-            FMath::FloorToInt(Coordinate.Y)
-        );
-
-        const FVector2D Alpha(
-            Coordinate.X - static_cast<float>(Cell.X),
-            Coordinate.Y - static_cast<float>(Cell.Y)
-        );
-
-        const float SmoothX = Alpha.X * Alpha.X * (3.0f - 2.0f * Alpha.X);
-        const float SmoothY = Alpha.Y * Alpha.Y * (3.0f - 2.0f * Alpha.Y);
-
-        const float N00 = Hash01(FIntVector(Cell.X, Cell.Y, 0), Salt);
-        const float N10 = Hash01(FIntVector(Cell.X + 1, Cell.Y, 0), Salt);
-        const float N01 = Hash01(FIntVector(Cell.X, Cell.Y + 1, 0), Salt);
-        const float N11 = Hash01(FIntVector(Cell.X + 1, Cell.Y + 1, 0), Salt);
-
-        return FMath::Lerp(
-            FMath::Lerp(N00, N10, SmoothX),
-            FMath::Lerp(N01, N11, SmoothX),
-            SmoothY
-        );
-    }
-
     float DensityMask(
         const FVector& WorldPosition,
         const float MinimumSpacing,
@@ -117,12 +80,6 @@ FCubusTerrainSurfaceLayerMasks EvaluateCubusTerrainSurfaceLayers(
         Settings.SnowMinimumWorldHeight - HeightWidth,
         Settings.SnowMinimumWorldHeight + HeightWidth,
         WorldZ
-    );
-
-    Result.Macro = CubusTerrainSurfaceLayers::SmoothNoise2D(
-        WorldPosition,
-        Settings.MacroWorldSize,
-        WorldSeed ^ 0x53a9
     );
 
     const bool bClutterSlopeAllowed =
