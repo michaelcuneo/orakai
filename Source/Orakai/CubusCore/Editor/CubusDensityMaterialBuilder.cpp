@@ -65,12 +65,13 @@ namespace CubusDensityMaterialBuilder
     void AddCustomInput(
         UMaterialExpressionCustom* Custom,
         const TCHAR* Name,
-        UMaterialExpression* Expression
+        UMaterialExpression* Expression,
+        const int32 OutputIndex = 0
     )
     {
         FCustomInput Input;
         Input.InputName = FName(Name);
-        Connect(Input.Input, Expression);
+        Connect(Input.Input, Expression, OutputIndex);
         Custom->Inputs.Add(Input);
     }
 
@@ -280,7 +281,9 @@ float4 materialIds = float4(
 );
 materialIds = max(materialIds, 1.0);
 
-float4 blendWeights = saturate(MaterialWeights);
+float4 blendWeights = saturate(
+    float4(MaterialWeightsRgb, MaterialWeightA)
+);
 float blendWeightSum = dot(blendWeights, 1.0);
 blendWeights = blendWeightSum > 0.000001
     ? blendWeights / blendWeightSum
@@ -336,7 +339,8 @@ return result;
     AddCustomInput(BaseColor, TEXT("WorldPosition"), WorldPosition);
     AddCustomInput(BaseColor, TEXT("VertexNormal"), VertexNormal);
     AddCustomInput(BaseColor, TEXT("MaterialPalette"), MaterialPalette);
-    AddCustomInput(BaseColor, TEXT("MaterialWeights"), MaterialWeights);
+    AddCustomInput(BaseColor, TEXT("MaterialWeightsRgb"), MaterialWeights, 0);
+    AddCustomInput(BaseColor, TEXT("MaterialWeightA"), MaterialWeights, 4);
     AddCustomInput(BaseColor, TEXT("BaseColorArray"), BaseColorArray);
     AddCustomInput(BaseColor, TEXT("WorldScale"), WorldScale);
     AddCustomInput(BaseColor, TEXT("BlendSharpness"), BlendSharpness);
@@ -384,7 +388,8 @@ return result;
     AddCustomInput(Orm, TEXT("WorldPosition"), WorldPosition);
     AddCustomInput(Orm, TEXT("VertexNormal"), VertexNormal);
     AddCustomInput(Orm, TEXT("MaterialPalette"), MaterialPalette);
-    AddCustomInput(Orm, TEXT("MaterialWeights"), MaterialWeights);
+    AddCustomInput(Orm, TEXT("MaterialWeightsRgb"), MaterialWeights, 0);
+    AddCustomInput(Orm, TEXT("MaterialWeightA"), MaterialWeights, 4);
     AddCustomInput(Orm, TEXT("OrmArray"), OrmArray);
     AddCustomInput(Orm, TEXT("WorldScale"), WorldScale);
     AddCustomInput(Orm, TEXT("BlendSharpness"), BlendSharpness);
