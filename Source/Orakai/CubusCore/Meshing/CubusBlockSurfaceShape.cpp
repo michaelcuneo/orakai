@@ -144,25 +144,28 @@ FCubusBlockSurfaceClassification FCubusBlockSurfaceClassifier::Classify(
 
     if (XMatches == 1 && YMatches == 1)
     {
+        // Two downhill directions identify the open diagonal corner. Lower
+        // that one corner while retaining the other three at full block
+        // height, producing an inverse cut rather than a protruding point.
         if (bHighNegativeX && bHighNegativeY)
         {
             Result.Shape =
-                ECubusBlockSurfaceShape::CornerHighNegativeXNegativeY;
+                ECubusBlockSurfaceShape::CornerLowPositiveXPositiveY;
         }
         else if (bHighNegativeX && bHighPositiveY)
         {
             Result.Shape =
-                ECubusBlockSurfaceShape::CornerHighNegativeXPositiveY;
+                ECubusBlockSurfaceShape::CornerLowPositiveXNegativeY;
         }
         else if (bHighPositiveX && bHighNegativeY)
         {
             Result.Shape =
-                ECubusBlockSurfaceShape::CornerHighPositiveXNegativeY;
+                ECubusBlockSurfaceShape::CornerLowNegativeXPositiveY;
         }
         else
         {
             Result.Shape =
-                ECubusBlockSurfaceShape::CornerHighPositiveXPositiveY;
+                ECubusBlockSurfaceShape::CornerLowNegativeXNegativeY;
         }
 
         return Result;
