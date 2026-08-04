@@ -6,9 +6,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Texture2D.h"
 #include "Engine/Texture2DArray.h"
-#include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
-#include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -35,10 +33,6 @@ namespace CubusMaterialRegistryEditor
             FMath::Max(Texture->Source.GetSizeY(), 1)
         );
 
-        // Texture-array source assembly expands common source formats to at
-        // least four bytes per pixel before compression. This deliberately
-        // ignores mip overhead, so the guard remains a conservative lower
-        // bound rather than pretending the operation is cheaper than it is.
         return Width * Height * 4ull * static_cast<uint64>(SliceCount);
     }
 
@@ -159,45 +153,6 @@ namespace CubusMaterialRegistryEditor
 
         SaveAsset(Texture);
         return Texture;
-    }
-
-    void ForceGeometricDensityNormal(UMaterial* Material)
-    {
-        if (!IsValid(Material))
-        {
-            return;
-        }
-
-        UMaterialExpressionVertexNormalWS* VertexNormal = nullptr;
-        for (UMaterialExpression* Expression :
-            Material->GetEditorOnlyData()->ExpressionCollection.Expressions)
-        {
-            VertexNormal = Cast<UMaterialExpressionVertexNormalWS>(Expression);
-            if (IsValid(VertexNormal))
-            {
-                break;
-            }
-        }
-
-        if (!IsValid(VertexNormal))
-        {
-            UE_LOG(
-                LogTemp,
-                Error,
-                TEXT("M_CubusDensityPBR contains no VertexNormalWS expression.")
-            );
-            return;
-        }
-
-        Material->Modify();
-        FExpressionInput& NormalInput =
-            Material->GetEditorOnlyData()->Normal;
-        NormalInput.Expression = VertexNormal;
-        NormalInput.OutputIndex = 0;
-
-        UMaterialEditingLibrary::RecompileMaterial(Material);
-        Material->PostEditChange();
-        SaveAsset(Material);
     }
 
     template <typename TSelector>
@@ -475,8 +430,6 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
         return;
     }
 
-    ForceGeometricDensityNormal(BuiltMaterial);
-
     DensityMaterial = BuiltMaterial;
     DensityRuntimeMaterialByKey.Reset();
     UnifiedDensityRuntimeMaterial.Reset();
@@ -488,7 +441,7 @@ void UCubusMaterialRegistry::BuildDensityMaterial()
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus built unified density arrays and uses geometric world normals for stable lighting.")
+        TEXT("Cubus built unified density arrays with palette-blended triplanar normals.")
     );
 #else
     UE_LOG(LogTemp, Warning, TEXT("BuildDensityMaterial is only available in the Unreal Editor."));
