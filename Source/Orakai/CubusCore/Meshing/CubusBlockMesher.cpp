@@ -34,33 +34,12 @@ namespace CubusBlockMesher
             MaterialRegistry->IsRenderableSolid(Voxel->MaterialId);
     }
 
-    FCubusBlockVoxel ResolveBlockSample(
+    const FCubusBlockVoxel* ResolveAxisNeighbourVoxel(
         const FCubusBlockChunkNeighborhood& Neighborhood,
-        const UCubusMaterialRegistry* MaterialRegistry,
-        const FIntVector& LocalCoordinate
+        const FIntVector& LocalCoordinate,
+        const int32 Axis
     )
     {
-        const FCubusBlockVoxel* DirectVoxel =
-            Neighborhood.GetVoxel(
-                LocalCoordinate.X,
-                LocalCoordinate.Y,
-                LocalCoordinate.Z
-            );
-
-        if (DirectVoxel != nullptr)
-        {
-            return IsRenderableSolid(DirectVoxel, MaterialRegistry)
-                ? *DirectVoxel
-                : MakeEmptyVoxel();
-        }
-
-        // The legacy block neighbourhood stores only six face neighbours.
-        // Marching Cubes also asks for edge/corner samples such as
-        // (ChunkSize, ChunkSize, Z). Reconstruct those samples from every
-        // available axis projection instead of treating them as air, which
-        // previously carved holes where chunks met.
-        TArray<const FCubusBlockVoxel*, TInlineAllocator<7>> Candidates;
-
         const int32 ClampedX = FMath::Clamp(
             LocalCoordinate.X,
             0,
@@ -77,54 +56,127 @@ namespace CubusBlockMesher
             Cubus::ChunkSize - 1
         );
 
-        Candidates.Add(
-            Neighborhood.GetVoxel(
-                LocalCoordinate.X,
-                ClampedY,
-                ClampedZ
+        if (Axis == 0)
+        {
+            if (LocalCoordinate.X < 0 && Neighborhood.NegativeX != nullptr)
+            {
+                return Neighborhood.NegativeX->GetVoxel(
+                    Cubus::ChunkSize + LocalCoordinate.X,
+                    ClampedY,
+                    ClampedZ
+                );
+            }
+
+            if (
+                LocalCoordinate.X >= Cubus::ChunkSize &&
+                Neighborhood.PositiveX != nullptr
             )
+            {
+                return Neighborhood.PositiveX->GetVoxel(
+                    LocalCoordinate.X - Cubus::ChunkSize,
+                    ClampedY,
+                    ClampedZ
+                );
+            }
+        }
+        else if (Axis == 1)
+        {
+            if (LocalCoordinate.Y < 0 && Neighborhood.NegativeY != nullptr)
+            {
+                return Neighborhood.NegativeY->GetVoxel(
+                    ClampedX,
+                    Cubus::ChunkSize + LocalCoordinate.Y,
+                    ClampedZ
+                );
+            }
+
+            if (
+                LocalCoordinate.Y >= Cubus::ChunkSize &&
+                Neighborhood.PositiveY != nullptr
+            )
+            {
+                return Neighborhood.PositiveY->GetVoxel(
+                    ClampedX,
+                    LocalCoordinate.Y - Cubus::ChunkSize,
+                    ClampedZ
+                );
+            }
+        }
+        else
+        {
+            if (LocalCoordinate.Z < 0 && Neighborhood.NegativeZ != nullptr)
+            {
+                return Neighborhood.NegativeZ->GetVoxel(
+                    ClampedX,
+                    ClampedY,
+                    Cubus::ChunkSize + LocalCoordinate.Z
+                );
+            }
+
+            if (
+                LocalCoordinate.Z >= Cubus::ChunkSize &&
+                Neighborhood.PositiveZ != nullptr
+            )
+            {
+                return Neighborhood.PositiveZ->GetVoxel(
+                    ClampedX,
+                    ClampedY,
+                    LocalCoordinate.Z - Cubus::ChunkSize
+                );
+            }
+        }
+
+        return nullptr;
+    }
+
+    FCubusBlockVoxel ResolveBlockSample(
+        const FCubusBlockChunkNeighborhood& Neighborhood,
+        const UCubusMaterialRegistry* MaterialRegistry,
+        const FIntVector& LocalCoordinate
+    )
+    {
+        if (
+            LocalCoordinate.X >= 0 &&
+            LocalCoordinate.X < Cubus::ChunkSize &&
+            LocalCoordinate.Y >= 0 &&
+            LocalCoordinate.Y < Cubus::ChunkSize &&
+            LocalCoordinate.Z >= 0 &&
+            LocalCoordinate.Z < Cubus::ChunkSize
+        )
+        {
+            const FCubusBlockVoxel* DirectVoxel =
+                Neighborhood.Centre->GetVoxel(LocalCoordinate);
+
+            return IsRenderableSolid(DirectVoxel, MaterialRegistry)
+                ? *DirectVoxel
+                : MakeEmptyVoxel();
+        }
+
+        TArray<const FCubusBlockVoxel*, TInlineAllocator<4>> Candidates;
+
+        for (int32 Axis = 0; Axis < 3; ++Axis)
+        {
+            if (
+                const FCubusBlockVoxel* AxisVoxel =
+                    ResolveAxisNeighbourVoxel(
+                        Neighborhood,
+                        LocalCoordinate,
+                        Axis
+                    )
+            )
+            {
+                Candidates.Add(AxisVoxel);
+            }
+        }
+
+        const FIntVector ClampedCoordinate(
+            FMath::Clamp(LocalCoordinate.X, 0, Cubus::ChunkSize - 1),
+            FMath::Clamp(LocalCoordinate.Y, 0, Cubus::ChunkSize - 1),
+            FMath::Clamp(LocalCoordinate.Z, 0, Cubus::ChunkSize - 1)
         );
+
         Candidates.Add(
-            Neighborhood.GetVoxel(
-                ClampedX,
-                LocalCoordinate.Y,
-                ClampedZ
-            )
-        );
-        Candidates.Add(
-            Neighborhood.GetVoxel(
-                ClampedX,
-                ClampedY,
-                LocalCoordinate.Z
-            )
-        );
-        Candidates.Add(
-            Neighborhood.GetVoxel(
-                LocalCoordinate.X,
-                LocalCoordinate.Y,
-                ClampedZ
-            )
-        );
-        Candidates.Add(
-            Neighborhood.GetVoxel(
-                LocalCoordinate.X,
-                ClampedY,
-                LocalCoordinate.Z
-            )
-        );
-        Candidates.Add(
-            Neighborhood.GetVoxel(
-                ClampedX,
-                LocalCoordinate.Y,
-                LocalCoordinate.Z
-            )
-        );
-        Candidates.Add(
-            Neighborhood.GetVoxel(
-                ClampedX,
-                ClampedY,
-                ClampedZ
-            )
+            Neighborhood.Centre->GetVoxel(ClampedCoordinate)
         );
 
         TMap<int32, int32> SolidVotesByMaterial;
@@ -138,14 +190,12 @@ namespace CubusBlockMesher
                 ++SolidVoteCount;
                 ++SolidVotesByMaterial.FindOrAdd(Candidate->MaterialId);
             }
-            else if (Candidate != nullptr)
+            else
             {
                 ++EmptyVoteCount;
             }
         }
 
-        // Bias ties toward solid. A tiny amount of hidden overlap is safer
-        // than a visible crack between independently generated chunks.
         if (SolidVoteCount <= 0 || SolidVoteCount < EmptyVoteCount)
         {
             return MakeEmptyVoxel();
@@ -168,134 +218,77 @@ namespace CubusBlockMesher
         return Result;
     }
 
-    int32 DecodeLowMaterialId(const double PackedValue)
-    {
-        const int64 Packed = FMath::RoundToInt64(PackedValue);
-        return static_cast<int32>(
-            Packed % FCubusDensityMesher::MaterialIdPackingBase
-        );
-    }
-
-    int32 DecodeHighMaterialId(const double PackedValue)
-    {
-        const int64 Packed = FMath::RoundToInt64(PackedValue);
-        return static_cast<int32>(
-            Packed / FCubusDensityMesher::MaterialIdPackingBase
-        );
-    }
-
-    int32 ResolveTriangleMaterial(
-        const FCubusMeshData& Source,
-        const int32 SourceIndex0,
-        const int32 SourceIndex1,
-        const int32 SourceIndex2
+    int32 FindDominantPaletteSlot(
+        const FCubusMeshData& Mesh,
+        const int32 Index0,
+        const int32 Index1,
+        const int32 Index2
     )
     {
-        if (!Source.UV0.IsValidIndex(SourceIndex0))
-        {
-            return 1;
-        }
+        const int32 Indices[3] = { Index0, Index1, Index2 };
+        float Totals[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
-        const FVector2D PackedPalette = Source.UV0[SourceIndex0];
-        const int32 MaterialIds[4] =
+        for (const int32 Index : Indices)
         {
-            DecodeLowMaterialId(PackedPalette.X),
-            DecodeHighMaterialId(PackedPalette.X),
-            DecodeLowMaterialId(PackedPalette.Y),
-            DecodeHighMaterialId(PackedPalette.Y)
-        };
-
-        float WeightTotals[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        const int32 SourceIndices[3] =
-        {
-            SourceIndex0,
-            SourceIndex1,
-            SourceIndex2
-        };
-
-        for (const int32 SourceIndex : SourceIndices)
-        {
-            if (!Source.VertexColors.IsValidIndex(SourceIndex))
+            if (!Mesh.VertexColors.IsValidIndex(Index))
             {
                 continue;
             }
 
-            const FLinearColor& Weights = Source.VertexColors[SourceIndex];
-            WeightTotals[0] += Weights.R;
-            WeightTotals[1] += Weights.G;
-            WeightTotals[2] += Weights.B;
-            WeightTotals[3] += Weights.A;
+            const FLinearColor& Weight = Mesh.VertexColors[Index];
+            Totals[0] += Weight.R;
+            Totals[1] += Weight.G;
+            Totals[2] += Weight.B;
+            Totals[3] += Weight.A;
         }
 
         int32 DominantSlot = 0;
         for (int32 Slot = 1; Slot < 4; ++Slot)
         {
-            if (WeightTotals[Slot] > WeightTotals[DominantSlot])
+            if (Totals[Slot] > Totals[DominantSlot])
             {
                 DominantSlot = Slot;
             }
         }
 
-        return FMath::Max(1, MaterialIds[DominantSlot]);
+        return DominantSlot;
     }
 
-    float GetBlockFaceSelector(const FVector& FaceNormal)
+    FLinearColor MakeHardPaletteWeight(const int32 Slot)
     {
-        if (FaceNormal.Z > 0.55f)
+        switch (Slot)
         {
-            return 0.5f;
+            case 1: return FLinearColor(0.0f, 1.0f, 0.0f, 0.0f);
+            case 2: return FLinearColor(0.0f, 0.0f, 1.0f, 0.0f);
+            case 3: return FLinearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            default: return FLinearColor(1.0f, 0.0f, 0.0f, 0.0f);
         }
-
-        if (FaceNormal.Z < -0.55f)
-        {
-            return 1.0f;
-        }
-
-        return 0.0f;
     }
 
-    void ConvertDensityMeshToBlockSections(
-        const FCubusMaterialMeshMap& DensityMeshes,
-        FCubusMaterialMeshMap& OutBlockMeshes
-    )
+    void HardenGeologicalBlockMesh(FCubusMeshData& Mesh)
     {
-        OutBlockMeshes.Reset();
-
-        const FCubusMeshData* Source =
-            DensityMeshes.Find(
-                FCubusDensityMesher::UnifiedDensityMaterialKey
-            );
-
-        if (Source == nullptr)
-        {
-            return;
-        }
-
         for (
             int32 TriangleOffset = 0;
-            TriangleOffset + 2 < Source->Triangles.Num();
+            TriangleOffset + 2 < Mesh.Triangles.Num();
             TriangleOffset += 3
         )
         {
-            const int32 SourceIndices[3] =
-            {
-                Source->Triangles[TriangleOffset + 0],
-                Source->Triangles[TriangleOffset + 1],
-                Source->Triangles[TriangleOffset + 2]
-            };
+            const int32 Index0 = Mesh.Triangles[TriangleOffset + 0];
+            const int32 Index1 = Mesh.Triangles[TriangleOffset + 1];
+            const int32 Index2 = Mesh.Triangles[TriangleOffset + 2];
 
             if (
-                !Source->Vertices.IsValidIndex(SourceIndices[0]) ||
-                !Source->Vertices.IsValidIndex(SourceIndices[1]) ||
-                !Source->Vertices.IsValidIndex(SourceIndices[2])
+                !Mesh.Vertices.IsValidIndex(Index0) ||
+                !Mesh.Vertices.IsValidIndex(Index1) ||
+                !Mesh.Vertices.IsValidIndex(Index2)
             )
             {
                 continue;
             }
 
-            const FVector Vertex0 = Source->Vertices[SourceIndices[0]];
-            const FVector Vertex1 = Source->Vertices[SourceIndices[1]];
-            const FVector Vertex2 = Source->Vertices[SourceIndices[2]];
+            const FVector& Vertex0 = Mesh.Vertices[Index0];
+            const FVector& Vertex1 = Mesh.Vertices[Index1];
+            const FVector& Vertex2 = Mesh.Vertices[Index2];
 
             FVector FaceNormal = FVector::CrossProduct(
                 Vertex1 - Vertex0,
@@ -307,57 +300,43 @@ namespace CubusBlockMesher
                 FaceNormal = FVector::UpVector;
             }
 
-            const int32 MaterialId = ResolveTriangleMaterial(
-                *Source,
-                SourceIndices[0],
-                SourceIndices[1],
-                SourceIndices[2]
+            const int32 DominantSlot = FindDominantPaletteSlot(
+                Mesh,
+                Index0,
+                Index1,
+                Index2
             );
 
-            FCubusMeshData& Target = OutBlockMeshes.FindOrAdd(MaterialId);
-            const int32 FirstTargetIndex = Target.Vertices.Num();
+            const FLinearColor HardWeight =
+                MakeHardPaletteWeight(DominantSlot);
 
-            Target.Vertices.Add(Vertex0);
-            Target.Vertices.Add(Vertex1);
-            Target.Vertices.Add(Vertex2);
-
-            Target.Triangles.Append(
-            {
-                FirstTargetIndex + 0,
-                FirstTargetIndex + 1,
-                FirstTargetIndex + 2
-            });
-
-            Target.Normals.Add(FaceNormal);
-            Target.Normals.Add(FaceNormal);
-            Target.Normals.Add(FaceNormal);
-
-            // Ordinary block materials expect conventional face UVs and the
-            // top/side/bottom selector in vertex alpha, not density palettes.
-            Target.UV0.Add(FVector2D(0.0f, 0.0f));
-            Target.UV0.Add(FVector2D(1.0f, 0.0f));
-            Target.UV0.Add(FVector2D(0.0f, 1.0f));
-
-            const float Selector = GetBlockFaceSelector(FaceNormal);
-            const FLinearColor FaceColor(
-                1.0f,
-                1.0f,
-                1.0f,
-                Selector
-            );
-
-            Target.VertexColors.Add(FaceColor);
-            Target.VertexColors.Add(FaceColor);
-            Target.VertexColors.Add(FaceColor);
-
+            const FVector TangentDirection =
+                (Vertex1 - Vertex0).GetSafeNormal();
             const FProcMeshTangent Tangent(
-                (Vertex1 - Vertex0).GetSafeNormal(),
+                TangentDirection.IsNearlyZero()
+                    ? FVector::ForwardVector
+                    : TangentDirection,
                 false
             );
 
-            Target.Tangents.Add(Tangent);
-            Target.Tangents.Add(Tangent);
-            Target.Tangents.Add(Tangent);
+            const int32 Indices[3] = { Index0, Index1, Index2 };
+            for (const int32 Index : Indices)
+            {
+                if (Mesh.Normals.IsValidIndex(Index))
+                {
+                    Mesh.Normals[Index] = FaceNormal;
+                }
+
+                if (Mesh.VertexColors.IsValidIndex(Index))
+                {
+                    Mesh.VertexColors[Index] = HardWeight;
+                }
+
+                if (Mesh.Tangents.IsValidIndex(Index))
+                {
+                    Mesh.Tangents[Index] = Tangent;
+                }
+            }
         }
     }
 }
@@ -410,21 +389,25 @@ void FCubusBlockMesher::BuildChunk(
         BlockDensityField
     );
 
-    FCubusMaterialMeshMap DensityMeshes;
     int32 GeneratedTriangleCount = 0;
 
     FCubusDensityMesher::BuildChunk(
         SamplingBuffer,
         VoxelSize,
         0.0f,
-        DensityMeshes,
+        OutMaterialMeshes,
         GeneratedTriangleCount
     );
 
-    CubusBlockMesher::ConvertDensityMeshToBlockSections(
-        DensityMeshes,
-        OutMaterialMeshes
-    );
+    if (
+        FCubusMeshData* GeologicalMesh =
+            OutMaterialMeshes.Find(
+                FCubusDensityMesher::UnifiedDensityMaterialKey
+            )
+    )
+    {
+        CubusBlockMesher::HardenGeologicalBlockMesh(*GeologicalMesh);
+    }
 
     OutGeneratedFaceCount = GeneratedTriangleCount;
 }
