@@ -196,6 +196,71 @@ void UCubusMaterialRegistry::ApplyWeatherParameters(
     );
 }
 
+void UCubusMaterialRegistry::ApplyTerrainSurfaceLayerParameters(
+    UMaterialInstanceDynamic* RuntimeMaterial
+) const
+{
+    if (!IsValid(RuntimeMaterial))
+    {
+        return;
+    }
+
+    const FCubusTerrainSurfaceLayerSettings& Layers = TerrainSurfaceLayers;
+
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusMacroWorldSize"),
+        FMath::Max(1.0f, Layers.MacroWorldSize)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusMacroColourStrength"),
+        FMath::Clamp(Layers.MacroColourStrength, 0.0f, 1.0f)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusMacroRoughnessStrength"),
+        FMath::Clamp(Layers.MacroRoughnessStrength, 0.0f, 1.0f)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusGrassMinimumNormalZ"),
+        FMath::Clamp(Layers.GrassMinimumNormalZ, 0.0f, 1.0f)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusRockMaximumNormalZ"),
+        FMath::Clamp(Layers.RockMaximumNormalZ, 0.0f, 1.0f)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusSlopeBlendWidth"),
+        FMath::Max(0.001f, Layers.SlopeBlendWidth)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusSandMaximumWorldHeight"),
+        Layers.SandMaximumWorldHeight
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusSnowMinimumWorldHeight"),
+        Layers.SnowMinimumWorldHeight
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusHeightBlendWidth"),
+        FMath::Max(1.0f, Layers.HeightBlendWidth)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusMicroWorldSize"),
+        FMath::Max(1.0f, Layers.MicroWorldSize)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusMicroNormalStrength"),
+        FMath::Max(0.0f, Layers.MicroNormalStrength)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusMicroHeightStrength"),
+        FMath::Clamp(Layers.MicroHeightStrength, 0.0f, 1.0f)
+    );
+    RuntimeMaterial->SetScalarParameterValue(
+        TEXT("CubusMicroRoughnessStrength"),
+        FMath::Clamp(Layers.MicroRoughnessStrength, 0.0f, 1.0f)
+    );
+}
+
 void UCubusMaterialRegistry::SetWeatherMaterialState(
     const float Wetness,
     const float WetDarkening,
@@ -354,6 +419,7 @@ void UCubusMaterialRegistry::BindDensityGpuResources(
         TEXT("DensityMaterialIdPackingBase"),
         static_cast<float>(FCubusDensityMesher::MaterialIdPackingBase)
     );
+    ApplyTerrainSurfaceLayerParameters(RuntimeMaterial);
 }
 
 UMaterialInterface* UCubusMaterialRegistry::ResolveUnifiedDensityRuntimeMaterial() const
