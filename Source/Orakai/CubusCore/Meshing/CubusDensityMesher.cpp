@@ -194,7 +194,9 @@ namespace CubusDensityMesher
         SortWeightedMaterials(Accumulated);
 
         float TotalWeight = 0.0f;
-        const int32 BlendCount = FMath::Min(Accumulated.Num(), 4);
+        // Keep blends stable and readable by limiting each vertex to the
+        // two strongest terrain materials.
+        const int32 BlendCount = FMath::Min(Accumulated.Num(), 2);
         for (int32 Slot = 0; Slot < BlendCount; ++Slot)
         {
             Blend.MaterialIds[Slot] = Accumulated[Slot].MaterialId;
@@ -226,27 +228,31 @@ namespace CubusDensityMesher
         const FInterpolatedVertex (&Vertices)[3]
     )
     {
-        TArray<FWeightedMaterial> Accumulated;
-        Accumulated.Reserve(12);
+        TArray<int32> UniqueMaterialIds;
+        UniqueMaterialIds.Reserve(12);
 
         for (const FInterpolatedVertex& Vertex : Vertices)
         {
             for (int32 Slot = 0; Slot < 4; ++Slot)
             {
-                AddWeightedMaterial(
-                    Accumulated,
-                    Vertex.MaterialBlend.MaterialIds[Slot],
-                    Vertex.MaterialBlend.Weights[Slot]
+                if (Vertex.MaterialBlend.Weights[Slot] <= UE_SMALL_NUMBER)
+                {
+                    continue;
+                }
+
+                const int32 MaterialId = ClampDensityMaterialId(
+                    Vertex.MaterialBlend.MaterialIds[Slot]
                 );
+                UniqueMaterialIds.AddUnique(MaterialId);
             }
         }
 
-        SortWeightedMaterials(Accumulated);
+        UniqueMaterialIds.Sort();
 
         FTriangleMaterialPalette Palette;
-        Palette.Count = FMath::Clamp(Accumulated.Num(), 1, 4);
+        Palette.Count = FMath::Clamp(UniqueMaterialIds.Num(), 1, 4);
 
-        if (Accumulated.IsEmpty())
+        if (UniqueMaterialIds.IsEmpty())
         {
             Palette.MaterialIds[0] = ClampDensityMaterialId(
                 Vertices[0].MaterialId
@@ -258,7 +264,7 @@ namespace CubusDensityMesher
             for (int32 Slot = 0; Slot < Palette.Count; ++Slot)
             {
                 Palette.MaterialIds[Slot] =
-                    Accumulated[Slot].MaterialId;
+                    UniqueMaterialIds[Slot];
             }
         }
 

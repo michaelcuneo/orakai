@@ -31,6 +31,8 @@ namespace CubusDensityMaterialBuilder
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityNormal.TA_CubusDensityNormal");
     constexpr const TCHAR* OrmArrayPath =
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityORM.TA_CubusDensityORM");
+    constexpr const TCHAR* HeightArrayPath =
+        TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityHeight.TA_CubusDensityHeight");
 
     template <typename TExpression>
     TExpression* AddExpression(
@@ -175,24 +177,28 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
         LoadObject<UTexture>(nullptr, NormalArrayPath);
     UTexture* OrmArrayAsset =
         LoadObject<UTexture>(nullptr, OrmArrayPath);
+    UTexture* HeightArrayAsset =
+        LoadObject<UTexture>(nullptr, HeightArrayPath);
 
     if (
         !IsValid(BaseColorArrayAsset) ||
         !IsValid(NormalArrayAsset) ||
-        !IsValid(OrmArrayAsset)
+        !IsValid(OrmArrayAsset) ||
+        !IsValid(HeightArrayAsset)
     )
     {
         UE_LOG(
             LogTemp,
             Error,
             TEXT(
-                "Build the Cubus density BaseColor, Normal and ORM texture "
+                "Build the Cubus density BaseColor, Normal, ORM and Height texture "
                 "arrays before building M_CubusDensityPBR. "
-                "BaseColor=%s Normal=%s ORM=%s"
+                "BaseColor=%s Normal=%s ORM=%s Height=%s"
             ),
             IsValid(BaseColorArrayAsset) ? TEXT("valid") : TEXT("missing"),
             IsValid(NormalArrayAsset) ? TEXT("valid") : TEXT("missing"),
-            IsValid(OrmArrayAsset) ? TEXT("valid") : TEXT("missing")
+            IsValid(OrmArrayAsset) ? TEXT("valid") : TEXT("missing"),
+            IsValid(HeightArrayAsset) ? TEXT("valid") : TEXT("missing")
         );
         return nullptr;
     }
@@ -249,6 +255,16 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
             460
         );
 
+    UMaterialExpressionTextureObjectParameter* HeightArray =
+        AddTextureArray(
+            Material,
+            TEXT("DensityHeightArray"),
+            HeightArrayAsset,
+            SAMPLERTYPE_LinearColor,
+            -1500,
+            640
+        );
+
     UMaterialExpressionScalarParameter* WorldScale =
         AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 660);
     WorldScale->ParameterName = TEXT("CubusBaseColorWorldScale");
@@ -259,10 +275,15 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
     BlendSharpness->ParameterName = TEXT("CubusTriplanarBlendSharpness");
     BlendSharpness->DefaultValue = 4.0f;
 
+    UMaterialExpressionScalarParameter* HeightBlendStrength =
+        AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 900);
+    HeightBlendStrength->ParameterName = TEXT("CubusHeightBlendStrength");
+    HeightBlendStrength->DefaultValue = 3.0f;
+
     UMaterialExpressionScalarParameter* PackingBase =
         AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 980);
     PackingBase->ParameterName = TEXT("DensityMaterialIdPackingBase");
-    PackingBase->DefaultValue = 4096.0f;
+    PackingBase->DefaultValue = 32.0f;
 
     const TCHAR* SharedCode = TEXT(R"(
 float scale = max(WorldScale, 0.000001);
@@ -294,6 +315,47 @@ projectionWeights /= max(
     projectionWeights.x + projectionWeights.y + projectionWeights.z,
     0.000001
 );
+
+float heightBlend = max(HeightBlendStrength, 0.0);
+if (heightBlend > 0.000001)
+{
+    float4 heights = 0.0;
+
+    [unroll]
+    for (int materialIndex = 0; materialIndex < 4; ++materialIndex)
+    {
+        float slice = materialIds[materialIndex];
+
+        float heightX = Texture2DArraySample(
+            HeightArray,
+            HeightArraySampler,
+            float3(WorldPosition.yz * scale, slice)
+        ).r;
+        float heightY = Texture2DArraySample(
+            HeightArray,
+            HeightArraySampler,
+            float3(WorldPosition.xz * scale, slice)
+        ).r;
+        float heightZ = Texture2DArraySample(
+            HeightArray,
+            HeightArraySampler,
+            float3(WorldPosition.xy * scale, slice)
+        ).r;
+
+        heights[materialIndex] =
+            heightX * projectionWeights.x +
+            heightY * projectionWeights.y +
+            heightZ * projectionWeights.z;
+    }
+
+    float4 shapedWeights = blendWeights * exp2((heights - 0.5) * heightBlend);
+    float shapedSum = dot(shapedWeights, 1.0);
+
+    if (shapedSum > 0.000001)
+    {
+        blendWeights = shapedWeights / shapedSum;
+    }
+}
 )");
 
     auto AddSharedInputs = [
@@ -303,6 +365,8 @@ projectionWeights /= max(
         MaterialWeights,
         WorldScale,
         BlendSharpness,
+        HeightBlendStrength,
+        HeightArray,
         PackingBase
     ](UMaterialExpressionCustom* Custom)
     {
@@ -313,6 +377,8 @@ projectionWeights /= max(
         AddCustomInput(Custom, TEXT("MaterialWeightA"), MaterialWeights, 4);
         AddCustomInput(Custom, TEXT("WorldScale"), WorldScale);
         AddCustomInput(Custom, TEXT("BlendSharpness"), BlendSharpness);
+        AddCustomInput(Custom, TEXT("HeightBlendStrength"), HeightBlendStrength);
+        AddCustomInput(Custom, TEXT("HeightArray"), HeightArray);
         AddCustomInput(Custom, TEXT("MaterialIdPackingBase"), PackingBase);
     };
 

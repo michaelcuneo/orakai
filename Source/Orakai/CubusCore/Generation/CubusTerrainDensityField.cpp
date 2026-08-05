@@ -373,28 +373,27 @@ FCubusTerrainDensityField::GetColumnData(
         Column.SurfaceMaterialId =
             Settings.RockMaterialId;
     }
-    else if (
-        Column.SurfaceVoxelHeight >=
-        Settings.SnowMinimumHeight
-    )
-    {
-        Column.SurfaceMaterialId =
-            Settings.SnowMaterialId;
-    }
-    else if (Settings.BiomeSettings.bEnabled)
-    {
-        Column.SurfaceMaterialId = FCubusBiomeField::Sample(
-            WorldSampleX - 0.5f,
-            WorldSampleY - 0.5f,
-            Column.SurfaceVoxelHeight,
-            Column.Slope,
-            Settings.BiomeSettings
-        ).SurfaceMaterialId;
-    }
     else
     {
-        Column.SurfaceMaterialId =
-            Settings.SurfaceMaterialId;
+        Column.SurfaceMaterialId = Settings.BiomeSettings.bEnabled
+            ? FCubusBiomeField::Sample(
+                WorldSampleX - 0.5f,
+                WorldSampleY - 0.5f,
+                Column.SurfaceVoxelHeight,
+                Column.Slope,
+                Settings.BiomeSettings
+            ).SurfaceMaterialId
+            : Settings.SurfaceMaterialId;
+
+        // Snow should cap default terrain at elevation, but should not erase
+        // explicit biome-authored high-altitude surface choices.
+        if (
+            Column.SurfaceVoxelHeight >= Settings.SnowMinimumHeight &&
+            Column.SurfaceMaterialId == Settings.SurfaceMaterialId
+        )
+        {
+            Column.SurfaceMaterialId = Settings.SnowMaterialId;
+        }
     }
 
     ColumnCache.Add(Key, Column);
