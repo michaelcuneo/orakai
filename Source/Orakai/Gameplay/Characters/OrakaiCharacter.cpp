@@ -75,64 +75,37 @@ void AOrakaiCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &AOrakaiCharacter::Look);
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AOrakaiCharacter::Look);
 
-		if (bEnableSurvivalInteraction)
-		{
-			PlayerInputComponent->BindKey(
-				EKeys::LeftMouseButton,
-				IE_Pressed,
-				this,
-				&AOrakaiCharacter::HandleHarvestInput
-			);
-			PlayerInputComponent->BindKey(
-				EKeys::RightMouseButton,
-				IE_Pressed,
-				this,
-				&AOrakaiCharacter::HandlePlaceWoodInput
-			);
-		}
+		PlayerInputComponent->BindKey(
+			EKeys::LeftMouseButton,
+			IE_Pressed,
+			this,
+			&AOrakaiCharacter::HandleHarvestInput
+		);
+		PlayerInputComponent->BindKey(
+			EKeys::RightMouseButton,
+			IE_Pressed,
+			this,
+			&AOrakaiCharacter::HandlePlaceWoodInput
+		);
 
 		if (bEnableGhostMode)
 		{
-			PlayerInputComponent->BindKey(
-				EKeys::G,
-				IE_Pressed,
-				this,
-				&AOrakaiCharacter::ToggleGhostMode
-			);
-			PlayerInputComponent->BindKey(
-				EKeys::SpaceBar,
-				IE_Pressed,
-				this,
-				&AOrakaiCharacter::HandleGhostAscendPressed
-			);
-			PlayerInputComponent->BindKey(
-				EKeys::SpaceBar,
-				IE_Released,
-				this,
-				&AOrakaiCharacter::HandleGhostAscendReleased
-			);
-			PlayerInputComponent->BindKey(
-				EKeys::LeftControl,
-				IE_Pressed,
-				this,
-				&AOrakaiCharacter::HandleGhostDescendPressed
-			);
-			PlayerInputComponent->BindKey(
-				EKeys::LeftControl,
-				IE_Released,
-				this,
-				&AOrakaiCharacter::HandleGhostDescendReleased
-			);
+			PlayerInputComponent->BindKey(EKeys::G, IE_Pressed, this, &AOrakaiCharacter::ToggleGhostMode);
+			PlayerInputComponent->BindKey(EKeys::SpaceBar, IE_Pressed, this, &AOrakaiCharacter::HandleGhostAscendPressed);
+			PlayerInputComponent->BindKey(EKeys::SpaceBar, IE_Released, this, &AOrakaiCharacter::HandleGhostAscendReleased);
+			PlayerInputComponent->BindKey(EKeys::LeftControl, IE_Pressed, this, &AOrakaiCharacter::HandleGhostDescendPressed);
+			PlayerInputComponent->BindKey(EKeys::LeftControl, IE_Released, this, &AOrakaiCharacter::HandleGhostDescendReleased);
+		}
+
+		if (bEnableVoxelEditTestMode)
+		{
+			PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &AOrakaiCharacter::HandleEnableVoxelEditTestMode);
+			PlayerInputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &AOrakaiCharacter::HandleDisableVoxelEditTestMode);
 		}
 	}
 	else
 	{
-		UE_LOG(
-			LogOrakai,
-			Error,
-			TEXT("'%s' Failed to find an Enhanced Input component!"),
-			*GetNameSafe(this)
-		);
+		UE_LOG(LogOrakai, Error, TEXT("'%s' Failed to find an Enhanced Input component!"), *GetNameSafe(this));
 	}
 }
 
@@ -253,6 +226,88 @@ void AOrakaiCharacter::SetGhostModeEnabled(const bool bEnabled)
 	UE_LOG(LogOrakai, Display, TEXT("Ghost mode disabled."));
 }
 
+void AOrakaiCharacter::SetVoxelEditTestModeEnabled(const bool bEnabled)
+{
+	if (!bEnableVoxelEditTestMode || bVoxelEditTestModeActive == bEnabled)
+	{
+		return;
+	}
+
+	bVoxelEditTestModeActive = bEnabled;
+	UE_LOG(
+		LogOrakai,
+		Display,
+		TEXT("Voxel edit test mode %s. Left click removes density; right click adds density."),
+		bEnabled ? TEXT("enabled") : TEXT("disabled")
+	);
+}
+
+void AOrakaiCharacter::HandleEnableVoxelEditTestMode()
+{
+	SetVoxelEditTestModeEnabled(true);
+}
+
+void AOrakaiCharacter::HandleDisableVoxelEditTestMode()
+{
+	SetVoxelEditTestModeEnabled(false);
+}
+
+bool AOrakaiCharacter::TraceInteractionHit(FHitResult& OutHit, const FName TraceTag) const
+{
+	FVector TraceStart;
+	FVector TraceEnd;
+	if (!BuildInteractionRay(TraceStart, TraceEnd) || !IsValid(GetWorld()))
+	{
+		return false;
+	}
+
+	FCollisionQueryParams QueryParams(TraceTag, true, this);
+	return GetWorld()->LineTraceSingleByChannel(
+		OutHit,
+		TraceStart,
+		TraceEnd,
+		ECC_Visibility,
+		QueryParams
+	);
+}
+
+bool AOrakaiCharacter::RemoveDensityVoxelAtCrosshair()
+{
+	FHitResult Hit;
+	if (!TraceInteractionHit(Hit, SCENE_QUERY_STAT(OrakaiRemoveDensityTest)))
+	{
+		return false;
+	}
+
+	const int32 EditedCount = UCubusVoxelEditLibrary::RemoveDensityFromHit(
+		Hit,
+		FMath::Max(0, VoxelEditBrushRadius),
+		FMath::Max(0.01f, VoxelEditStrength)
+	);
+
+	UE_LOG(LogOrakai, Display, TEXT("Removed density from %d voxel samples."), EditedCount);
+	return EditedCount > 0;
+}
+
+bool AOrakaiCharacter::AddDensityVoxelAtCrosshair()
+{
+	FHitResult Hit;
+	if (!TraceInteractionHit(Hit, SCENE_QUERY_STAT(OrakaiAddDensityTest)))
+	{
+		return false;
+	}
+
+	const int32 EditedCount = UCubusVoxelEditLibrary::AddDensityFromHit(
+		Hit,
+		FMath::Max(0, VoxelEditBrushRadius),
+		FMath::Max(0.01f, VoxelEditStrength),
+		FMath::Max(1, VoxelEditMaterialId)
+	);
+
+	UE_LOG(LogOrakai, Display, TEXT("Added density to %d voxel samples with material %d."), EditedCount, VoxelEditMaterialId);
+	return EditedCount > 0;
+}
+
 void AOrakaiCharacter::HandleGhostAscendPressed()
 {
 	if (bGhostModeActive)
@@ -306,18 +361,14 @@ bool AOrakaiCharacter::BuildInteractionRay(FVector& OutStart, FVector& OutEnd) c
 	}
 
 	OutStart = FollowCamera->GetComponentLocation();
-	OutEnd = OutStart +
-		FollowCamera->GetForwardVector() * FMath::Max(100.0f, InteractionDistance);
+	OutEnd = OutStart + FollowCamera->GetForwardVector() * FMath::Max(100.0f, InteractionDistance);
 	return true;
 }
 
 int32 AOrakaiCharacter::GetWoodCount() const
 {
-	const UOrakaiPersistenceSubsystem* Persistence =
-		UOrakaiPersistenceSubsystem::Get(this);
-	return Persistence != nullptr
-		? Persistence->GetInventoryQuantity(TEXT("Wood"))
-		: 0;
+	const UOrakaiPersistenceSubsystem* Persistence = UOrakaiPersistenceSubsystem::Get(this);
+	return Persistence != nullptr ? Persistence->GetInventoryQuantity(TEXT("Wood")) : 0;
 }
 
 bool AOrakaiCharacter::DoHarvestTree()
@@ -330,27 +381,20 @@ bool AOrakaiCharacter::DoHarvestTree()
 	if (
 		!IsValid(CubusWorld) ||
 		!BuildInteractionRay(TraceStart, TraceEnd) ||
-		!CubusWorld->HarvestTreeAlongRay(
-			TraceStart,
-			TraceEnd,
-			TreeSelectionRadius,
-			TreeWorldVoxel
-		)
+		!CubusWorld->HarvestTreeAlongRay(TraceStart, TraceEnd, TreeSelectionRadius, TreeWorldVoxel)
 	)
 	{
 		return false;
 	}
 
-	UOrakaiPersistenceSubsystem* Persistence =
-		UOrakaiPersistenceSubsystem::Get(this);
+	UOrakaiPersistenceSubsystem* Persistence = UOrakaiPersistenceSubsystem::Get(this);
 	if (Persistence == nullptr)
 	{
 		return false;
 	}
 
 	const int32 NewWoodCount =
-		Persistence->GetInventoryQuantity(TEXT("Wood")) +
-		FMath::Max(1, WoodPerTree);
+		Persistence->GetInventoryQuantity(TEXT("Wood")) + FMath::Max(1, WoodPerTree);
 	Persistence->SetInventoryQuantity(TEXT("Wood"), NewWoodCount);
 
 	UE_LOG(
@@ -367,47 +411,49 @@ bool AOrakaiCharacter::DoHarvestTree()
 
 void AOrakaiCharacter::HandleHarvestInput()
 {
-	DoHarvestTree();
+	if (bVoxelEditTestModeActive)
+	{
+		RemoveDensityVoxelAtCrosshair();
+		return;
+	}
+
+	if (bEnableSurvivalInteraction)
+	{
+		DoHarvestTree();
+	}
 }
 
 void AOrakaiCharacter::HandlePlaceWoodInput()
 {
-	DoPlaceWoodBlock();
+	if (bVoxelEditTestModeActive)
+	{
+		AddDensityVoxelAtCrosshair();
+		return;
+	}
+
+	if (bEnableSurvivalInteraction)
+	{
+		DoPlaceWoodBlock();
+	}
 }
 
 bool AOrakaiCharacter::DoPlaceWoodBlock()
 {
-	UOrakaiPersistenceSubsystem* Persistence =
-		UOrakaiPersistenceSubsystem::Get(this);
+	UOrakaiPersistenceSubsystem* Persistence = UOrakaiPersistenceSubsystem::Get(this);
 	if (Persistence == nullptr)
 	{
 		return false;
 	}
 
-	const int32 WoodCount =
-		Persistence->GetInventoryQuantity(TEXT("Wood"));
+	const int32 WoodCount = Persistence->GetInventoryQuantity(TEXT("Wood"));
 	if (WoodCount <= 0)
 	{
 		return false;
 	}
 
-	FVector TraceStart;
-	FVector TraceEnd;
-	if (!BuildInteractionRay(TraceStart, TraceEnd))
-	{
-		return false;
-	}
-
 	FHitResult Hit;
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(OrakaiPlaceWood), true, this);
 	if (
-		!GetWorld()->LineTraceSingleByChannel(
-			Hit,
-			TraceStart,
-			TraceEnd,
-			ECC_Visibility,
-			QueryParams
-		) ||
+		!TraceInteractionHit(Hit, SCENE_QUERY_STAT(OrakaiPlaceWood)) ||
 		!UCubusVoxelEditLibrary::AddVoxelFromHit(Hit, WoodBlockMaterialId, false)
 	)
 	{
