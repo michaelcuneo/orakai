@@ -60,6 +60,18 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Ghost Mode", meta=(ClampMin="100.0", Units="cm/s"))
 	float GhostFlySpeed = 2400.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Voxel Editing")
+	bool bEnableVoxelEditTestMode = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Voxel Editing", meta=(ClampMin="0"))
+	int32 VoxelEditBrushRadius = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Voxel Editing", meta=(ClampMin="0.01"))
+	float VoxelEditStrength = 2.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Voxel Editing", meta=(ClampMin="1"))
+	int32 VoxelEditMaterialId = 1;
+
 public:
 	AOrakaiCharacter();
 
@@ -102,14 +114,29 @@ public:
 	UFUNCTION(BlueprintPure, Category="Debug|Ghost Mode")
 	bool IsGhostModeEnabled() const { return bGhostModeActive; }
 
+	UFUNCTION(BlueprintCallable, Category="Debug|Voxel Editing")
+	void SetVoxelEditTestModeEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintPure, Category="Debug|Voxel Editing")
+	bool IsVoxelEditTestModeEnabled() const { return bVoxelEditTestModeActive; }
+
+	UFUNCTION(BlueprintCallable, Category="Debug|Voxel Editing")
+	bool RemoveDensityVoxelAtCrosshair();
+
+	UFUNCTION(BlueprintCallable, Category="Debug|Voxel Editing")
+	bool AddDensityVoxelAtCrosshair();
+
 	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 
 private:
 	ACubusBlockWorldActor* FindCubusWorld() const;
 	bool BuildInteractionRay(FVector& OutStart, FVector& OutEnd) const;
+	bool TraceInteractionHit(FHitResult& OutHit, FName TraceTag) const;
 	void HandleHarvestInput();
 	void HandlePlaceWoodInput();
+	void HandleEnableVoxelEditTestMode();
+	void HandleDisableVoxelEditTestMode();
 	void HandleGhostAscendPressed();
 	void HandleGhostAscendReleased();
 	void HandleGhostDescendPressed();
@@ -118,6 +145,7 @@ private:
 	bool bGhostModeActive = false;
 	bool bGhostAscendHeld = false;
 	bool bGhostDescendHeld = false;
+	bool bVoxelEditTestModeActive = false;
 	TEnumAsByte<ECollisionEnabled::Type> SavedCapsuleCollision = ECollisionEnabled::QueryAndPhysics;
 	TEnumAsByte<EMovementMode> SavedMovementMode = MOVE_Walking;
 	uint8 SavedCustomMovementMode = 0;
