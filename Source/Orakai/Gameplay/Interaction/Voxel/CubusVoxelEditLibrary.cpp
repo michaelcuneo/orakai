@@ -56,12 +56,6 @@ namespace CubusVoxelEdit
             return false;
         }
 
-        /*
-         * Push the sample point slightly across the hit plane:
-         *
-         * removal  -> inside the struck voxel
-         * placement -> outside into the adjacent voxel
-         */
         const float SurfaceOffset =
             FMath::Max(0.5f, VoxelSize * 0.01f);
 
@@ -98,19 +92,77 @@ namespace CubusVoxelEdit
             )
         );
 
-        /*
-         * LocalCoordinate may intentionally be -1 or ChunkSize when the
-         * selected voxel lies across a chunk boundary. Adding it to the
-         * chunk's world-voxel origin naturally produces the correct world
-         * coordinate, and EditVoxelAtWorldVoxel resolves the neighbouring
-         * chunk.
-         */
         OutWorldVoxel =
             ChunkActor->GetChunkCoordinate() * Cubus::ChunkSize +
             LocalCoordinate;
 
         OutBlockWorld = BlockWorld;
         return true;
+    }
+
+    float SmoothBrushWeight(const int32 Radius, const int32 MaximumRadius)
+    {
+        if (MaximumRadius <= 0)
+        {
+            return Radius <= 0 ? 1.0f : 0.0f;
+        }
+
+        const float NormalizedRadius =
+            static_cast<float>(Radius) /
+            static_cast<float>(MaximumRadius + 1);
+
+        const float T = FMath::Clamp(1.0f - NormalizedRadius, 0.0f, 1.0f);
+        return T * T * (3.0f - 2.0f * T);
+    }
+
+    int32 ApplySmoothDensityBrush(
+        ACubusBlockWorldActor& BlockWorld,
+        const FIntVector& CentreWorldSample,
+        const int32 BrushRadius,
+        const float DensityDelta,
+        const int32 MaterialId
+    )
+    {
+        const int32 SafeRadius = FMath::Max(0, BrushRadius);
+
+        if (SafeRadius == 0)
+        {
+            return BlockWorld.EditDensitySphereAtWorldSample(
+                CentreWorldSample,
+                0,
+                DensityDelta,
+                MaterialId
+            );
+        }
+
+        int32 ChangedSampleCount = 0;
+        float OuterWeight = 0.0f;
+
+        for (int32 Radius = SafeRadius; Radius >= 0; --Radius)
+        {
+            const float CurrentWeight =
+                SmoothBrushWeight(Radius, SafeRadius);
+
+            const float IncrementalWeight =
+                FMath::Max(0.0f, CurrentWeight - OuterWeight);
+
+            OuterWeight = CurrentWeight;
+
+            if (IncrementalWeight <= KINDA_SMALL_NUMBER)
+            {
+                continue;
+            }
+
+            ChangedSampleCount +=
+                BlockWorld.EditDensitySphereAtWorldSample(
+                    CentreWorldSample,
+                    Radius,
+                    DensityDelta * IncrementalWeight,
+                    MaterialId
+                );
+        }
+
+        return ChangedSampleCount;
     }
 }
 
@@ -149,13 +201,7 @@ bool UCubusVoxelEditLibrary::RemoveVoxelFromHit(
     FIntVector WorldVoxel;
     ACubusBlockWorldActor* BlockWorld = nullptr;
 
-    if (
-        !ResolveHitVoxel(
-            Hit,
-            WorldVoxel,
-            BlockWorld
-        )
-    )
+    if (!ResolveHitVoxel(Hit, WorldVoxel, BlockWorld))
     {
         return false;
     }
@@ -181,13 +227,7 @@ bool UCubusVoxelEditLibrary::AddVoxelFromHit(
     FIntVector WorldVoxel;
     ACubusBlockWorldActor* BlockWorld = nullptr;
 
-    if (
-        !ResolveAdjacentVoxel(
-            Hit,
-            WorldVoxel,
-            BlockWorld
-        )
-    )
+    if (!ResolveAdjacentVoxel(Hit, WorldVoxel, BlockWorld))
     {
         return false;
     }
@@ -262,7 +302,8 @@ int32 UCubusVoxelEditLibrary::RemoveDensityFromHit(
         return 0;
     }
 
-    return BlockWorld->EditDensitySphereAtWorldSample(
+    return CubusVoxelEdit::ApplySmoothDensityBrush(
+        *BlockWorld,
         WorldSample,
         BrushRadius,
         -FMath::Abs(Strength),
@@ -290,7 +331,8 @@ int32 UCubusVoxelEditLibrary::AddDensityFromHit(
         return 0;
     }
 
-    return BlockWorld->EditDensitySphereAtWorldSample(
+    return CubusVoxelEdit::ApplySmoothDensityBrush(
+        *BlockWorld,
         WorldSample,
         BrushRadius,
         FMath::Abs(Strength),
