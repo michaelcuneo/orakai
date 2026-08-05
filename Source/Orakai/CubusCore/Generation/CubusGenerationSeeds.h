@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 9: heterogeneous soil undulation, broken ground and erosion
-    // rills replace the uniform fine-detail field from version eight.
-    static constexpr uint32 CurrentGenerationVersion = 9;
+    // Bumped to 10: deterministic terrain clutter is now appended from the
+    // terrain material library's surface-layer settings.
+    static constexpr uint32 CurrentGenerationVersion = 10;
 
     int64 World = 1;
     int32 Terrain = 0;
