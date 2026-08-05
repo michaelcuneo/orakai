@@ -18,12 +18,12 @@ public:
     static constexpr int32 UnifiedDensityMaterialKey = -1;
 
     /**
-     * Two 12-bit IDs are packed into each UV component. 4095 therefore is the
-     * largest density material ID that remains exactly representable after
-     * conversion to the procedural mesh GPU vertex format.
+        * Two 12-bit IDs are packed into each UV component. 4095 therefore is the
+        * largest density material ID that remains exactly representable after
+        * conversion to the procedural mesh GPU vertex format.
      */
-    static constexpr int32 MaximumDensityMaterialId = 4095;
-    static constexpr int32 MaterialIdPackingBase = 4096;
+        static constexpr int32 MaximumDensityMaterialId = 4095;
+        static constexpr int32 MaterialIdPackingBase = 4096;
 
     static void BuildChunk(
         const FCubusDensitySamplingBuffer& DensityBuffer,
