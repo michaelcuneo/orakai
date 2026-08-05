@@ -7,11 +7,18 @@
 #include "AssetToolsModule.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "MaterialEditingLibrary.h"
+#include "Materials/MaterialExpressionAdd.h"
 #include "Materials/MaterialExpressionComponentMask.h"
+#include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionLinearInterpolate.h"
+#include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionOneMinus.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionSaturate.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
@@ -25,7 +32,7 @@ namespace CubusDensityMaterialBuilder
         TEXT("/Game/Cubus/Materials/M_CubusDensityPBR");
     constexpr const TCHAR* AssetName = TEXT("M_CubusDensityPBR");
 
-    constexpr const TCHAR* BaseColorArrayPath =
+        constexpr const TCHAR* BaseColorArrayPath =
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityBaseColor.TA_CubusDensityBaseColor");
     constexpr const TCHAR* NormalArrayPath =
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityNormal.TA_CubusDensityNormal");
@@ -33,6 +40,10 @@ namespace CubusDensityMaterialBuilder
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityORM.TA_CubusDensityORM");
     constexpr const TCHAR* HeightArrayPath =
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityHeight.TA_CubusDensityHeight");
+    constexpr const TCHAR* MacroColorArrayPath =
+        TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityMacroColor.TA_CubusDensityMacroColor");
+    constexpr const TCHAR* DetailNormalArrayPath =
+        TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityDetailNormal.TA_CubusDensityDetailNormal");
 
     template <typename TExpression>
     TExpression* AddExpression(
@@ -98,7 +109,7 @@ namespace CubusDensityMaterialBuilder
         return Mask;
     }
 
-    UMaterialExpressionTextureObjectParameter* AddTextureArray(
+        UMaterialExpressionTextureObjectParameter* AddTextureArray(
         UMaterial* Material,
         const TCHAR* ParameterName,
         UTexture* Texture,
@@ -118,6 +129,116 @@ namespace CubusDensityMaterialBuilder
         Result->Texture = Texture;
         Result->SamplerType = SamplerType;
         return Result;
+    }
+
+    UMaterialExpressionConstant* AddConstant(
+        UMaterial* Material,
+        const float Value,
+        const int32 X,
+        const int32 Y
+    )
+    {
+        UMaterialExpressionConstant* Node = AddExpression<UMaterialExpressionConstant>(Material, X, Y);
+        Node->R = Value;
+        return Node;
+    }
+
+    UMaterialExpressionScalarParameter* AddScalar(
+        UMaterial* Material,
+        const TCHAR* Name,
+        const float Value,
+        const int32 X,
+        const int32 Y
+    )
+    {
+        UMaterialExpressionScalarParameter* Node = AddExpression<UMaterialExpressionScalarParameter>(Material, X, Y);
+        Node->ParameterName = Name;
+        Node->DefaultValue = Value;
+        return Node;
+    }
+
+    UMaterialExpressionVectorParameter* AddVector(
+        UMaterial* Material,
+        const TCHAR* Name,
+        const FLinearColor& Value,
+        const int32 X,
+        const int32 Y
+    )
+    {
+        UMaterialExpressionVectorParameter* Node = AddExpression<UMaterialExpressionVectorParameter>(Material, X, Y);
+        Node->ParameterName = Name;
+        Node->DefaultValue = Value;
+        return Node;
+    }
+
+    UMaterialExpressionMultiply* AddMultiply(
+        UMaterial* Material,
+        UMaterialExpression* A,
+        UMaterialExpression* B,
+        const int32 X,
+        const int32 Y,
+        const int32 AOutput = 0,
+        const int32 BOutput = 0
+    )
+    {
+        UMaterialExpressionMultiply* Node = AddExpression<UMaterialExpressionMultiply>(Material, X, Y);
+        Connect(Node->A, A, AOutput);
+        Connect(Node->B, B, BOutput);
+        return Node;
+    }
+
+    UMaterialExpressionAdd* AddAdd(
+        UMaterial* Material,
+        UMaterialExpression* A,
+        UMaterialExpression* B,
+        const int32 X,
+        const int32 Y
+    )
+    {
+        UMaterialExpressionAdd* Node = AddExpression<UMaterialExpressionAdd>(Material, X, Y);
+        Connect(Node->A, A);
+        Connect(Node->B, B);
+        return Node;
+    }
+
+    UMaterialExpressionOneMinus* AddOneMinus(
+        UMaterial* Material,
+        UMaterialExpression* Input,
+        const int32 X,
+        const int32 Y
+    )
+    {
+        UMaterialExpressionOneMinus* Node = AddExpression<UMaterialExpressionOneMinus>(Material, X, Y);
+        Connect(Node->Input, Input);
+        return Node;
+    }
+
+    UMaterialExpressionSaturate* AddSaturate(
+        UMaterial* Material,
+        UMaterialExpression* Input,
+        const int32 X,
+        const int32 Y
+    )
+    {
+        UMaterialExpressionSaturate* Node = AddExpression<UMaterialExpressionSaturate>(Material, X, Y);
+        Connect(Node->Input, Input);
+        return Node;
+    }
+
+    UMaterialExpressionLinearInterpolate* AddLerp(
+        UMaterial* Material,
+        UMaterialExpression* A,
+        UMaterialExpression* B,
+        UMaterialExpression* Alpha,
+        const int32 X,
+        const int32 Y
+    )
+    {
+        UMaterialExpressionLinearInterpolate* Node = AddExpression<UMaterialExpressionLinearInterpolate>(Material, X, Y);
+        Connect(Node->A, A);
+        Connect(Node->B, B);
+        Connect(Node->Alpha, Alpha);
+        return Node;
     }
 
     UMaterial* FindOrCreateMaterial()
@@ -171,7 +292,7 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
         return nullptr;
     }
 
-    UTexture* BaseColorArrayAsset =
+        UTexture* BaseColorArrayAsset =
         LoadObject<UTexture>(nullptr, BaseColorArrayPath);
     UTexture* NormalArrayAsset =
         LoadObject<UTexture>(nullptr, NormalArrayPath);
@@ -179,26 +300,33 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
         LoadObject<UTexture>(nullptr, OrmArrayPath);
     UTexture* HeightArrayAsset =
         LoadObject<UTexture>(nullptr, HeightArrayPath);
+    UTexture* MacroColorArrayAsset =
+        LoadObject<UTexture>(nullptr, MacroColorArrayPath);
+    UTexture* DetailNormalArrayAsset =
+        LoadObject<UTexture>(nullptr, DetailNormalArrayPath);
 
     if (
         !IsValid(BaseColorArrayAsset) ||
         !IsValid(NormalArrayAsset) ||
         !IsValid(OrmArrayAsset) ||
-        !IsValid(HeightArrayAsset)
+        !IsValid(HeightArrayAsset) ||
+        !IsValid(MacroColorArrayAsset) ||
+        !IsValid(DetailNormalArrayAsset)
     )
     {
         UE_LOG(
             LogTemp,
             Error,
             TEXT(
-                "Build the Cubus density BaseColor, Normal, ORM and Height texture "
-                "arrays before building M_CubusDensityPBR. "
-                "BaseColor=%s Normal=%s ORM=%s Height=%s"
+                "Build the Cubus density texture arrays before building M_CubusDensityPBR. "
+                "BaseColor=%s Normal=%s ORM=%s Height=%s MacroColor=%s DetailNormal=%s"
             ),
             IsValid(BaseColorArrayAsset) ? TEXT("valid") : TEXT("missing"),
             IsValid(NormalArrayAsset) ? TEXT("valid") : TEXT("missing"),
             IsValid(OrmArrayAsset) ? TEXT("valid") : TEXT("missing"),
-            IsValid(HeightArrayAsset) ? TEXT("valid") : TEXT("missing")
+            IsValid(HeightArrayAsset) ? TEXT("valid") : TEXT("missing"),
+            IsValid(MacroColorArrayAsset) ? TEXT("valid") : TEXT("missing"),
+            IsValid(DetailNormalArrayAsset) ? TEXT("valid") : TEXT("missing")
         );
         return nullptr;
     }
@@ -255,7 +383,16 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
             460
         );
 
-    UMaterialExpressionTextureObjectParameter* HeightArray =
+
+
+
+
+
+
+
+
+
+        UMaterialExpressionTextureObjectParameter* HeightArray =
         AddTextureArray(
             Material,
             TEXT("DensityHeightArray"),
@@ -265,25 +402,70 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
             640
         );
 
-    UMaterialExpressionScalarParameter* WorldScale =
-        AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 660);
-    WorldScale->ParameterName = TEXT("CubusBaseColorWorldScale");
-    WorldScale->DefaultValue = 0.01f;
+    UMaterialExpressionTextureObjectParameter* MacroColorArray =
+        AddTextureArray(
+            Material,
+            TEXT("DensityMacroColorArray"),
+            MacroColorArrayAsset,
+            SAMPLERTYPE_Color,
+            -1500,
+            820
+        );
 
-    UMaterialExpressionScalarParameter* BlendSharpness =
-        AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 820);
-    BlendSharpness->ParameterName = TEXT("CubusTriplanarBlendSharpness");
-    BlendSharpness->DefaultValue = 4.0f;
+    UMaterialExpressionTextureObjectParameter* DetailNormalArray =
+        AddTextureArray(
+            Material,
+            TEXT("DensityDetailNormalArray"),
+            DetailNormalArrayAsset,
+            SAMPLERTYPE_Normal,
+            -1500,
+            1000
+        );
 
-    UMaterialExpressionScalarParameter* HeightBlendStrength =
-        AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 900);
-    HeightBlendStrength->ParameterName = TEXT("CubusHeightBlendStrength");
-    HeightBlendStrength->DefaultValue = 3.0f;
+    UMaterialExpressionTextureObjectParameter* MaterialDataTable =
+        AddTextureArray(
+            Material,
+            TEXT("DensityMaterialData"),
+            nullptr,
+            SAMPLERTYPE_LinearColor,
+            -1500,
+            1180
+        );
+
+    UMaterialExpressionScalarParameter* TableWidth =
+        AddScalar(Material, TEXT("DensityMaterialTableWidth"), 1.0f, -1500, 1340);
 
     UMaterialExpressionScalarParameter* PackingBase =
-        AddExpression<UMaterialExpressionScalarParameter>(Material, -1500, 980);
-    PackingBase->ParameterName = TEXT("DensityMaterialIdPackingBase");
-    PackingBase->DefaultValue = 32.0f;
+        AddScalar(Material, TEXT("DensityMaterialIdPackingBase"), 32.0f, -1500, 1420);
+
+    UMaterialExpressionScalarParameter* WeatherWetness =
+        AddScalar(Material, TEXT("CubusWeatherWetness"), 0.0f, -1500, 1500);
+
+    UMaterialExpressionScalarParameter* WeatherWetDarkening =
+        AddScalar(Material, TEXT("CubusWeatherWetDarkening"), 0.65f, -1500, 1580);
+
+    UMaterialExpressionScalarParameter* WeatherWetRoughness =
+        AddScalar(Material, TEXT("CubusWeatherWetRoughness"), 0.12f, -1500, 1660);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     const TCHAR* SharedCode = TEXT(R"(
 float scale = max(WorldScale, 0.000001);
