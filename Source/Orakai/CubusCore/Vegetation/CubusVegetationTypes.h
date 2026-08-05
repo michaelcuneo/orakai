@@ -3,6 +3,20 @@
 #include "CoreMinimal.h"
 #include "CubusVegetationTypes.generated.h"
 
+/** Stable generated-instance type IDs shared by generation and rendering. */
+namespace CubusVegetationType
+{
+    constexpr int32 Grass = 1;
+    constexpr int32 Shrub = 2;
+    constexpr int32 BroadleafTree = 3;
+    constexpr int32 Reeds = 4;
+    constexpr int32 Alpine = 5;
+    constexpr int32 ConiferTree = 6;
+    constexpr int32 StoneClutter = 7;
+    constexpr int32 OrganicClutter = 8;
+    constexpr int32 Count = 9;
+}
+
 UENUM(BlueprintType, meta = (Bitflags))
 enum class ECubusVegetationBiome : uint8
 {
@@ -21,7 +35,12 @@ struct FCubusVegetationSpeciesCatalogEntry
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
     FName SpeciesId = NAME_None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Catalog",
+        meta = (ToolTip = "1 Grass, 2 Shrub, 3 Broadleaf, 4 Reeds, 5 Alpine, 6 Conifer, 7 Stone clutter, 8 Organic clutter")
+    )
     int32 TypeId = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (ClampMin = "0.001"))
@@ -33,24 +52,13 @@ struct FCubusVegetationSpeciesCatalogEntry
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (AllowedClasses = "/Script/Engine.StaticMesh,/Script/Engine.SkeletalMesh"))
     TArray<TSoftObjectPtr<UObject>> GrowthStageMeshes;
 
-    /**
-     * Static representations used when a skeletal tree is outside the
-     * interactive hero radius.
-     *
-     * Entries correspond to GrowthStageMeshes by growth-stage index.
-     * A missing entry means no static fallback exists for that stage.
-     */
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Vegetation|Catalog"
-    )
+    /** Static representations used outside the interactive hero radius. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
     TArray<TSoftObjectPtr<UStaticMesh>> StaticGrowthStageMeshes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (AllowedClasses = "/Script/Engine.Actor"))
     TSoftClassPtr<AActor> HeroPveActorClassOverride;
 
-    // Accepts data assets/blueprints that indirectly reference the runtime actor class.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
     TSoftObjectPtr<UObject> HeroPveActorAssetOverride;
 };
