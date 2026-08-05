@@ -19,20 +19,16 @@
 
 AOrakaiCharacter::AOrakaiCharacter()
 {
-	// Set size for collision capsule
+	PrimaryActorTick.bCanEverTick = true;
+
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
-		
-	// Don't rotate when the controller rotates. Let that just affect the camera.
+
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
 
-	// Configure character movement
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
-
-	// Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
-	// instead of recompiling to adjust them
 	GetCharacterMovement()->JumpZVelocity = 500.f;
 	GetCharacterMovement()->AirControl = 0.35f;
 	GetCharacterMovement()->MaxWalkSpeed = 500.f;
@@ -40,42 +36,47 @@ AOrakaiCharacter::AOrakaiCharacter()
 	GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
 	GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
 
-	// Create a camera boom (pulls in towards the player if there is a collision)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
 	CameraBoom->TargetArmLength = 400.0f;
 	CameraBoom->bUsePawnControlRotation = true;
 
-	// Create a follow camera
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+}
 
-	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
-	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+void AOrakaiCharacter::Tick(const float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (!bGhostModeActive || GetController() == nullptr)
+	{
+		return;
+	}
+
+	const float VerticalInput =
+		(bGhostAscendHeld ? 1.0f : 0.0f) -
+		(bGhostDescendHeld ? 1.0f : 0.0f);
+
+	if (!FMath::IsNearlyZero(VerticalInput))
+	{
+		AddMovementInput(FVector::UpVector, VerticalInput);
+	}
 }
 
 void AOrakaiCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
-	// Set up action bindings
-	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
-		
-		// Jumping
+	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+	{
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
-
-		// Moving
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AOrakaiCharacter::Move);
 		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &AOrakaiCharacter::Look);
-
-		// Looking
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AOrakaiCharacter::Look);
 
 		if (bEnableSurvivalInteraction)
 		{
-			// UE 5.8 deliberately deletes UEnhancedInputComponent::BindKey. These
-			// source-default mouse bindings still use the legacy key-binding path,
-			// so bind them through the UInputComponent base instead.
 			PlayerInputComponent->BindKey(
 				EKeys::LeftMouseButton,
 				IE_Pressed,
@@ -89,56 +90,93 @@ void AOrakaiCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 				&AOrakaiCharacter::HandlePlaceWoodInput
 			);
 		}
+
+		if (bEnableGhostMode)
+		{
+			PlayerInputComponent->BindKey(
+				EKeys::G,
+				IE_Pressed,
+				this,
+				&AOrakaiCharacter::ToggleGhostMode
+			);
+			PlayerInputComponent->BindKey(
+				EKeys::SpaceBar,
+				IE_Pressed,
+				this,
+				&AOrakaiCharacter::HandleGhostAscendPressed
+			);
+			PlayerInputComponent->BindKey(
+				EKeys::SpaceBar,
+				IE_Released,
+				this,
+				&AOrakaiCharacter::HandleGhostAscendReleased
+			);
+			PlayerInputComponent->BindKey(
+				EKeys::LeftControl,
+				IE_Pressed,
+				this,
+				&AOrakaiCharacter::HandleGhostDescendPressed
+			);
+			PlayerInputComponent->BindKey(
+				EKeys::LeftControl,
+				IE_Released,
+				this,
+				&AOrakaiCharacter::HandleGhostDescendReleased
+			);
+		}
 	}
 	else
 	{
-		UE_LOG(LogOrakai, Error, TEXT("'%s' Failed to find an Enhanced Input component! This template is built to use the Enhanced Input system. If you intend to use the legacy system, then you will need to update this C++ file."), *GetNameSafe(this));
+		UE_LOG(
+			LogOrakai,
+			Error,
+			TEXT("'%s' Failed to find an Enhanced Input component!"),
+			*GetNameSafe(this)
+		);
 	}
 }
 
 void AOrakaiCharacter::Move(const FInputActionValue& Value)
 {
-	// input is a Vector2D
-	FVector2D MovementVector = Value.Get<FVector2D>();
-
-	// route the input
+	const FVector2D MovementVector = Value.Get<FVector2D>();
 	DoMove(MovementVector.X, MovementVector.Y);
 }
 
 void AOrakaiCharacter::Look(const FInputActionValue& Value)
 {
-	// input is a Vector2D
-	FVector2D LookAxisVector = Value.Get<FVector2D>();
-
-	// route the input
+	const FVector2D LookAxisVector = Value.Get<FVector2D>();
 	DoLook(LookAxisVector.X, LookAxisVector.Y);
 }
 
 void AOrakaiCharacter::DoMove(float Right, float Forward)
 {
-	if (GetController() != nullptr)
+	if (GetController() == nullptr)
 	{
-		// find out which way is forward
-		const FRotator Rotation = GetController()->GetControlRotation();
-		const FRotator YawRotation(0, Rotation.Yaw, 0);
+		return;
+	}
 
-		// get forward vector
-		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	const FRotator Rotation = GetController()->GetControlRotation();
 
-		// get right vector 
-		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
-		// add movement 
+	if (bGhostModeActive)
+	{
+		const FVector ForwardDirection = Rotation.Vector();
+		const FVector RightDirection = FRotationMatrix(Rotation).GetUnitAxis(EAxis::Y);
 		AddMovementInput(ForwardDirection, Forward);
 		AddMovementInput(RightDirection, Right);
+		return;
 	}
+
+	const FRotator YawRotation(0.0f, Rotation.Yaw, 0.0f);
+	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+	AddMovementInput(ForwardDirection, Forward);
+	AddMovementInput(RightDirection, Right);
 }
 
 void AOrakaiCharacter::DoLook(float Yaw, float Pitch)
 {
 	if (GetController() != nullptr)
 	{
-		// add yaw and pitch input to controller
 		AddControllerYawInput(Yaw);
 		AddControllerPitchInput(Pitch);
 	}
@@ -146,14 +184,99 @@ void AOrakaiCharacter::DoLook(float Yaw, float Pitch)
 
 void AOrakaiCharacter::DoJumpStart()
 {
-	// signal the character to jump
-	Jump();
+	if (!bGhostModeActive)
+	{
+		Jump();
+	}
 }
 
 void AOrakaiCharacter::DoJumpEnd()
 {
-	// signal the character to stop jumping
-	StopJumping();
+	if (!bGhostModeActive)
+	{
+		StopJumping();
+	}
+}
+
+void AOrakaiCharacter::ToggleGhostMode()
+{
+	SetGhostModeEnabled(!bGhostModeActive);
+}
+
+void AOrakaiCharacter::SetGhostModeEnabled(const bool bEnabled)
+{
+	if (bGhostModeActive == bEnabled)
+	{
+		return;
+	}
+
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (!IsValid(Movement) || !IsValid(Capsule))
+	{
+		return;
+	}
+
+	if (bEnabled)
+	{
+		SavedCapsuleCollision = Capsule->GetCollisionEnabled();
+		SavedMovementMode = Movement->MovementMode;
+		SavedCustomMovementMode = Movement->CustomMovementMode;
+		SavedMaxFlySpeed = Movement->MaxFlySpeed;
+		bSavedOrientRotationToMovement = Movement->bOrientRotationToMovement;
+
+		bGhostModeActive = true;
+		bGhostAscendHeld = false;
+		bGhostDescendHeld = false;
+
+		StopJumping();
+		Movement->StopMovementImmediately();
+		Movement->MaxFlySpeed = FMath::Max(100.0f, GhostFlySpeed);
+		Movement->bOrientRotationToMovement = false;
+		Movement->SetMovementMode(MOVE_Flying);
+		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+		UE_LOG(LogOrakai, Display, TEXT("Ghost mode enabled."));
+		return;
+	}
+
+	bGhostModeActive = false;
+	bGhostAscendHeld = false;
+	bGhostDescendHeld = false;
+
+	Movement->StopMovementImmediately();
+	Movement->MaxFlySpeed = SavedMaxFlySpeed;
+	Movement->bOrientRotationToMovement = bSavedOrientRotationToMovement;
+	Capsule->SetCollisionEnabled(SavedCapsuleCollision);
+	Movement->SetMovementMode(SavedMovementMode, SavedCustomMovementMode);
+
+	UE_LOG(LogOrakai, Display, TEXT("Ghost mode disabled."));
+}
+
+void AOrakaiCharacter::HandleGhostAscendPressed()
+{
+	if (bGhostModeActive)
+	{
+		bGhostAscendHeld = true;
+	}
+}
+
+void AOrakaiCharacter::HandleGhostAscendReleased()
+{
+	bGhostAscendHeld = false;
+}
+
+void AOrakaiCharacter::HandleGhostDescendPressed()
+{
+	if (bGhostModeActive)
+	{
+		bGhostDescendHeld = true;
+	}
+}
+
+void AOrakaiCharacter::HandleGhostDescendReleased()
+{
+	bGhostDescendHeld = false;
 }
 
 ACubusBlockWorldActor* AOrakaiCharacter::FindCubusWorld() const
@@ -175,10 +298,7 @@ ACubusBlockWorldActor* AOrakaiCharacter::FindCubusWorld() const
 	return nullptr;
 }
 
-bool AOrakaiCharacter::BuildInteractionRay(
-	FVector& OutStart,
-	FVector& OutEnd
-) const
+bool AOrakaiCharacter::BuildInteractionRay(FVector& OutStart, FVector& OutEnd) const
 {
 	if (!IsValid(FollowCamera))
 	{
