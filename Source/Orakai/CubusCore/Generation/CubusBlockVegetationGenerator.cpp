@@ -9,17 +9,6 @@
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Generation/CubusLandmarkField.h"
 
-namespace CubusVegetationType
-{
-    constexpr int32 Grass = 1;
-    constexpr int32 Shrub = 2;
-    constexpr int32 BroadleafTree = 3;
-    constexpr int32 Reeds = 4;
-    constexpr int32 Alpine = 5;
-    constexpr int32 ConiferTree = 6;
-    constexpr int32 Count = 7;
-}
-
 void FCubusBlockVegetationGenerator::Generate(
     FCubusBlockChunkData& Chunk,
     const UCubusGeologyProfile* GeologyProfile
