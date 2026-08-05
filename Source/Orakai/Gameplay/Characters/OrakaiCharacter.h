@@ -15,42 +15,30 @@ struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
 
-/**
- *  A simple player-controllable third person character
- *  Implements a controllable orbiting camera
- */
 UCLASS(abstract)
 class AOrakaiCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
-	/** Camera boom positioning the camera behind the character */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta=(AllowPrivateAccess="true"))
 	USpringArmComponent* CameraBoom;
 
-	/** Follow camera */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta=(AllowPrivateAccess="true"))
 	UCameraComponent* FollowCamera;
-	
-protected:
 
-	/** Jump Input Action */
+protected:
 	UPROPERTY(EditAnywhere, Category="Input")
 	UInputAction* JumpAction;
 
-	/** Move Input Action */
 	UPROPERTY(EditAnywhere, Category="Input")
 	UInputAction* MoveAction;
 
-	/** Look Input Action */
 	UPROPERTY(EditAnywhere, Category="Input")
 	UInputAction* LookAction;
 
-	/** Mouse Look Input Action */
 	UPROPERTY(EditAnywhere, Category="Input")
 	UInputAction* MouseLookAction;
 
-	/** Source-only defaults: left click harvests, right click places wood. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Survival")
 	bool bEnableSurvivalInteraction = true;
 
@@ -66,39 +54,33 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Survival", meta=(ClampMin="1"))
 	int32 WoodBlockMaterialId = 6;
 
-public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Ghost Mode")
+	bool bEnableGhostMode = true;
 
-	/** Constructor */
-	AOrakaiCharacter();	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Ghost Mode", meta=(ClampMin="100.0", Units="cm/s"))
+	float GhostFlySpeed = 2400.0f;
+
+public:
+	AOrakaiCharacter();
+
+	virtual void Tick(float DeltaSeconds) override;
 
 protected:
-
-	/** Initialize input action bindings */
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
-protected:
-
-	/** Called for movement input */
 	void Move(const FInputActionValue& Value);
-
-	/** Called for looking input */
 	void Look(const FInputActionValue& Value);
 
 public:
-
-	/** Handles move inputs from either controls or UI interfaces */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void DoMove(float Right, float Forward);
 
-	/** Handles look inputs from either controls or UI interfaces */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void DoLook(float Yaw, float Pitch);
 
-	/** Handles jump pressed inputs from either controls or UI interfaces */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void DoJumpStart();
 
-	/** Handles jump pressed inputs from either controls or UI interfaces */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void DoJumpEnd();
 
@@ -111,17 +93,34 @@ public:
 	UFUNCTION(BlueprintPure, Category="Survival")
 	int32 GetWoodCount() const;
 
-public:
+	UFUNCTION(BlueprintCallable, Category="Debug|Ghost Mode")
+	void ToggleGhostMode();
 
-	/** Returns CameraBoom subobject **/
-	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+	UFUNCTION(BlueprintCallable, Category="Debug|Ghost Mode")
+	void SetGhostModeEnabled(bool bEnabled);
 
-	/** Returns FollowCamera subobject **/
-	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+	UFUNCTION(BlueprintPure, Category="Debug|Ghost Mode")
+	bool IsGhostModeEnabled() const { return bGhostModeActive; }
+
+	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 
 private:
 	ACubusBlockWorldActor* FindCubusWorld() const;
 	bool BuildInteractionRay(FVector& OutStart, FVector& OutEnd) const;
 	void HandleHarvestInput();
 	void HandlePlaceWoodInput();
+	void HandleGhostAscendPressed();
+	void HandleGhostAscendReleased();
+	void HandleGhostDescendPressed();
+	void HandleGhostDescendReleased();
+
+	bool bGhostModeActive = false;
+	bool bGhostAscendHeld = false;
+	bool bGhostDescendHeld = false;
+	TEnumAsByte<ECollisionEnabled::Type> SavedCapsuleCollision = ECollisionEnabled::QueryAndPhysics;
+	TEnumAsByte<EMovementMode> SavedMovementMode = MOVE_Walking;
+	uint8 SavedCustomMovementMode = 0;
+	float SavedMaxFlySpeed = 600.0f;
+	bool bSavedOrientRotationToMovement = true;
 };
