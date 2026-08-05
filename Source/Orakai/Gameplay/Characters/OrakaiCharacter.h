@@ -132,7 +132,7 @@ public:
 private:
 	ACubusBlockWorldActor* FindCubusWorld() const;
 	bool BuildInteractionRay(FVector& OutStart, FVector& OutEnd) const;
-	bool TraceInteractionHit(FHitResult& OutHit, FName TraceTag) const;
+	bool TraceInteractionHit(FHitResult& OutHit) const;
 	void HandleHarvestInput();
 	void HandlePlaceWoodInput();
 	void HandleEnableVoxelEditTestMode();
