@@ -7,18 +7,11 @@
 #include "AssetToolsModule.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "MaterialEditingLibrary.h"
-#include "Materials/MaterialExpressionAdd.h"
 #include "Materials/MaterialExpressionComponentMask.h"
-#include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionCustom.h"
-#include "Materials/MaterialExpressionLinearInterpolate.h"
-#include "Materials/MaterialExpressionMultiply.h"
-#include "Materials/MaterialExpressionOneMinus.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
-#include "Materials/MaterialExpressionSaturate.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
-#include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
@@ -32,7 +25,7 @@ namespace CubusDensityMaterialBuilder
         TEXT("/Game/Cubus/Materials/M_CubusDensityPBR");
     constexpr const TCHAR* AssetName = TEXT("M_CubusDensityPBR");
 
-        constexpr const TCHAR* BaseColorArrayPath =
+    constexpr const TCHAR* BaseColorArrayPath =
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityBaseColor.TA_CubusDensityBaseColor");
     constexpr const TCHAR* NormalArrayPath =
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityNormal.TA_CubusDensityNormal");
@@ -46,21 +39,16 @@ namespace CubusDensityMaterialBuilder
         TEXT("/Game/Cubus/Materials/Arrays/TA_CubusDensityDetailNormal.TA_CubusDensityDetailNormal");
 
     template <typename TExpression>
-    TExpression* AddExpression(
-        UMaterial* Material,
-        const int32 X,
-        const int32 Y
-    )
+    TExpression* AddExpression(UMaterial* Material, int32 X, int32 Y)
     {
-        UMaterialExpression* Created =
+        TExpression* Expression = Cast<TExpression>(
             UMaterialEditingLibrary::CreateMaterialExpression(
                 Material,
                 TExpression::StaticClass(),
                 X,
                 Y
-            );
-
-        TExpression* Expression = Cast<TExpression>(Created);
+            )
+        );
         check(Expression != nullptr);
         return Expression;
     }
@@ -68,7 +56,7 @@ namespace CubusDensityMaterialBuilder
     void Connect(
         FExpressionInput& Input,
         UMaterialExpression* Expression,
-        const int32 OutputIndex = 0
+        int32 OutputIndex = 0
     )
     {
         Input.Expression = Expression;
@@ -79,165 +67,67 @@ namespace CubusDensityMaterialBuilder
         UMaterialExpressionCustom* Custom,
         const TCHAR* Name,
         UMaterialExpression* Expression,
-        const int32 OutputIndex = 0
+        int32 OutputIndex = 0
     )
     {
-        FCustomInput Input;
+        FCustomInput& Input = Custom->Inputs.AddDefaulted_GetRef();
         Input.InputName = FName(Name);
         Connect(Input.Input, Expression, OutputIndex);
-        Custom->Inputs.Add(Input);
     }
 
-    UMaterialExpressionComponentMask* AddMask(
+    UMaterialExpressionTextureObjectParameter* AddTextureArray(
         UMaterial* Material,
-        UMaterialExpression* Input,
-        const bool bR,
-        const bool bG,
-        const bool bB,
-        const int32 X,
-        const int32 Y
-    )
-    {
-        UMaterialExpressionComponentMask* Mask =
-            AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
-
-        Mask->R = bR;
-        Mask->G = bG;
-        Mask->B = bB;
-        Mask->A = false;
-        Connect(Mask->Input, Input);
-        return Mask;
-    }
-
-        UMaterialExpressionTextureObjectParameter* AddTextureArray(
-        UMaterial* Material,
-        const TCHAR* ParameterName,
+        const TCHAR* Name,
         UTexture* Texture,
-        const EMaterialSamplerType SamplerType,
-        const int32 X,
-        const int32 Y
+        EMaterialSamplerType SamplerType,
+        int32 X,
+        int32 Y
     )
     {
-        UMaterialExpressionTextureObjectParameter* Result =
+        UMaterialExpressionTextureObjectParameter* Node =
             AddExpression<UMaterialExpressionTextureObjectParameter>(
                 Material,
                 X,
                 Y
             );
-
-        Result->ParameterName = ParameterName;
-        Result->Texture = Texture;
-        Result->SamplerType = SamplerType;
-        return Result;
-    }
-
-    UMaterialExpressionConstant* AddConstant(
-        UMaterial* Material,
-        const float Value,
-        const int32 X,
-        const int32 Y
-    )
-    {
-        UMaterialExpressionConstant* Node = AddExpression<UMaterialExpressionConstant>(Material, X, Y);
-        Node->R = Value;
+        Node->ParameterName = Name;
+        Node->Texture = Texture;
+        Node->SamplerType = SamplerType;
         return Node;
     }
 
     UMaterialExpressionScalarParameter* AddScalar(
         UMaterial* Material,
         const TCHAR* Name,
-        const float Value,
-        const int32 X,
-        const int32 Y
+        float Value,
+        int32 X,
+        int32 Y
     )
     {
-        UMaterialExpressionScalarParameter* Node = AddExpression<UMaterialExpressionScalarParameter>(Material, X, Y);
+        UMaterialExpressionScalarParameter* Node =
+            AddExpression<UMaterialExpressionScalarParameter>(Material, X, Y);
         Node->ParameterName = Name;
         Node->DefaultValue = Value;
         return Node;
     }
 
-    UMaterialExpressionVectorParameter* AddVector(
-        UMaterial* Material,
-        const TCHAR* Name,
-        const FLinearColor& Value,
-        const int32 X,
-        const int32 Y
-    )
-    {
-        UMaterialExpressionVectorParameter* Node = AddExpression<UMaterialExpressionVectorParameter>(Material, X, Y);
-        Node->ParameterName = Name;
-        Node->DefaultValue = Value;
-        return Node;
-    }
-
-    UMaterialExpressionMultiply* AddMultiply(
-        UMaterial* Material,
-        UMaterialExpression* A,
-        UMaterialExpression* B,
-        const int32 X,
-        const int32 Y,
-        const int32 AOutput = 0,
-        const int32 BOutput = 0
-    )
-    {
-        UMaterialExpressionMultiply* Node = AddExpression<UMaterialExpressionMultiply>(Material, X, Y);
-        Connect(Node->A, A, AOutput);
-        Connect(Node->B, B, BOutput);
-        return Node;
-    }
-
-    UMaterialExpressionAdd* AddAdd(
-        UMaterial* Material,
-        UMaterialExpression* A,
-        UMaterialExpression* B,
-        const int32 X,
-        const int32 Y
-    )
-    {
-        UMaterialExpressionAdd* Node = AddExpression<UMaterialExpressionAdd>(Material, X, Y);
-        Connect(Node->A, A);
-        Connect(Node->B, B);
-        return Node;
-    }
-
-    UMaterialExpressionOneMinus* AddOneMinus(
+    UMaterialExpressionComponentMask* AddMask(
         UMaterial* Material,
         UMaterialExpression* Input,
-        const int32 X,
-        const int32 Y
+        bool bR,
+        bool bG,
+        bool bB,
+        int32 X,
+        int32 Y
     )
     {
-        UMaterialExpressionOneMinus* Node = AddExpression<UMaterialExpressionOneMinus>(Material, X, Y);
+        UMaterialExpressionComponentMask* Node =
+            AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
+        Node->R = bR;
+        Node->G = bG;
+        Node->B = bB;
+        Node->A = false;
         Connect(Node->Input, Input);
-        return Node;
-    }
-
-    UMaterialExpressionSaturate* AddSaturate(
-        UMaterial* Material,
-        UMaterialExpression* Input,
-        const int32 X,
-        const int32 Y
-    )
-    {
-        UMaterialExpressionSaturate* Node = AddExpression<UMaterialExpressionSaturate>(Material, X, Y);
-        Connect(Node->Input, Input);
-        return Node;
-    }
-
-    UMaterialExpressionLinearInterpolate* AddLerp(
-        UMaterial* Material,
-        UMaterialExpression* A,
-        UMaterialExpression* B,
-        UMaterialExpression* Alpha,
-        const int32 X,
-        const int32 Y
-    )
-    {
-        UMaterialExpressionLinearInterpolate* Node = AddExpression<UMaterialExpressionLinearInterpolate>(Material, X, Y);
-        Connect(Node->A, A);
-        Connect(Node->B, B);
-        Connect(Node->Alpha, Alpha);
         return Node;
     }
 
@@ -292,41 +182,26 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
         return nullptr;
     }
 
-        UTexture* BaseColorArrayAsset =
-        LoadObject<UTexture>(nullptr, BaseColorArrayPath);
-    UTexture* NormalArrayAsset =
-        LoadObject<UTexture>(nullptr, NormalArrayPath);
-    UTexture* OrmArrayAsset =
-        LoadObject<UTexture>(nullptr, OrmArrayPath);
-    UTexture* HeightArrayAsset =
-        LoadObject<UTexture>(nullptr, HeightArrayPath);
-    UTexture* MacroColorArrayAsset =
-        LoadObject<UTexture>(nullptr, MacroColorArrayPath);
-    UTexture* DetailNormalArrayAsset =
-        LoadObject<UTexture>(nullptr, DetailNormalArrayPath);
+    UTexture* BaseColorAsset = LoadObject<UTexture>(nullptr, BaseColorArrayPath);
+    UTexture* NormalAsset = LoadObject<UTexture>(nullptr, NormalArrayPath);
+    UTexture* OrmAsset = LoadObject<UTexture>(nullptr, OrmArrayPath);
+    UTexture* HeightAsset = LoadObject<UTexture>(nullptr, HeightArrayPath);
+    UTexture* MacroAsset = LoadObject<UTexture>(nullptr, MacroColorArrayPath);
+    UTexture* DetailNormalAsset = LoadObject<UTexture>(nullptr, DetailNormalArrayPath);
 
     if (
-        !IsValid(BaseColorArrayAsset) ||
-        !IsValid(NormalArrayAsset) ||
-        !IsValid(OrmArrayAsset) ||
-        !IsValid(HeightArrayAsset) ||
-        !IsValid(MacroColorArrayAsset) ||
-        !IsValid(DetailNormalArrayAsset)
+        !IsValid(BaseColorAsset) ||
+        !IsValid(NormalAsset) ||
+        !IsValid(OrmAsset) ||
+        !IsValid(HeightAsset) ||
+        !IsValid(MacroAsset) ||
+        !IsValid(DetailNormalAsset)
     )
     {
         UE_LOG(
             LogTemp,
             Error,
-            TEXT(
-                "Build the Cubus density texture arrays before building M_CubusDensityPBR. "
-                "BaseColor=%s Normal=%s ORM=%s Height=%s MacroColor=%s DetailNormal=%s"
-            ),
-            IsValid(BaseColorArrayAsset) ? TEXT("valid") : TEXT("missing"),
-            IsValid(NormalArrayAsset) ? TEXT("valid") : TEXT("missing"),
-            IsValid(OrmArrayAsset) ? TEXT("valid") : TEXT("missing"),
-            IsValid(HeightArrayAsset) ? TEXT("valid") : TEXT("missing"),
-            IsValid(MacroColorArrayAsset) ? TEXT("valid") : TEXT("missing"),
-            IsValid(DetailNormalArrayAsset) ? TEXT("valid") : TEXT("missing")
+            TEXT("Build all six Cubus density texture arrays before building M_CubusDensityPBR.")
         );
         return nullptr;
     }
@@ -341,222 +216,91 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
     Material->bTangentSpaceNormal = false;
 
     UMaterialExpressionWorldPosition* WorldPosition =
-        AddExpression<UMaterialExpressionWorldPosition>(Material, -1500, -650);
-
+        AddExpression<UMaterialExpressionWorldPosition>(Material, -1800, -700);
     UMaterialExpressionVertexNormalWS* VertexNormal =
-        AddExpression<UMaterialExpressionVertexNormalWS>(Material, -1500, -470);
-
-    UMaterialExpressionTextureCoordinate* MaterialPalette =
-        AddExpression<UMaterialExpressionTextureCoordinate>(Material, -1500, -290);
-    MaterialPalette->CoordinateIndex = 0;
-
-    UMaterialExpressionVertexColor* MaterialWeights =
-        AddExpression<UMaterialExpressionVertexColor>(Material, -1500, -110);
+        AddExpression<UMaterialExpressionVertexNormalWS>(Material, -1800, -520);
+    UMaterialExpressionTextureCoordinate* Palette =
+        AddExpression<UMaterialExpressionTextureCoordinate>(Material, -1800, -340);
+    Palette->CoordinateIndex = 0;
+    UMaterialExpressionVertexColor* Weights =
+        AddExpression<UMaterialExpressionVertexColor>(Material, -1800, -160);
 
     UMaterialExpressionTextureObjectParameter* BaseColorArray =
-        AddTextureArray(
-            Material,
-            TEXT("DensityBaseColorArray"),
-            BaseColorArrayAsset,
-            SAMPLERTYPE_Color,
-            -1500,
-            100
-        );
-
+        AddTextureArray(Material, TEXT("DensityBaseColorArray"), BaseColorAsset, SAMPLERTYPE_Color, -1800, 80);
     UMaterialExpressionTextureObjectParameter* NormalArray =
-        AddTextureArray(
-            Material,
-            TEXT("DensityNormalArray"),
-            NormalArrayAsset,
-            SAMPLERTYPE_Normal,
-            -1500,
-            280
-        );
-
+        AddTextureArray(Material, TEXT("DensityNormalArray"), NormalAsset, SAMPLERTYPE_Normal, -1800, 240);
     UMaterialExpressionTextureObjectParameter* OrmArray =
-        AddTextureArray(
-            Material,
-            TEXT("DensityORMArray"),
-            OrmArrayAsset,
-            SAMPLERTYPE_LinearColor,
-            -1500,
-            460
-        );
+        AddTextureArray(Material, TEXT("DensityORMArray"), OrmAsset, SAMPLERTYPE_LinearColor, -1800, 400);
+    UMaterialExpressionTextureObjectParameter* HeightArray =
+        AddTextureArray(Material, TEXT("DensityHeightArray"), HeightAsset, SAMPLERTYPE_LinearColor, -1800, 560);
+    UMaterialExpressionTextureObjectParameter* MacroArray =
+        AddTextureArray(Material, TEXT("DensityMacroColorArray"), MacroAsset, SAMPLERTYPE_Color, -1800, 720);
+    UMaterialExpressionTextureObjectParameter* DetailArray =
+        AddTextureArray(Material, TEXT("DensityDetailNormalArray"), DetailNormalAsset, SAMPLERTYPE_Normal, -1800, 880);
 
-
-
-
-
-
-
-
-
-
-        UMaterialExpressionTextureObjectParameter* HeightArray =
-        AddTextureArray(
-            Material,
-            TEXT("DensityHeightArray"),
-            HeightArrayAsset,
-            SAMPLERTYPE_LinearColor,
-            -1500,
-            640
-        );
-
-    UMaterialExpressionTextureObjectParameter* MacroColorArray =
-        AddTextureArray(
-            Material,
-            TEXT("DensityMacroColorArray"),
-            MacroColorArrayAsset,
-            SAMPLERTYPE_Color,
-            -1500,
-            820
-        );
-
-    UMaterialExpressionTextureObjectParameter* DetailNormalArray =
-        AddTextureArray(
-            Material,
-            TEXT("DensityDetailNormalArray"),
-            DetailNormalArrayAsset,
-            SAMPLERTYPE_Normal,
-            -1500,
-            1000
-        );
-
-    UMaterialExpressionTextureObjectParameter* MaterialDataTable =
-        AddTextureArray(
-            Material,
-            TEXT("DensityMaterialData"),
-            nullptr,
-            SAMPLERTYPE_LinearColor,
-            -1500,
-            1180
-        );
-
-    UMaterialExpressionScalarParameter* TableWidth =
-        AddScalar(Material, TEXT("DensityMaterialTableWidth"), 1.0f, -1500, 1340);
-
+    UMaterialExpressionScalarParameter* WorldScale =
+        AddScalar(Material, TEXT("CubusBaseColorWorldScale"), 0.01f, -1800, 1100);
+    UMaterialExpressionScalarParameter* MacroScale =
+        AddScalar(Material, TEXT("CubusMacroWorldScale"), 0.0005f, -1800, 1180);
+    UMaterialExpressionScalarParameter* MacroStrength =
+        AddScalar(Material, TEXT("CubusMacroColorStrength"), 0.35f, -1800, 1260);
+    UMaterialExpressionScalarParameter* DetailScale =
+        AddScalar(Material, TEXT("CubusDetailNormalWorldScale"), 0.04f, -1800, 1340);
+    UMaterialExpressionScalarParameter* DetailStrength =
+        AddScalar(Material, TEXT("CubusDetailNormalStrength"), 0.35f, -1800, 1420);
+    UMaterialExpressionScalarParameter* BlendSharpness =
+        AddScalar(Material, TEXT("CubusTriplanarBlendSharpness"), 4.0f, -1800, 1500);
+    UMaterialExpressionScalarParameter* HeightBlendStrength =
+        AddScalar(Material, TEXT("CubusHeightBlendStrength"), 3.0f, -1800, 1580);
     UMaterialExpressionScalarParameter* PackingBase =
-        AddScalar(Material, TEXT("DensityMaterialIdPackingBase"), 32.0f, -1500, 1420);
-
-    UMaterialExpressionScalarParameter* WeatherWetness =
-        AddScalar(Material, TEXT("CubusWeatherWetness"), 0.0f, -1500, 1500);
-
-    UMaterialExpressionScalarParameter* WeatherWetDarkening =
-        AddScalar(Material, TEXT("CubusWeatherWetDarkening"), 0.65f, -1500, 1580);
-
-    UMaterialExpressionScalarParameter* WeatherWetRoughness =
-        AddScalar(Material, TEXT("CubusWeatherWetRoughness"), 0.12f, -1500, 1660);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        AddScalar(Material, TEXT("DensityMaterialIdPackingBase"), 32.0f, -1800, 1660);
+    UMaterialExpressionScalarParameter* Wetness =
+        AddScalar(Material, TEXT("CubusWeatherWetness"), 0.0f, -1800, 1740);
+    UMaterialExpressionScalarParameter* WetDarkening =
+        AddScalar(Material, TEXT("CubusWeatherWetDarkening"), 0.65f, -1800, 1820);
+    UMaterialExpressionScalarParameter* WetRoughness =
+        AddScalar(Material, TEXT("CubusWeatherWetRoughness"), 0.12f, -1800, 1900);
 
     const TCHAR* SharedCode = TEXT(R"(
 float scale = max(WorldScale, 0.000001);
 float sharpness = max(BlendSharpness, 1.0);
 float packingBase = max(MaterialIdPackingBase, 2.0);
-
 float packed01 = floor(MaterialPalette.x + 0.5);
 float packed23 = floor(MaterialPalette.y + 0.5);
-
-float4 materialIds = float4(
-    fmod(packed01, packingBase),
-    floor(packed01 / packingBase),
-    fmod(packed23, packingBase),
-    floor(packed23 / packingBase)
-);
-materialIds = max(materialIds, 1.0);
-
-float4 blendWeights = saturate(
-    float4(MaterialWeightsRgb, MaterialWeightA)
-);
-float blendWeightSum = dot(blendWeights, 1.0);
-blendWeights = blendWeightSum > 0.000001
-    ? blendWeights / blendWeightSum
-    : float4(1.0, 0.0, 0.0, 0.0);
-
+float4 materialIds = max(float4(
+    fmod(packed01, packingBase), floor(packed01 / packingBase),
+    fmod(packed23, packingBase), floor(packed23 / packingBase)), 1.0);
+float4 blendWeights = saturate(float4(MaterialWeightsRgb, MaterialWeightA));
+float weightSum = dot(blendWeights, 1.0);
+blendWeights = weightSum > 0.000001 ? blendWeights / weightSum : float4(1,0,0,0);
 float3 geometryNormal = normalize(VertexNormal);
 float3 projectionWeights = pow(abs(geometryNormal), sharpness);
-projectionWeights /= max(
-    projectionWeights.x + projectionWeights.y + projectionWeights.z,
-    0.000001
-);
-
-float heightBlend = max(HeightBlendStrength, 0.0);
-if (heightBlend > 0.000001)
+projectionWeights /= max(dot(projectionWeights, 1.0), 0.000001);
+float heightStrength = max(HeightBlendStrength, 0.0);
+if (heightStrength > 0.000001)
 {
     float4 heights = 0.0;
-
-    [unroll]
-    for (int materialIndex = 0; materialIndex < 4; ++materialIndex)
+    [unroll] for (int i = 0; i < 4; ++i)
     {
-        float slice = materialIds[materialIndex];
-
-        float heightX = Texture2DArraySample(
-            HeightArray,
-            HeightArraySampler,
-            float3(WorldPosition.yz * scale, slice)
-        ).r;
-        float heightY = Texture2DArraySample(
-            HeightArray,
-            HeightArraySampler,
-            float3(WorldPosition.xz * scale, slice)
-        ).r;
-        float heightZ = Texture2DArraySample(
-            HeightArray,
-            HeightArraySampler,
-            float3(WorldPosition.xy * scale, slice)
-        ).r;
-
-        heights[materialIndex] =
-            heightX * projectionWeights.x +
-            heightY * projectionWeights.y +
-            heightZ * projectionWeights.z;
+        float slice = materialIds[i];
+        heights[i] =
+            Texture2DArraySample(HeightArray, HeightArraySampler, float3(WorldPosition.yz * scale, slice)).r * projectionWeights.x +
+            Texture2DArraySample(HeightArray, HeightArraySampler, float3(WorldPosition.xz * scale, slice)).r * projectionWeights.y +
+            Texture2DArraySample(HeightArray, HeightArraySampler, float3(WorldPosition.xy * scale, slice)).r * projectionWeights.z;
     }
-
-    float4 shapedWeights = blendWeights * exp2((heights - 0.5) * heightBlend);
-    float shapedSum = dot(shapedWeights, 1.0);
-
-    if (shapedSum > 0.000001)
-    {
-        blendWeights = shapedWeights / shapedSum;
-    }
+    float4 shaped = blendWeights * exp2((heights - 0.5) * heightStrength);
+    float shapedSum = dot(shaped, 1.0);
+    if (shapedSum > 0.000001) blendWeights = shaped / shapedSum;
 }
 )");
 
-    auto AddSharedInputs = [
-        WorldPosition,
-        VertexNormal,
-        MaterialPalette,
-        MaterialWeights,
-        WorldScale,
-        BlendSharpness,
-        HeightBlendStrength,
-        HeightArray,
-        PackingBase
-    ](UMaterialExpressionCustom* Custom)
+    auto AddSharedInputs = [&](UMaterialExpressionCustom* Custom)
     {
         AddCustomInput(Custom, TEXT("WorldPosition"), WorldPosition);
         AddCustomInput(Custom, TEXT("VertexNormal"), VertexNormal);
-        AddCustomInput(Custom, TEXT("MaterialPalette"), MaterialPalette);
-        AddCustomInput(Custom, TEXT("MaterialWeightsRgb"), MaterialWeights, 0);
-        AddCustomInput(Custom, TEXT("MaterialWeightA"), MaterialWeights, 4);
+        AddCustomInput(Custom, TEXT("MaterialPalette"), Palette);
+        AddCustomInput(Custom, TEXT("MaterialWeightsRgb"), Weights, 0);
+        AddCustomInput(Custom, TEXT("MaterialWeightA"), Weights, 4);
         AddCustomInput(Custom, TEXT("WorldScale"), WorldScale);
         AddCustomInput(Custom, TEXT("BlendSharpness"), BlendSharpness);
         AddCustomInput(Custom, TEXT("HeightBlendStrength"), HeightBlendStrength);
@@ -565,168 +309,112 @@ if (heightBlend > 0.000001)
     };
 
     UMaterialExpressionCustom* BaseColor =
-        AddExpression<UMaterialExpressionCustom>(Material, -560, -560);
-    BaseColor->Description = TEXT("Cubus Density Palette Triplanar Base Color");
+        AddExpression<UMaterialExpressionCustom>(Material, -700, -620);
+    BaseColor->Description = TEXT("Cubus material and macro colour");
     BaseColor->OutputType = CMOT_Float3;
     BaseColor->Code = FString(SharedCode) + TEXT(R"(
-float3 result = 0.0;
-
-[unroll]
-for (int materialIndex = 0; materialIndex < 4; ++materialIndex)
+float3 baseResult = 0.0;
+float3 macroResult = 0.0;
+float macroScale = max(MacroScale, 0.000001);
+[unroll] for (int i = 0; i < 4; ++i)
 {
-    float slice = materialIds[materialIndex];
-    float materialWeight = blendWeights[materialIndex];
-
-    float3 sampleX = Texture2DArraySample(
-        BaseColorArray,
-        BaseColorArraySampler,
-        float3(WorldPosition.yz * scale, slice)
-    ).rgb;
-    float3 sampleY = Texture2DArraySample(
-        BaseColorArray,
-        BaseColorArraySampler,
-        float3(WorldPosition.xz * scale, slice)
-    ).rgb;
-    float3 sampleZ = Texture2DArraySample(
-        BaseColorArray,
-        BaseColorArraySampler,
-        float3(WorldPosition.xy * scale, slice)
-    ).rgb;
-
-    result += (
-        sampleX * projectionWeights.x +
-        sampleY * projectionWeights.y +
-        sampleZ * projectionWeights.z
-    ) * materialWeight;
+    float slice = materialIds[i];
+    float w = blendWeights[i];
+    float3 baseSample =
+        Texture2DArraySample(BaseColorArray, BaseColorArraySampler, float3(WorldPosition.yz * scale, slice)).rgb * projectionWeights.x +
+        Texture2DArraySample(BaseColorArray, BaseColorArraySampler, float3(WorldPosition.xz * scale, slice)).rgb * projectionWeights.y +
+        Texture2DArraySample(BaseColorArray, BaseColorArraySampler, float3(WorldPosition.xy * scale, slice)).rgb * projectionWeights.z;
+    float3 macroSample =
+        Texture2DArraySample(MacroColorArray, MacroColorArraySampler, float3(WorldPosition.yz * macroScale, slice)).rgb * projectionWeights.x +
+        Texture2DArraySample(MacroColorArray, MacroColorArraySampler, float3(WorldPosition.xz * macroScale, slice)).rgb * projectionWeights.y +
+        Texture2DArraySample(MacroColorArray, MacroColorArraySampler, float3(WorldPosition.xy * macroScale, slice)).rgb * projectionWeights.z;
+    baseResult += baseSample * w;
+    macroResult += macroSample * w;
 }
-
-return result;
+float3 macroMultiplier = lerp(1.0, macroResult * 2.0, saturate(MacroStrength));
+float3 dryColor = baseResult * macroMultiplier;
+float wetFactor = saturate(WeatherWetness) * saturate(WeatherWetDarkening);
+return dryColor * lerp(1.0, 0.55, wetFactor);
 )");
     AddSharedInputs(BaseColor);
     AddCustomInput(BaseColor, TEXT("BaseColorArray"), BaseColorArray);
+    AddCustomInput(BaseColor, TEXT("MacroColorArray"), MacroArray);
+    AddCustomInput(BaseColor, TEXT("MacroScale"), MacroScale);
+    AddCustomInput(BaseColor, TEXT("MacroStrength"), MacroStrength);
+    AddCustomInput(BaseColor, TEXT("WeatherWetness"), Wetness);
+    AddCustomInput(BaseColor, TEXT("WeatherWetDarkening"), WetDarkening);
 
     UMaterialExpressionCustom* WorldNormal =
-        AddExpression<UMaterialExpressionCustom>(Material, -560, -80);
-    WorldNormal->Description = TEXT("Cubus Density Palette Triplanar World Normal");
+        AddExpression<UMaterialExpressionCustom>(Material, -700, -80);
+    WorldNormal->Description = TEXT("Cubus base and micro world normal");
     WorldNormal->OutputType = CMOT_Float3;
     WorldNormal->Code = FString(SharedCode) + TEXT(R"(
-float3 result = 0.0;
-float signX = geometryNormal.x < 0.0 ? -1.0 : 1.0;
-float signY = geometryNormal.y < 0.0 ? -1.0 : 1.0;
-float signZ = geometryNormal.z < 0.0 ? -1.0 : 1.0;
-
-[unroll]
-for (int materialIndex = 0; materialIndex < 4; ++materialIndex)
+float3 baseResult = 0.0;
+float3 detailResult = 0.0;
+float detailScale = max(DetailScale, 0.000001);
+float3 signs = float3(
+    geometryNormal.x < 0.0 ? -1.0 : 1.0,
+    geometryNormal.y < 0.0 ? -1.0 : 1.0,
+    geometryNormal.z < 0.0 ? -1.0 : 1.0
+);
+[unroll] for (int i = 0; i < 4; ++i)
 {
-    float slice = materialIds[materialIndex];
-    float materialWeight = blendWeights[materialIndex];
-
-    float2 encodedX = Texture2DArraySample(
-        NormalArray,
-        NormalArraySampler,
-        float3(WorldPosition.yz * scale, slice)
-    ).rg * 2.0 - 1.0;
-    float2 encodedY = Texture2DArraySample(
-        NormalArray,
-        NormalArraySampler,
-        float3(WorldPosition.xz * scale, slice)
-    ).rg * 2.0 - 1.0;
-    float2 encodedZ = Texture2DArraySample(
-        NormalArray,
-        NormalArraySampler,
-        float3(WorldPosition.xy * scale, slice)
-    ).rg * 2.0 - 1.0;
-
-    float3 tangentX = float3(
-        encodedX,
-        sqrt(saturate(1.0 - dot(encodedX, encodedX)))
-    );
-    float3 tangentY = float3(
-        encodedY,
-        sqrt(saturate(1.0 - dot(encodedY, encodedY)))
-    );
-    float3 tangentZ = float3(
-        encodedZ,
-        sqrt(saturate(1.0 - dot(encodedZ, encodedZ)))
-    );
-
-    float3 normalX = float3(
-        tangentX.z * signX,
-        tangentX.x,
-        tangentX.y
-    );
-    float3 normalY = float3(
-        tangentY.x,
-        tangentY.z * signY,
-        tangentY.y
-    );
-    float3 normalZ = float3(
-        tangentZ.x,
-        tangentZ.y,
-        tangentZ.z * signZ
-    );
-
-    float3 materialNormal = normalize(
-        normalX * projectionWeights.x +
-        normalY * projectionWeights.y +
-        normalZ * projectionWeights.z
-    );
-
-    result += materialNormal * materialWeight;
+    float slice = materialIds[i];
+    float w = blendWeights[i];
+    float2 bx = Texture2DArraySample(NormalArray, NormalArraySampler, float3(WorldPosition.yz * scale, slice)).rg * 2.0 - 1.0;
+    float2 by = Texture2DArraySample(NormalArray, NormalArraySampler, float3(WorldPosition.xz * scale, slice)).rg * 2.0 - 1.0;
+    float2 bz = Texture2DArraySample(NormalArray, NormalArraySampler, float3(WorldPosition.xy * scale, slice)).rg * 2.0 - 1.0;
+    float2 dx = Texture2DArraySample(DetailNormalArray, DetailNormalArraySampler, float3(WorldPosition.yz * detailScale, slice)).rg * 2.0 - 1.0;
+    float2 dy = Texture2DArraySample(DetailNormalArray, DetailNormalArraySampler, float3(WorldPosition.xz * detailScale, slice)).rg * 2.0 - 1.0;
+    float2 dz = Texture2DArraySample(DetailNormalArray, DetailNormalArraySampler, float3(WorldPosition.xy * detailScale, slice)).rg * 2.0 - 1.0;
+    float3 bnx = float3(sqrt(saturate(1.0-dot(bx,bx))) * signs.x, bx.x, bx.y);
+    float3 bny = float3(by.x, sqrt(saturate(1.0-dot(by,by))) * signs.y, by.y);
+    float3 bnz = float3(bz.x, bz.y, sqrt(saturate(1.0-dot(bz,bz))) * signs.z);
+    float3 dnx = float3(sqrt(saturate(1.0-dot(dx,dx))) * signs.x, dx.x, dx.y);
+    float3 dny = float3(dy.x, sqrt(saturate(1.0-dot(dy,dy))) * signs.y, dy.y);
+    float3 dnz = float3(dz.x, dz.y, sqrt(saturate(1.0-dot(dz,dz))) * signs.z);
+    baseResult += normalize(bnx*projectionWeights.x + bny*projectionWeights.y + bnz*projectionWeights.z) * w;
+    detailResult += normalize(dnx*projectionWeights.x + dny*projectionWeights.y + dnz*projectionWeights.z) * w;
 }
-
-return normalize(result);
+float3 baseNormal = normalize(baseResult);
+float3 detailNormal = normalize(detailResult);
+return normalize(lerp(baseNormal, normalize(baseNormal + detailNormal - geometryNormal), saturate(DetailStrength)));
 )");
     AddSharedInputs(WorldNormal);
     AddCustomInput(WorldNormal, TEXT("NormalArray"), NormalArray);
+    AddCustomInput(WorldNormal, TEXT("DetailNormalArray"), DetailArray);
+    AddCustomInput(WorldNormal, TEXT("DetailScale"), DetailScale);
+    AddCustomInput(WorldNormal, TEXT("DetailStrength"), DetailStrength);
 
     UMaterialExpressionCustom* Orm =
-        AddExpression<UMaterialExpressionCustom>(Material, -560, 400);
-    Orm->Description = TEXT("Cubus Density Palette Triplanar ORM");
+        AddExpression<UMaterialExpressionCustom>(Material, -700, 500);
+    Orm->Description = TEXT("Cubus blended ORM and wet roughness");
     Orm->OutputType = CMOT_Float3;
     Orm->Code = FString(SharedCode) + TEXT(R"(
 float3 result = 0.0;
-
-[unroll]
-for (int materialIndex = 0; materialIndex < 4; ++materialIndex)
+[unroll] for (int i = 0; i < 4; ++i)
 {
-    float slice = materialIds[materialIndex];
-    float materialWeight = blendWeights[materialIndex];
-
-    float3 sampleX = Texture2DArraySample(
-        OrmArray,
-        OrmArraySampler,
-        float3(WorldPosition.yz * scale, slice)
-    ).rgb;
-    float3 sampleY = Texture2DArraySample(
-        OrmArray,
-        OrmArraySampler,
-        float3(WorldPosition.xz * scale, slice)
-    ).rgb;
-    float3 sampleZ = Texture2DArraySample(
-        OrmArray,
-        OrmArraySampler,
-        float3(WorldPosition.xy * scale, slice)
-    ).rgb;
-
-    result += (
-        sampleX * projectionWeights.x +
-        sampleY * projectionWeights.y +
-        sampleZ * projectionWeights.z
-    ) * materialWeight;
+    float slice = materialIds[i];
+    float3 sampleValue =
+        Texture2DArraySample(OrmArray, OrmArraySampler, float3(WorldPosition.yz * scale, slice)).rgb * projectionWeights.x +
+        Texture2DArraySample(OrmArray, OrmArraySampler, float3(WorldPosition.xz * scale, slice)).rgb * projectionWeights.y +
+        Texture2DArraySample(OrmArray, OrmArraySampler, float3(WorldPosition.xy * scale, slice)).rgb * projectionWeights.z;
+    result += sampleValue * blendWeights[i];
 }
-
+result.g = lerp(result.g, saturate(WeatherWetRoughness), saturate(WeatherWetness));
 return result;
 )");
     AddSharedInputs(Orm);
     AddCustomInput(Orm, TEXT("OrmArray"), OrmArray);
+    AddCustomInput(Orm, TEXT("WeatherWetness"), Wetness);
+    AddCustomInput(Orm, TEXT("WeatherWetRoughness"), WetRoughness);
 
     UMaterialExpressionComponentMask* AmbientOcclusion =
-        AddMask(Material, Orm, true, false, false, -100, 390);
+        AddMask(Material, Orm, true, false, false, -180, 480);
     UMaterialExpressionComponentMask* Roughness =
-        AddMask(Material, Orm, false, true, false, -100, 520);
+        AddMask(Material, Orm, false, true, false, -180, 600);
     UMaterialExpressionComponentMask* Metallic =
-        AddMask(Material, Orm, false, false, true, -100, 650);
+        AddMask(Material, Orm, false, false, true, -180, 720);
 
     UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
     Connect(Data->BaseColor, BaseColor);
@@ -739,11 +427,8 @@ return result;
 
     UE_LOG(
         LogTemp,
-        Warning,
-        TEXT(
-            "Built Cubus density material stage 4: decoded UV0 palette and "
-            "blended triplanar BaseColor, world-space Normal and ORM."
-        )
+        Display,
+        TEXT("Built Cubus density terrain material: palette, macro colour, PBR micro detail and weather response.")
     );
 
     return Material;
