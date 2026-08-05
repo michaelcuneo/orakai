@@ -75,18 +75,8 @@ void AOrakaiCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &AOrakaiCharacter::Look);
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AOrakaiCharacter::Look);
 
-		PlayerInputComponent->BindKey(
-			EKeys::LeftMouseButton,
-			IE_Pressed,
-			this,
-			&AOrakaiCharacter::HandleHarvestInput
-		);
-		PlayerInputComponent->BindKey(
-			EKeys::RightMouseButton,
-			IE_Pressed,
-			this,
-			&AOrakaiCharacter::HandlePlaceWoodInput
-		);
+		PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AOrakaiCharacter::HandleHarvestInput);
+		PlayerInputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &AOrakaiCharacter::HandlePlaceWoodInput);
 
 		if (bEnableGhostMode)
 		{
@@ -197,18 +187,15 @@ void AOrakaiCharacter::SetGhostModeEnabled(const bool bEnabled)
 		SavedCustomMovementMode = Movement->CustomMovementMode;
 		SavedMaxFlySpeed = Movement->MaxFlySpeed;
 		bSavedOrientRotationToMovement = Movement->bOrientRotationToMovement;
-
 		bGhostModeActive = true;
 		bGhostAscendHeld = false;
 		bGhostDescendHeld = false;
-
 		StopJumping();
 		Movement->StopMovementImmediately();
 		Movement->MaxFlySpeed = FMath::Max(100.0f, GhostFlySpeed);
 		Movement->bOrientRotationToMovement = false;
 		Movement->SetMovementMode(MOVE_Flying);
 		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
 		UE_LOG(LogOrakai, Display, TEXT("Ghost mode enabled."));
 		return;
 	}
@@ -216,13 +203,11 @@ void AOrakaiCharacter::SetGhostModeEnabled(const bool bEnabled)
 	bGhostModeActive = false;
 	bGhostAscendHeld = false;
 	bGhostDescendHeld = false;
-
 	Movement->StopMovementImmediately();
 	Movement->MaxFlySpeed = SavedMaxFlySpeed;
 	Movement->bOrientRotationToMovement = bSavedOrientRotationToMovement;
 	Capsule->SetCollisionEnabled(SavedCapsuleCollision);
 	Movement->SetMovementMode(SavedMovementMode, SavedCustomMovementMode);
-
 	UE_LOG(LogOrakai, Display, TEXT("Ghost mode disabled."));
 }
 
@@ -234,12 +219,7 @@ void AOrakaiCharacter::SetVoxelEditTestModeEnabled(const bool bEnabled)
 	}
 
 	bVoxelEditTestModeActive = bEnabled;
-	UE_LOG(
-		LogOrakai,
-		Display,
-		TEXT("Voxel edit test mode %s. Left click removes density; right click adds density."),
-		bEnabled ? TEXT("enabled") : TEXT("disabled")
-	);
+	UE_LOG(LogOrakai, Display, TEXT("Voxel edit test mode %s. Left click removes density; right click adds density."), bEnabled ? TEXT("enabled") : TEXT("disabled"));
 }
 
 void AOrakaiCharacter::HandleEnableVoxelEditTestMode()
@@ -252,7 +232,7 @@ void AOrakaiCharacter::HandleDisableVoxelEditTestMode()
 	SetVoxelEditTestModeEnabled(false);
 }
 
-bool AOrakaiCharacter::TraceInteractionHit(FHitResult& OutHit, const FName TraceTag) const
+bool AOrakaiCharacter::TraceInteractionHit(FHitResult& OutHit) const
 {
 	FVector TraceStart;
 	FVector TraceEnd;
@@ -261,20 +241,14 @@ bool AOrakaiCharacter::TraceInteractionHit(FHitResult& OutHit, const FName Trace
 		return false;
 	}
 
-	FCollisionQueryParams QueryParams(TraceTag, true, this);
-	return GetWorld()->LineTraceSingleByChannel(
-		OutHit,
-		TraceStart,
-		TraceEnd,
-		ECC_Visibility,
-		QueryParams
-	);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(OrakaiInteractionTrace), true, this);
+	return GetWorld()->LineTraceSingleByChannel(OutHit, TraceStart, TraceEnd, ECC_Visibility, QueryParams);
 }
 
 bool AOrakaiCharacter::RemoveDensityVoxelAtCrosshair()
 {
 	FHitResult Hit;
-	if (!TraceInteractionHit(Hit, SCENE_QUERY_STAT(OrakaiRemoveDensityTest)))
+	if (!TraceInteractionHit(Hit))
 	{
 		return false;
 	}
@@ -292,7 +266,7 @@ bool AOrakaiCharacter::RemoveDensityVoxelAtCrosshair()
 bool AOrakaiCharacter::AddDensityVoxelAtCrosshair()
 {
 	FHitResult Hit;
-	if (!TraceInteractionHit(Hit, SCENE_QUERY_STAT(OrakaiAddDensityTest)))
+	if (!TraceInteractionHit(Hit))
 	{
 		return false;
 	}
@@ -378,11 +352,7 @@ bool AOrakaiCharacter::DoHarvestTree()
 	FVector TraceEnd;
 	FIntVector TreeWorldVoxel;
 
-	if (
-		!IsValid(CubusWorld) ||
-		!BuildInteractionRay(TraceStart, TraceEnd) ||
-		!CubusWorld->HarvestTreeAlongRay(TraceStart, TraceEnd, TreeSelectionRadius, TreeWorldVoxel)
-	)
+	if (!IsValid(CubusWorld) || !BuildInteractionRay(TraceStart, TraceEnd) || !CubusWorld->HarvestTreeAlongRay(TraceStart, TraceEnd, TreeSelectionRadius, TreeWorldVoxel))
 	{
 		return false;
 	}
@@ -393,19 +363,9 @@ bool AOrakaiCharacter::DoHarvestTree()
 		return false;
 	}
 
-	const int32 NewWoodCount =
-		Persistence->GetInventoryQuantity(TEXT("Wood")) + FMath::Max(1, WoodPerTree);
+	const int32 NewWoodCount = Persistence->GetInventoryQuantity(TEXT("Wood")) + FMath::Max(1, WoodPerTree);
 	Persistence->SetInventoryQuantity(TEXT("Wood"), NewWoodCount);
-
-	UE_LOG(
-		LogOrakai,
-		Display,
-		TEXT("Harvested tree (%d, %d, %d): wood=%d"),
-		TreeWorldVoxel.X,
-		TreeWorldVoxel.Y,
-		TreeWorldVoxel.Z,
-		NewWoodCount
-	);
+	UE_LOG(LogOrakai, Display, TEXT("Harvested tree (%d, %d, %d): wood=%d"), TreeWorldVoxel.X, TreeWorldVoxel.Y, TreeWorldVoxel.Z, NewWoodCount);
 	return true;
 }
 
@@ -452,10 +412,7 @@ bool AOrakaiCharacter::DoPlaceWoodBlock()
 	}
 
 	FHitResult Hit;
-	if (
-		!TraceInteractionHit(Hit, SCENE_QUERY_STAT(OrakaiPlaceWood)) ||
-		!UCubusVoxelEditLibrary::AddVoxelFromHit(Hit, WoodBlockMaterialId, false)
-	)
+	if (!TraceInteractionHit(Hit) || !UCubusVoxelEditLibrary::AddVoxelFromHit(Hit, WoodBlockMaterialId, false))
 	{
 		return false;
 	}
