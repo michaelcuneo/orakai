@@ -15,6 +15,17 @@ struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
 
+UENUM(BlueprintType)
+enum class EOrakaiDensityTool : uint8
+{
+	Off = 0,
+	Add = 1,
+	Remove = 2,
+	Smooth = 3,
+	Level = 4,
+	Restore = 5
+};
+
 UCLASS(abstract)
 class AOrakaiCharacter : public ACharacter
 {
@@ -64,22 +75,20 @@ protected:
 	bool bEnableVoxelEditTestMode = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Voxel Editing", meta=(ClampMin="0"))
-	int32 VoxelEditBrushRadius = 1;
+	int32 VoxelEditBrushRadius = 3;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Voxel Editing", meta=(ClampMin="0.01"))
-	float VoxelEditStrength = 2.0f;
+	float VoxelEditStrength = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Voxel Editing", meta=(ClampMin="1"))
 	int32 VoxelEditMaterialId = 1;
 
 public:
 	AOrakaiCharacter();
-
 	virtual void Tick(float DeltaSeconds) override;
 
 protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 
@@ -115,16 +124,13 @@ public:
 	bool IsGhostModeEnabled() const { return bGhostModeActive; }
 
 	UFUNCTION(BlueprintCallable, Category="Debug|Voxel Editing")
-	void SetVoxelEditTestModeEnabled(bool bEnabled);
+	void SetDensityTool(EOrakaiDensityTool Tool);
 
 	UFUNCTION(BlueprintPure, Category="Debug|Voxel Editing")
-	bool IsVoxelEditTestModeEnabled() const { return bVoxelEditTestModeActive; }
+	EOrakaiDensityTool GetDensityTool() const { return ActiveDensityTool; }
 
 	UFUNCTION(BlueprintCallable, Category="Debug|Voxel Editing")
-	bool RemoveDensityVoxelAtCrosshair();
-
-	UFUNCTION(BlueprintCallable, Category="Debug|Voxel Editing")
-	bool AddDensityVoxelAtCrosshair();
+	bool ApplyDensityToolAtCrosshair();
 
 	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
@@ -135,8 +141,14 @@ private:
 	bool TraceInteractionHit(FHitResult& OutHit) const;
 	void HandleHarvestInput();
 	void HandlePlaceWoodInput();
-	void HandleEnableVoxelEditTestMode();
-	void HandleDisableVoxelEditTestMode();
+	void SelectDensityTool0();
+	void SelectDensityTool1();
+	void SelectDensityTool2();
+	void SelectDensityTool3();
+	void SelectDensityTool4();
+	void SelectDensityTool5();
+	void DrawDensityToolHud() const;
+	const TCHAR* GetDensityToolName() const;
 	void HandleGhostAscendPressed();
 	void HandleGhostAscendReleased();
 	void HandleGhostDescendPressed();
@@ -145,7 +157,7 @@ private:
 	bool bGhostModeActive = false;
 	bool bGhostAscendHeld = false;
 	bool bGhostDescendHeld = false;
-	bool bVoxelEditTestModeActive = false;
+	EOrakaiDensityTool ActiveDensityTool = EOrakaiDensityTool::Off;
 	TEnumAsByte<ECollisionEnabled::Type> SavedCapsuleCollision = ECollisionEnabled::QueryAndPhysics;
 	TEnumAsByte<EMovementMode> SavedMovementMode = MOVE_Walking;
 	uint8 SavedCustomMovementMode = 0;
