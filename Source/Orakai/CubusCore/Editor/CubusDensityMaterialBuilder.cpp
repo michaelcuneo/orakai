@@ -215,9 +215,9 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusDensityPbrMaterial()
 
     UMaterialExpressionScalarParameter* TableWidth = AddScalar(Material, TEXT("DensityMaterialTableWidth"), 1.0f, -2200, 1260);
     UMaterialExpressionScalarParameter* PackingBase = AddScalar(Material, TEXT("DensityMaterialIdPackingBase"), 32.0f, -2200, 1340);
-    UMaterialExpressionScalarParameter* NearScale = AddScalar(Material, TEXT("CubusNearTextureScaleMultiplier"), 3.0f, -2200, 1420);
-    UMaterialExpressionScalarParameter* MidScale = AddScalar(Material, TEXT("CubusMidTextureScaleMultiplier"), 0.55f, -2200, 1500);
-    UMaterialExpressionScalarParameter* FarScale = AddScalar(Material, TEXT("CubusFarTextureScaleMultiplier"), 0.08f, -2200, 1580);
+    UMaterialExpressionScalarParameter* NearScale = AddScalar(Material, TEXT("CubusNearTextureScaleMultiplier"), 1.0f, -2200, 1420);
+    UMaterialExpressionScalarParameter* MidScale = AddScalar(Material, TEXT("CubusMidTextureScaleMultiplier"), 0.183333f, -2200, 1500);
+    UMaterialExpressionScalarParameter* FarScale = AddScalar(Material, TEXT("CubusFarTextureScaleMultiplier"), 0.026667f, -2200, 1580);
     UMaterialExpressionScalarParameter* NearBlendStart = AddScalar(Material, TEXT("CubusNearBlendStart"), 800.0f, -2200, 1660);
     UMaterialExpressionScalarParameter* NearBlendEnd = AddScalar(Material, TEXT("CubusNearBlendEnd"), 3000.0f, -2200, 1740);
     UMaterialExpressionScalarParameter* FarBlendStart = AddScalar(Material, TEXT("CubusFarBlendStart"), 8000.0f, -2200, 1820);
