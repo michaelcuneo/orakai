@@ -10,10 +10,15 @@ namespace CubusDensityTools
     {
         if (Radius <= 0)
         {
-            return Offset.IsZero() ? 1.0f : 0.0f;
+            return Offset == FIntVector::ZeroValue ? 1.0f : 0.0f;
         }
 
-        const float Distance = FVector(Offset).Size();
+        const FVector OffsetVector(
+            static_cast<double>(Offset.X),
+            static_cast<double>(Offset.Y),
+            static_cast<double>(Offset.Z)
+        );
+        const float Distance = static_cast<float>(OffsetVector.Size());
         if (Distance > static_cast<float>(Radius))
         {
             return 0.0f;
