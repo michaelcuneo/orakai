@@ -2,6 +2,7 @@
 
 #include "OrakaiCharacter.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/Engine.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -20,13 +21,10 @@
 AOrakaiCharacter::AOrakaiCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
-
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
-
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
-
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
 	GetCharacterMovement()->JumpZVelocity = 500.f;
@@ -49,6 +47,7 @@ AOrakaiCharacter::AOrakaiCharacter()
 void AOrakaiCharacter::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	DrawDensityToolHud();
 
 	if (!bGhostModeActive || GetController() == nullptr)
 	{
@@ -89,8 +88,12 @@ void AOrakaiCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 
 		if (bEnableVoxelEditTestMode)
 		{
-			PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &AOrakaiCharacter::HandleEnableVoxelEditTestMode);
-			PlayerInputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &AOrakaiCharacter::HandleDisableVoxelEditTestMode);
+			PlayerInputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &AOrakaiCharacter::SelectDensityTool0);
+			PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &AOrakaiCharacter::SelectDensityTool1);
+			PlayerInputComponent->BindKey(EKeys::Two, IE_Pressed, this, &AOrakaiCharacter::SelectDensityTool2);
+			PlayerInputComponent->BindKey(EKeys::Three, IE_Pressed, this, &AOrakaiCharacter::SelectDensityTool3);
+			PlayerInputComponent->BindKey(EKeys::Four, IE_Pressed, this, &AOrakaiCharacter::SelectDensityTool4);
+			PlayerInputComponent->BindKey(EKeys::Five, IE_Pressed, this, &AOrakaiCharacter::SelectDensityTool5);
 		}
 	}
 	else
@@ -119,21 +122,16 @@ void AOrakaiCharacter::DoMove(float Right, float Forward)
 	}
 
 	const FRotator Rotation = GetController()->GetControlRotation();
-
 	if (bGhostModeActive)
 	{
-		const FVector ForwardDirection = Rotation.Vector();
-		const FVector RightDirection = FRotationMatrix(Rotation).GetUnitAxis(EAxis::Y);
-		AddMovementInput(ForwardDirection, Forward);
-		AddMovementInput(RightDirection, Right);
+		AddMovementInput(Rotation.Vector(), Forward);
+		AddMovementInput(FRotationMatrix(Rotation).GetUnitAxis(EAxis::Y), Right);
 		return;
 	}
 
 	const FRotator YawRotation(0.0f, Rotation.Yaw, 0.0f);
-	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-	AddMovementInput(ForwardDirection, Forward);
-	AddMovementInput(RightDirection, Right);
+	AddMovementInput(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X), Forward);
+	AddMovementInput(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y), Right);
 }
 
 void AOrakaiCharacter::DoLook(float Yaw, float Pitch)
@@ -211,25 +209,56 @@ void AOrakaiCharacter::SetGhostModeEnabled(const bool bEnabled)
 	UE_LOG(LogOrakai, Display, TEXT("Ghost mode disabled."));
 }
 
-void AOrakaiCharacter::SetVoxelEditTestModeEnabled(const bool bEnabled)
+void AOrakaiCharacter::SetDensityTool(const EOrakaiDensityTool Tool)
 {
-	if (!bEnableVoxelEditTestMode || bVoxelEditTestModeActive == bEnabled)
+	ActiveDensityTool = bEnableVoxelEditTestMode ? Tool : EOrakaiDensityTool::Off;
+	UE_LOG(LogOrakai, Display, TEXT("Density tool %d: %s"), static_cast<int32>(ActiveDensityTool), GetDensityToolName());
+}
+
+void AOrakaiCharacter::SelectDensityTool0() { SetDensityTool(EOrakaiDensityTool::Off); }
+void AOrakaiCharacter::SelectDensityTool1() { SetDensityTool(EOrakaiDensityTool::Add); }
+void AOrakaiCharacter::SelectDensityTool2() { SetDensityTool(EOrakaiDensityTool::Remove); }
+void AOrakaiCharacter::SelectDensityTool3() { SetDensityTool(EOrakaiDensityTool::Smooth); }
+void AOrakaiCharacter::SelectDensityTool4() { SetDensityTool(EOrakaiDensityTool::Level); }
+void AOrakaiCharacter::SelectDensityTool5() { SetDensityTool(EOrakaiDensityTool::Restore); }
+
+const TCHAR* AOrakaiCharacter::GetDensityToolName() const
+{
+	switch (ActiveDensityTool)
+	{
+	case EOrakaiDensityTool::Add: return TEXT("ADD DENSITY");
+	case EOrakaiDensityTool::Remove: return TEXT("REMOVE DENSITY");
+	case EOrakaiDensityTool::Smooth: return TEXT("SMOOTH DENSITY");
+	case EOrakaiDensityTool::Level: return TEXT("LEVEL DENSITY");
+	case EOrakaiDensityTool::Restore: return TEXT("RESTORE GENERATED TERRAIN");
+	default: return TEXT("OFF");
+	}
+}
+
+void AOrakaiCharacter::DrawDensityToolHud() const
+{
+	if (!bEnableVoxelEditTestMode || GEngine == nullptr)
 	{
 		return;
 	}
 
-	bVoxelEditTestModeActive = bEnabled;
-	UE_LOG(LogOrakai, Display, TEXT("Voxel edit test mode %s. Left click removes density; right click adds density."), bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
+	const FString Message = FString::Printf(
+		TEXT("TERRAIN TOOL: %d - %s\nRadius: %d | Strength: %.2f | Material: %d\nLMB: Apply | 0-5: Select Tool"),
+		static_cast<int32>(ActiveDensityTool),
+		GetDensityToolName(),
+		FMath::Max(0, VoxelEditBrushRadius),
+		VoxelEditStrength,
+		FMath::Max(1, VoxelEditMaterialId)
+	);
 
-void AOrakaiCharacter::HandleEnableVoxelEditTestMode()
-{
-	SetVoxelEditTestModeEnabled(true);
-}
-
-void AOrakaiCharacter::HandleDisableVoxelEditTestMode()
-{
-	SetVoxelEditTestModeEnabled(false);
+	GEngine->AddOnScreenDebugMessage(
+		731942,
+		0.0f,
+		ActiveDensityTool == EOrakaiDensityTool::Off ? FColor::Silver : FColor::Green,
+		Message,
+		false,
+		FVector2D(1.15f, 1.15f)
+	);
 }
 
 bool AOrakaiCharacter::TraceInteractionHit(FHitResult& OutHit) const
@@ -245,40 +274,45 @@ bool AOrakaiCharacter::TraceInteractionHit(FHitResult& OutHit) const
 	return GetWorld()->LineTraceSingleByChannel(OutHit, TraceStart, TraceEnd, ECC_Visibility, QueryParams);
 }
 
-bool AOrakaiCharacter::RemoveDensityVoxelAtCrosshair()
+bool AOrakaiCharacter::ApplyDensityToolAtCrosshair()
 {
+	if (ActiveDensityTool == EOrakaiDensityTool::Off)
+	{
+		return false;
+	}
+
 	FHitResult Hit;
 	if (!TraceInteractionHit(Hit))
 	{
 		return false;
 	}
 
-	const int32 EditedCount = UCubusVoxelEditLibrary::RemoveDensityFromHit(
-		Hit,
-		FMath::Max(0, VoxelEditBrushRadius),
-		FMath::Max(0.01f, VoxelEditStrength)
-	);
+	const int32 Radius = FMath::Max(0, VoxelEditBrushRadius);
+	const float Strength = FMath::Max(0.01f, VoxelEditStrength);
+	int32 EditedCount = 0;
 
-	UE_LOG(LogOrakai, Display, TEXT("Removed density from %d voxel samples."), EditedCount);
-	return EditedCount > 0;
-}
-
-bool AOrakaiCharacter::AddDensityVoxelAtCrosshair()
-{
-	FHitResult Hit;
-	if (!TraceInteractionHit(Hit))
+	switch (ActiveDensityTool)
 	{
-		return false;
+	case EOrakaiDensityTool::Add:
+		EditedCount = UCubusVoxelEditLibrary::AddDensityFromHit(Hit, Radius, Strength, FMath::Max(1, VoxelEditMaterialId));
+		break;
+	case EOrakaiDensityTool::Remove:
+		EditedCount = UCubusVoxelEditLibrary::RemoveDensityFromHit(Hit, Radius, Strength);
+		break;
+	case EOrakaiDensityTool::Smooth:
+		EditedCount = UCubusVoxelEditLibrary::SmoothDensityFromHit(Hit, Radius, FMath::Clamp(Strength, 0.0f, 1.0f));
+		break;
+	case EOrakaiDensityTool::Level:
+		EditedCount = UCubusVoxelEditLibrary::LevelDensityFromHit(Hit, Radius, FMath::Clamp(Strength, 0.0f, 1.0f), FMath::Max(1, VoxelEditMaterialId));
+		break;
+	case EOrakaiDensityTool::Restore:
+		EditedCount = UCubusVoxelEditLibrary::RestoreDensityFromHit(Hit, Radius, FMath::Clamp(Strength, 0.0f, 1.0f));
+		break;
+	default:
+		break;
 	}
 
-	const int32 EditedCount = UCubusVoxelEditLibrary::AddDensityFromHit(
-		Hit,
-		FMath::Max(0, VoxelEditBrushRadius),
-		FMath::Max(0.01f, VoxelEditStrength),
-		FMath::Max(1, VoxelEditMaterialId)
-	);
-
-	UE_LOG(LogOrakai, Display, TEXT("Added density to %d voxel samples with material %d."), EditedCount, VoxelEditMaterialId);
+	UE_LOG(LogOrakai, Display, TEXT("Density tool %s edited %d samples."), GetDensityToolName(), EditedCount);
 	return EditedCount > 0;
 }
 
@@ -290,10 +324,7 @@ void AOrakaiCharacter::HandleGhostAscendPressed()
 	}
 }
 
-void AOrakaiCharacter::HandleGhostAscendReleased()
-{
-	bGhostAscendHeld = false;
-}
+void AOrakaiCharacter::HandleGhostAscendReleased() { bGhostAscendHeld = false; }
 
 void AOrakaiCharacter::HandleGhostDescendPressed()
 {
@@ -303,10 +334,7 @@ void AOrakaiCharacter::HandleGhostDescendPressed()
 	}
 }
 
-void AOrakaiCharacter::HandleGhostDescendReleased()
-{
-	bGhostDescendHeld = false;
-}
+void AOrakaiCharacter::HandleGhostDescendReleased() { bGhostDescendHeld = false; }
 
 ACubusBlockWorldActor* AOrakaiCharacter::FindCubusWorld() const
 {
@@ -323,7 +351,6 @@ ACubusBlockWorldActor* AOrakaiCharacter::FindCubusWorld() const
 			return *Iterator;
 		}
 	}
-
 	return nullptr;
 }
 
@@ -333,7 +360,6 @@ bool AOrakaiCharacter::BuildInteractionRay(FVector& OutStart, FVector& OutEnd) c
 	{
 		return false;
 	}
-
 	OutStart = FollowCamera->GetComponentLocation();
 	OutEnd = OutStart + FollowCamera->GetForwardVector() * FMath::Max(100.0f, InteractionDistance);
 	return true;
@@ -351,7 +377,6 @@ bool AOrakaiCharacter::DoHarvestTree()
 	FVector TraceStart;
 	FVector TraceEnd;
 	FIntVector TreeWorldVoxel;
-
 	if (!IsValid(CubusWorld) || !BuildInteractionRay(TraceStart, TraceEnd) || !CubusWorld->HarvestTreeAlongRay(TraceStart, TraceEnd, TreeSelectionRadius, TreeWorldVoxel))
 	{
 		return false;
@@ -371,9 +396,9 @@ bool AOrakaiCharacter::DoHarvestTree()
 
 void AOrakaiCharacter::HandleHarvestInput()
 {
-	if (bVoxelEditTestModeActive)
+	if (ActiveDensityTool != EOrakaiDensityTool::Off)
 	{
-		RemoveDensityVoxelAtCrosshair();
+		ApplyDensityToolAtCrosshair();
 		return;
 	}
 
@@ -385,9 +410,8 @@ void AOrakaiCharacter::HandleHarvestInput()
 
 void AOrakaiCharacter::HandlePlaceWoodInput()
 {
-	if (bVoxelEditTestModeActive)
+	if (ActiveDensityTool != EOrakaiDensityTool::Off)
 	{
-		AddDensityVoxelAtCrosshair();
 		return;
 	}
 
