@@ -1,5 +1,20 @@
 #include "CubusCore/Generation/CubusDensityEditField.h"
 
+namespace CubusDensityEditField
+{
+    void BuildCubicBSplineWeights(const float T, float OutWeights[4])
+    {
+        const float T2 = T * T;
+        const float T3 = T2 * T;
+        const float OneMinusT = 1.0f - T;
+
+        OutWeights[0] = OneMinusT * OneMinusT * OneMinusT / 6.0f;
+        OutWeights[1] = (3.0f * T3 - 6.0f * T2 + 4.0f) / 6.0f;
+        OutWeights[2] = (-3.0f * T3 + 3.0f * T2 + 3.0f * T + 1.0f) / 6.0f;
+        OutWeights[3] = T3 / 6.0f;
+    }
+}
+
 FCubusDensityEditField::FCubusDensityEditField(
     const ICubusDensityField& InGeneratedField,
     const FCubusDensityEditMap& InEdits
@@ -49,49 +64,65 @@ FCubusDensitySample FCubusDensityEditField::SampleContinuous(
     FCubusDensitySample Result =
         GeneratedField.SampleContinuous(GlobalSampleCoordinate);
 
-    const FIntVector MinimumCoordinate(
+    const FIntVector BaseCoordinate(
         FMath::FloorToInt(GlobalSampleCoordinate.X),
         FMath::FloorToInt(GlobalSampleCoordinate.Y),
         FMath::FloorToInt(GlobalSampleCoordinate.Z)
     );
 
     const FVector Alpha(
-        GlobalSampleCoordinate.X -
-            static_cast<double>(MinimumCoordinate.X),
-        GlobalSampleCoordinate.Y -
-            static_cast<double>(MinimumCoordinate.Y),
-        GlobalSampleCoordinate.Z -
-            static_cast<double>(MinimumCoordinate.Z)
+        GlobalSampleCoordinate.X - static_cast<double>(BaseCoordinate.X),
+        GlobalSampleCoordinate.Y - static_cast<double>(BaseCoordinate.Y),
+        GlobalSampleCoordinate.Z - static_cast<double>(BaseCoordinate.Z)
+    );
+
+    float WeightsX[4];
+    float WeightsY[4];
+    float WeightsZ[4];
+    CubusDensityEditField::BuildCubicBSplineWeights(
+        static_cast<float>(Alpha.X),
+        WeightsX
+    );
+    CubusDensityEditField::BuildCubicBSplineWeights(
+        static_cast<float>(Alpha.Y),
+        WeightsY
+    );
+    CubusDensityEditField::BuildCubicBSplineWeights(
+        static_cast<float>(Alpha.Z),
+        WeightsZ
     );
 
     float InterpolatedDensityDelta = 0.0f;
     float StrongestMaterialWeight = 0.0f;
     int32 InterpolatedMaterialId = 0;
 
-    for (int32 Z = 0; Z <= 1; ++Z)
+    // Cubic B-spline interpolation samples four edit points per axis. Unlike
+    // trilinear interpolation, this produces continuous first and second
+    // derivatives across sample-cell boundaries, removing the planar facets
+    // that were visible in high-resolution near-field density meshes.
+    for (int32 Z = 0; Z < 4; ++Z)
     {
-        const float WeightZ = Z == 0
-            ? 1.0f - static_cast<float>(Alpha.Z)
-            : static_cast<float>(Alpha.Z);
-
-        for (int32 Y = 0; Y <= 1; ++Y)
+        for (int32 Y = 0; Y < 4; ++Y)
         {
-            const float WeightY = Y == 0
-                ? 1.0f - static_cast<float>(Alpha.Y)
-                : static_cast<float>(Alpha.Y);
-
-            for (int32 X = 0; X <= 1; ++X)
+            for (int32 X = 0; X < 4; ++X)
             {
-                const float WeightX = X == 0
-                    ? 1.0f - static_cast<float>(Alpha.X)
-                    : static_cast<float>(Alpha.X);
+                const float Weight =
+                    WeightsX[X] *
+                    WeightsY[Y] *
+                    WeightsZ[Z];
 
-                const float Weight = WeightX * WeightY * WeightZ;
-                const FCubusDensityEdit* Edit = Edits.Find(
-                    MinimumCoordinate + FIntVector(X, Y, Z)
-                );
+                if (Weight <= KINDA_SMALL_NUMBER)
+                {
+                    continue;
+                }
 
-                if (Edit == nullptr || Weight <= 0.0f)
+                const FIntVector SampleCoordinate =
+                    BaseCoordinate + FIntVector(X - 1, Y - 1, Z - 1);
+
+                const FCubusDensityEdit* Edit =
+                    Edits.Find(SampleCoordinate);
+
+                if (Edit == nullptr)
                 {
                     continue;
                 }
