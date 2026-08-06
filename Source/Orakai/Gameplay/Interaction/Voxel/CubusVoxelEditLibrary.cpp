@@ -326,7 +326,10 @@ int32 UCubusVoxelEditLibrary::AddDensityFromHit(
     FIntVector WorldSample;
     ACubusBlockWorldActor* BlockWorld = nullptr;
 
-    if (!ResolveAdjacentVoxel(Hit, WorldSample, BlockWorld))
+    // Density addition and removal must use the same hit-centred sample.
+    // Offsetting addition into the adjacent sample makes the operations
+    // asymmetric and can leave a one-sample residual shell or opening.
+    if (!ResolveHitVoxel(Hit, WorldSample, BlockWorld))
     {
         return 0;
     }
