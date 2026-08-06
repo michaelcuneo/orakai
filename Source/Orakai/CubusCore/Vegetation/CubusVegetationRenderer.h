@@ -14,6 +14,8 @@ class USkeletalMeshComponent;
 class UInstancedSkinnedMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 class USkinnedMeshComponent;
+class UInstancedStaticMeshComponent;
+class UHierarchicalInstancedStaticMeshComponent;
 
 struct FCubusVegetationSpeciesCatalogEntry;
 
@@ -55,26 +57,16 @@ public:
         bool bCastShadow,
         int32 StartCullDistance,
         int32 EndCullDistance,
-        TMap<
-            int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
-        >& StaticBatchComponents,
-        TMap<
-            int64,
-            TObjectPtr<UInstancedSkinnedMeshComponent>
-        >& SkeletalBatchComponents
+        TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>>& GrassBatchComponents,
+        TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& StaticBatchComponents,
+        TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>>& SkeletalBatchComponents
     ) const;
 
     void ApplyShadowSettings(
         bool bCastShadow,
-        const TMap<
-            int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
-        >& StaticBatchComponents,
-        const TMap<
-            int64,
-            TObjectPtr<UInstancedSkinnedMeshComponent>
-        >& SkeletalBatchComponents,
+        const TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>>& GrassBatchComponents,
+        const TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& StaticBatchComponents,
+        const TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>>& SkeletalBatchComponents,
         const TArray<TObjectPtr<USkeletalMeshComponent>>& HeroComponents
     ) const;
 
@@ -84,14 +76,18 @@ public:
     ) const;
 
     void ClearBatches(
-        const TMap<
-            int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
-        >& StaticBatchComponents,
-        const TMap<
-            int64,
-            TObjectPtr<UInstancedSkinnedMeshComponent>
-        >& SkeletalBatchComponents
+        const TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>>& GrassBatchComponents,
+        const TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& StaticBatchComponents,
+        const TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>>& SkeletalBatchComponents
+    ) const;
+
+    UInstancedStaticMeshComponent* CreateGrassBatch(
+        AActor* Owner,
+        USceneComponent* Root,
+        FName ComponentName,
+        bool bCastShadow,
+        int32 StartCullDistance,
+        int32 EndCullDistance
     ) const;
 
     UHierarchicalInstancedStaticMeshComponent* CreateStaticBatch(
