@@ -11,8 +11,8 @@ class USkeletalMesh;
 class USceneComponent;
 class UMaterialInterface;
 class USkeletalMeshComponent;
+class UInstancedStaticMeshComponent;
 class UInstancedSkinnedMeshComponent;
-class UHierarchicalInstancedStaticMeshComponent;
 class USkinnedMeshComponent;
 
 struct FCubusVegetationSpeciesCatalogEntry;
@@ -57,7 +57,7 @@ public:
         int32 EndCullDistance,
         TMap<
             int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+            TObjectPtr<UInstancedStaticMeshComponent>
         >& StaticBatchComponents,
         TMap<
             int64,
@@ -69,7 +69,7 @@ public:
         bool bCastShadow,
         const TMap<
             int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+            TObjectPtr<UInstancedStaticMeshComponent>
         >& StaticBatchComponents,
         const TMap<
             int64,
@@ -86,7 +86,7 @@ public:
     void ClearBatches(
         const TMap<
             int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+            TObjectPtr<UInstancedStaticMeshComponent>
         >& StaticBatchComponents,
         const TMap<
             int64,
@@ -94,10 +94,11 @@ public:
         >& SkeletalBatchComponents
     ) const;
 
-    UHierarchicalInstancedStaticMeshComponent* CreateStaticBatch(
+    UInstancedStaticMeshComponent* CreateStaticBatch(
         AActor* Owner,
         USceneComponent* Root,
         FName ComponentName,
+        bool bUseHierarchy,
         bool bCastShadow,
         int32 StartCullDistance,
         int32 EndCullDistance
