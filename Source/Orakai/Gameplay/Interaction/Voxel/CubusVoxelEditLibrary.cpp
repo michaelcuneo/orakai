@@ -3,6 +3,7 @@
 #include "CubusCore/Actors/CubusBlockWorldActor.h"
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
+#include "CubusCore/Persistence/OrakaiPersistenceTypes.h"
 
 namespace CubusVoxelEdit
 {
@@ -164,6 +165,24 @@ namespace CubusVoxelEdit
 
         return ChangedSampleCount;
     }
+
+    void RebuildEditedChunkImmediately(
+        ACubusBlockWorldActor& BlockWorld,
+        const FIntVector& WorldSample
+    )
+    {
+        const FIntVector ChunkCoordinate =
+            OrakaiPersistence::WorldVoxelToChunk(WorldSample);
+
+        if (ACubusVoxelVolumeActor* Chunk =
+                BlockWorld.FindChunk(ChunkCoordinate))
+        {
+            // The edited chunk is the one the player is looking at. Rebuild it
+            // immediately for responsive tools; neighbouring seam and normal
+            // dependencies remain on the world's throttled dirty queue.
+            Chunk->RebuildVolume();
+        }
+    }
 }
 
 bool UCubusVoxelEditLibrary::ResolveHitVoxel(
@@ -302,13 +321,24 @@ int32 UCubusVoxelEditLibrary::RemoveDensityFromHit(
         return 0;
     }
 
-    return CubusVoxelEdit::ApplySmoothDensityBrush(
-        *BlockWorld,
-        WorldSample,
-        BrushRadius,
-        -FMath::Abs(Strength),
-        0
-    );
+    const int32 ChangedSampleCount =
+        CubusVoxelEdit::ApplySmoothDensityBrush(
+            *BlockWorld,
+            WorldSample,
+            BrushRadius,
+            -FMath::Abs(Strength),
+            0
+        );
+
+    if (ChangedSampleCount > 0)
+    {
+        CubusVoxelEdit::RebuildEditedChunkImmediately(
+            *BlockWorld,
+            WorldSample
+        );
+    }
+
+    return ChangedSampleCount;
 }
 
 int32 UCubusVoxelEditLibrary::AddDensityFromHit(
@@ -326,19 +356,27 @@ int32 UCubusVoxelEditLibrary::AddDensityFromHit(
     FIntVector WorldSample;
     ACubusBlockWorldActor* BlockWorld = nullptr;
 
-    // Density addition and removal must use the same hit-centred sample.
-    // Offsetting addition into the adjacent sample makes the operations
-    // asymmetric and can leave a one-sample residual shell or opening.
     if (!ResolveHitVoxel(Hit, WorldSample, BlockWorld))
     {
         return 0;
     }
 
-    return CubusVoxelEdit::ApplySmoothDensityBrush(
-        *BlockWorld,
-        WorldSample,
-        BrushRadius,
-        FMath::Abs(Strength),
-        MaterialId
-    );
+    const int32 ChangedSampleCount =
+        CubusVoxelEdit::ApplySmoothDensityBrush(
+            *BlockWorld,
+            WorldSample,
+            BrushRadius,
+            FMath::Abs(Strength),
+            MaterialId
+        );
+
+    if (ChangedSampleCount > 0)
+    {
+        CubusVoxelEdit::RebuildEditedChunkImmediately(
+            *BlockWorld,
+            WorldSample
+        );
+    }
+
+    return ChangedSampleCount;
 }
