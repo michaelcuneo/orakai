@@ -231,26 +231,16 @@ void FCubusBlockVegetationGenerator::Generate(
                 {
                     BiomeMask = CubusVegetationBiome::Rocky;
 
-                    if (IsSpacedTreeCandidate(
-                        WorldX,
-                        WorldY,
-                        VegetationSeed ^ 619,
-                        GeologyProfile->RockyTreeDensity *
-                            FMath::Lerp(0.35f, 1.0f, BiomeSample.Moisture)
-                    ))
-                    {
-                        TypeId = SpeciesRoll < 0.10f
-                            ? CubusVegetationType::BroadleafTree
-                            : CubusVegetationType::ConiferTree;
-                        Density = 1.0f;
-                        ActivePlacementRoll = 0.0f;
-                    }
-                    else
-                    {
-                        TypeId = CubusVegetationType::Alpine;
-                        Density = GeologyProfile->RockyAlpineDensity *
-                            FMath::Lerp(0.35f, 1.0f, BiomeSample.Moisture);
-                    }
+                    TypeId =
+                        CubusVegetationType::Alpine;
+
+                    Density =
+                        GeologyProfile->RockyAlpineDensity *
+                        FMath::Lerp(
+                            0.35f,
+                            1.0f,
+                            BiomeSample.Moisture
+                        );
                 }
                 else if (BiomeSample.DominantBiome == ECubusBiomeKind::Plains)
                 {
@@ -295,24 +285,48 @@ void FCubusBlockVegetationGenerator::Generate(
                     : 0.012f;
             }
 
-            const bool bTreeType =
-                TypeId == CubusVegetationType::BroadleafTree ||
-                TypeId == CubusVegetationType::ConiferTree;
+            float MaximumAllowedSlopeDegrees = 89.0f;
 
-            const bool bGrassType =
-                TypeId == CubusVegetationType::Grass;
-
-            if (
-                bTreeType &&
-                ApproximateSlopeDegrees > 32.0f
-            )
+            switch (TypeId)
             {
-                continue;
+                case CubusVegetationType::BroadleafTree:
+                case CubusVegetationType::ConiferTree:
+                {
+                    MaximumAllowedSlopeDegrees = 32.0f;
+                    break;
+                }
+
+                case CubusVegetationType::Grass:
+                {
+                    MaximumAllowedSlopeDegrees = 42.0f;
+                    break;
+                }
+
+                case CubusVegetationType::Shrub:
+                {
+                    MaximumAllowedSlopeDegrees = 46.0f;
+                    break;
+                }
+
+                case CubusVegetationType::Reeds:
+                {
+                    MaximumAllowedSlopeDegrees = 18.0f;
+                    break;
+                }
+
+                case CubusVegetationType::Alpine:
+                {
+                    MaximumAllowedSlopeDegrees = 58.0f;
+                    break;
+                }
+
+                default:
+                    break;
             }
 
             if (
-                bGrassType &&
-                ApproximateSlopeDegrees > 42.0f
+                ApproximateSlopeDegrees >
+                MaximumAllowedSlopeDegrees
             )
             {
                 continue;
