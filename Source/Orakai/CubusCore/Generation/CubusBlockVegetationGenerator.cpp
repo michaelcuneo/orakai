@@ -107,32 +107,44 @@ void FCubusBlockVegetationGenerator::Generate(
                 FMath::Max(0, LocalX - 1),
                 LocalY
             );
+
             const int32 EastSurface = FindSurfaceLocalZ(
                 Chunk,
                 FMath::Min(Cubus::ChunkSize - 1, LocalX + 1),
                 LocalY
             );
+
             const int32 SouthSurface = FindSurfaceLocalZ(
                 Chunk,
                 LocalX,
                 FMath::Max(0, LocalY - 1)
             );
+
             const int32 NorthSurface = FindSurfaceLocalZ(
                 Chunk,
                 LocalX,
                 FMath::Min(Cubus::ChunkSize - 1, LocalY + 1)
             );
+
             const float GradientX =
                 WestSurface != INDEX_NONE && EastSurface != INDEX_NONE
                     ? static_cast<float>(EastSurface - WestSurface) * 0.5f
                     : 0.0f;
+
             const float GradientY =
                 SouthSurface != INDEX_NONE && NorthSurface != INDEX_NONE
                     ? static_cast<float>(NorthSurface - SouthSurface) * 0.5f
                     : 0.0f;
+
             const float LocalSlope = FMath::Sqrt(
                 GradientX * GradientX + GradientY * GradientY
             );
+
+            const float ApproximateSlopeDegrees =
+                FMath::RadiansToDegrees(
+                    FMath::Atan(LocalSlope)
+                );
+
             const FCubusBiomeSample BiomeSample = FCubusBiomeField::Sample(
                 static_cast<float>(WorldX),
                 static_cast<float>(WorldY),
@@ -144,9 +156,11 @@ void FCubusBlockVegetationGenerator::Generate(
             const float PlacementRoll = HashToUnitFloat(
                 HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 101)
             );
+
             const float SpeciesRoll = HashToUnitFloat(
                 HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 149)
             );
+
             int32 TypeId = 0;
             int32 BiomeMask = CubusVegetationBiome::All;
             float Density = 0.0f;
@@ -279,6 +293,29 @@ void FCubusBlockVegetationGenerator::Generate(
                 Density = IsValid(GeologyProfile)
                     ? GeologyProfile->FallbackTreeDensity
                     : 0.012f;
+            }
+
+            const bool bTreeType =
+                TypeId == CubusVegetationType::BroadleafTree ||
+                TypeId == CubusVegetationType::ConiferTree;
+
+            const bool bGrassType =
+                TypeId == CubusVegetationType::Grass;
+
+            if (
+                bTreeType &&
+                ApproximateSlopeDegrees > 32.0f
+            )
+            {
+                continue;
+            }
+
+            if (
+                bGrassType &&
+                ApproximateSlopeDegrees > 42.0f
+            )
+            {
+                continue;
             }
 
             if (

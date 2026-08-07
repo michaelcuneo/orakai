@@ -253,6 +253,30 @@ protected:
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Placement",
+        meta = (
+            ClampMin = "0.0",
+            ClampMax = "89.0",
+            Units = "deg"
+        )
+    )
+    float MaximumTreeSlopeDegrees = 32.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Placement",
+        meta = (
+            ClampMin = "0.0",
+            ClampMax = "89.0",
+            Units = "deg"
+        )
+    )
+    float MaximumGrassSlopeDegrees = 42.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
         Category = "Cubus|Vegetation|Grass",
         meta = (ClampMin = "1", ClampMax = "16")
     )

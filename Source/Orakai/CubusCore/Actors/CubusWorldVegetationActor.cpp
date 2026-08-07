@@ -1352,6 +1352,9 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             FVector FinalLocation =
                 ResolvedPlacement.Location;
 
+            FVector SurfaceNormal =
+                FVector::UpVector;
+
             const float FinalScale =
                 ResolvedPlacement.Scale;
 
@@ -1395,7 +1398,45 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 )
                 {
                     FinalLocation = SurfaceHit.ImpactPoint;
+                    SurfaceNormal = SurfaceHit.ImpactNormal.GetSafeNormal();
                 }
+            }
+
+            const float SurfaceSlopeDegrees =
+                FMath::RadiansToDegrees(
+                    FMath::Acos(
+                        FMath::Clamp(
+                            FVector::DotProduct(
+                                SurfaceNormal,
+                                FVector::UpVector
+                            ),
+                            -1.0f,
+                            1.0f
+                        )
+                    )
+                );
+
+            const bool bTreeType =
+                Instance.TypeId == CubusVegetationType::BroadleafTree ||
+                Instance.TypeId == CubusVegetationType::ConiferTree;
+
+            const bool bGrassType =
+                Instance.TypeId == CubusVegetationType::Grass;
+
+            if (
+                bTreeType &&
+                SurfaceSlopeDegrees > MaximumTreeSlopeDegrees
+            )
+            {
+                continue;
+            }
+
+            if (
+                bGrassType &&
+                SurfaceSlopeDegrees > MaximumGrassSlopeDegrees
+            )
+            {
+                continue;
             }
 
             const FTransform WorldTransform(
@@ -1464,10 +1505,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 CatalogSkeletalBatchComponents.Contains(
                     PrimaryBatchKey
                 );
-
-            const bool bTreeType =
-                Instance.TypeId == WorldBroadleafType ||
-                Instance.TypeId == WorldConiferType;
 
             int64 TargetBatchKey = PrimaryBatchKey;
 
@@ -1567,50 +1604,39 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                             2.0f * PI
                         );
 
+                    const float SafeGrassScatterRadius =
+                        FMath::Min(
+                            GrassScatterRadius,
+                            SafeVoxelSize * 0.42f
+                        );
+
                     const float Radius =
                         FMath::Sqrt(ScatterRandom.FRand()) *
-                        GrassScatterRadius;
+                        SafeGrassScatterRadius;
+
+                    const FVector ScatterOffset(
+                        FMath::Cos(Angle) * Radius,
+                        FMath::Sin(Angle) * Radius,
+                        0.0f
+                    );
 
                     FVector GrassWorldLocation =
                         FinalLocation +
-                        FVector(
-                            FMath::Cos(Angle) * Radius,
-                            FMath::Sin(Angle) * Radius,
-                            0.0f
-                        );
-
-                    const float SurfaceSearchDistance =
-                        SafeVoxelSize * 3.0f;
-
-                    FHitResult GrassSurfaceHit;
-
-                    FCollisionQueryParams QueryParams(
-                        SCENE_QUERY_STAT(
-                            CubusGrassSurfaceScatter
-                        ),
-                        false,
-                        this
-                    );
+                        ScatterOffset;
 
                     if (
-                        IsValid(TerrainMesh) &&
-                        Chunk->HasBuiltTerrainCollision() &&
-                        TerrainMesh->LineTraceComponent(
-                            GrassSurfaceHit,
-                            GrassWorldLocation +
-                                FVector::UpVector *
-                                SurfaceSearchDistance,
-                            GrassWorldLocation -
-                                FVector::UpVector *
-                                SurfaceSearchDistance,
-                            QueryParams
-                        )
+                        FMath::Abs(SurfaceNormal.Z) >
+                        0.01f
                     )
                     {
-                        GrassWorldLocation =
-                            GrassSurfaceHit.ImpactPoint;
+                        GrassWorldLocation.Z =
+                            FinalLocation.Z -
+                            (
+                                SurfaceNormal.X * ScatterOffset.X +
+                                SurfaceNormal.Y * ScatterOffset.Y
+                            ) /
+                            SurfaceNormal.Z;
                     }
-
                     const float GrassYaw =
                         FinalYaw +
                         ScatterRandom.FRandRange(
