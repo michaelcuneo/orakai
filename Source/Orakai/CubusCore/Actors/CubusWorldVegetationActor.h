@@ -10,6 +10,7 @@
 #include "CubusWorldVegetationActor.generated.h"
 
 class ACubusBlockWorldActor;
+class UInstancedStaticMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 class UInstancedSkinnedMeshComponent;
 class UMaterialParameterCollection;
@@ -226,7 +227,7 @@ protected:
     float RandomYawJitterDegrees = 35.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering", meta = (ClampMin = "0"))
-    int32 MaximumRenderedPlants = 4096;
+    int32 MaximumRenderedPlants = 100000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0.1", Units = "s"))
     float RefreshInterval = 1.0f;
@@ -249,13 +250,41 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int64 PublishedPlacementHash = 0;
 
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Grass",
+        meta = (ClampMin = "1", ClampMax = "16")
+    )
+    int32 GrassInstancesPerPlacement = 6;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Grass",
+        meta = (ClampMin = "0.0", Units = "cm")
+    )
+    float GrassScatterRadius = 80.0f;
+
 private:
 
     UPROPERTY(Transient)
-    TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> CatalogStaticBatchComponents;
+    TMap<
+        int64,
+        TObjectPtr<UInstancedStaticMeshComponent>
+    > CatalogGrassBatchComponents;
 
     UPROPERTY(Transient)
-    TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>> CatalogSkeletalBatchComponents;
+    TMap<
+        int64,
+        TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+    > CatalogStaticBatchComponents;
+
+    UPROPERTY(Transient)
+    TMap<
+        int64,
+        TObjectPtr<UInstancedSkinnedMeshComponent>
+    > CatalogSkeletalBatchComponents;
 
     UPROPERTY(Transient)
     TArray<TObjectPtr<USkeletalMeshComponent>> HeroSkeletalWindComponents;

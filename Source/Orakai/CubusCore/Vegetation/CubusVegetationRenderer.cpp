@@ -391,15 +391,16 @@ void FCubusVegetationRenderer::EnsureBatches(
     const int32 EndCullDistance,
     TMap<
         int64,
-        TObjectPtr<
-            UHierarchicalInstancedStaticMeshComponent
-        >
+        TObjectPtr<UInstancedStaticMeshComponent>
+    >& GrassBatchComponents,
+    TMap<
+        int64,
+        TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
     >& StaticBatchComponents,
     TMap<
         int64,
         TObjectPtr<UInstancedSkinnedMeshComponent>
-    >& SkeletalBatchComponents,
-    TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>>& GrassBatchComponents
+    >& SkeletalBatchComponents
 ) const
 {
     TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>> NewGrassBatches;

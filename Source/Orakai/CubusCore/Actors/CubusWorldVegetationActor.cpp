@@ -10,8 +10,10 @@
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Data/CubusVegetationInstance.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/InstancedSkinnedMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/SceneComponent.h"
 #include "Engine/SkeletalMesh.h"
@@ -148,6 +150,7 @@ void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
 
     VegetationRenderer.ApplyShadowSettings(
         bCastWorldPlantShadows,
+        CatalogGrassBatchComponents,
         CatalogStaticBatchComponents,
         CatalogSkeletalBatchComponents,
         HeroSkeletalWindComponents
@@ -1053,6 +1056,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         !GetWorld() ||
         !GetWorld()->IsGameWorld() ||
         (
+            CatalogGrassBatchComponents.IsEmpty() &&
             CatalogStaticBatchComponents.IsEmpty() &&
             CatalogSkeletalBatchComponents.IsEmpty()
         )
@@ -1177,6 +1181,15 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
     if (bAppendOnly)
     {
+        for (const TPair<int64, TObjectPtr<UInstancedStaticMeshComponent>>& Pair
+            : CatalogGrassBatchComponents)
+        {
+            if (IsValid(Pair.Value))
+            {
+                StaticBatchTransformCount +=
+                    Pair.Value->GetInstanceCount();
+            }
+        }
         for (const TPair<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& Pair
              : CatalogStaticBatchComponents)
         {
@@ -1336,7 +1349,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 continue;
             }
 
-            const FVector FinalLocation =
+            FVector FinalLocation =
                 ResolvedPlacement.Location;
 
             const float FinalScale =
@@ -1344,6 +1357,46 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
             const float FinalYaw =
                 ResolvedPlacement.Yaw;
+
+            UProceduralMeshComponent* TerrainMesh =
+                Chunk->GetTerrainMeshComponent();
+
+            if (
+                IsValid(TerrainMesh) &&
+                Chunk->HasBuiltTerrainCollision()
+            )
+            {
+                const float SurfaceSearchDistance =
+                    SafeVoxelSize * 3.0f;
+
+                const FVector TraceStart =
+                    FinalLocation +
+                    FVector::UpVector * SurfaceSearchDistance;
+
+                const FVector TraceEnd =
+                    FinalLocation -
+                    FVector::UpVector * SurfaceSearchDistance;
+
+                FHitResult SurfaceHit;
+
+                FCollisionQueryParams QueryParams(
+                    SCENE_QUERY_STAT(CubusVegetationSurfaceSnap),
+                    false,
+                    this
+                );
+
+                if (
+                    TerrainMesh->LineTraceComponent(
+                        SurfaceHit,
+                        TraceStart,
+                        TraceEnd,
+                        QueryParams
+                    )
+                )
+                {
+                    FinalLocation = SurfaceHit.ImpactPoint;
+                }
+            }
 
             const FTransform WorldTransform(
                 FRotator(0.0f, FinalYaw, 0.0f),
@@ -1458,6 +1511,9 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             }
 
             if (
+                !CatalogGrassBatchComponents.Contains(
+                    TargetBatchKey
+                ) &&
                 !CatalogStaticBatchComponents.Contains(
                     TargetBatchKey
                 ) &&
@@ -1469,9 +1525,124 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 continue;
             }
 
-            CatalogTransformsByBatchKey
-                .FindOrAdd(TargetBatchKey)
-                .Add(LocalTransform);
+            TArray<FTransform>& BatchTransforms =
+                CatalogTransformsByBatchKey.FindOrAdd(
+                    TargetBatchKey
+                );
+
+            if (
+                Instance.TypeId != CubusVegetationType::Grass ||
+                GrassInstancesPerPlacement <= 1
+            )
+            {
+                BatchTransforms.Add(LocalTransform);
+            }
+            else
+            {
+                const int32 GrassCount =
+                    FMath::Max(1, GrassInstancesPerPlacement);
+
+                for (
+                    int32 GrassIndex = 0;
+                    GrassIndex < GrassCount;
+                    ++GrassIndex
+                )
+                {
+                    const uint32 ScatterHash =
+                        HashCombineFast(
+                            GetTypeHash(Instance.WorldVoxel),
+                            HashCombineFast(
+                                GetTypeHash(TargetBatchKey),
+                                GetTypeHash(GrassIndex)
+                            )
+                        );
+
+                    FRandomStream ScatterRandom(
+                        static_cast<int32>(ScatterHash)
+                    );
+
+                    const float Angle =
+                        ScatterRandom.FRandRange(
+                            0.0f,
+                            2.0f * PI
+                        );
+
+                    const float Radius =
+                        FMath::Sqrt(ScatterRandom.FRand()) *
+                        GrassScatterRadius;
+
+                    FVector GrassWorldLocation =
+                        FinalLocation +
+                        FVector(
+                            FMath::Cos(Angle) * Radius,
+                            FMath::Sin(Angle) * Radius,
+                            0.0f
+                        );
+
+                    const float SurfaceSearchDistance =
+                        SafeVoxelSize * 3.0f;
+
+                    FHitResult GrassSurfaceHit;
+
+                    FCollisionQueryParams QueryParams(
+                        SCENE_QUERY_STAT(
+                            CubusGrassSurfaceScatter
+                        ),
+                        false,
+                        this
+                    );
+
+                    if (
+                        IsValid(TerrainMesh) &&
+                        Chunk->HasBuiltTerrainCollision() &&
+                        TerrainMesh->LineTraceComponent(
+                            GrassSurfaceHit,
+                            GrassWorldLocation +
+                                FVector::UpVector *
+                                SurfaceSearchDistance,
+                            GrassWorldLocation -
+                                FVector::UpVector *
+                                SurfaceSearchDistance,
+                            QueryParams
+                        )
+                    )
+                    {
+                        GrassWorldLocation =
+                            GrassSurfaceHit.ImpactPoint;
+                    }
+
+                    const float GrassYaw =
+                        FinalYaw +
+                        ScatterRandom.FRandRange(
+                            0.0f,
+                            360.0f
+                        );
+
+                    const float GrassScale =
+                        FinalScale *
+                        ScatterRandom.FRandRange(
+                            0.82f,
+                            1.18f
+                        );
+
+                    const FTransform GrassWorldTransform(
+                        FRotator(
+                            0.0f,
+                            GrassYaw,
+                            0.0f
+                        ),
+                        GrassWorldLocation,
+                        FVector(GrassScale)
+                    );
+
+                    BatchTransforms.Add(
+                        GrassWorldTransform
+                            .GetRelativeTransform(
+                                GetActorTransform()
+                            )
+                    );
+                }
+            }
 
             ++RenderedPlantCount;
         }
@@ -1495,34 +1666,67 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         HeroTransformsByBatchKey
     );
 
+    for (
+        const TPair<int64, TObjectPtr<UInstancedStaticMeshComponent>>& Pair
+         : CatalogGrassBatchComponents)
+    {
+        UInstancedStaticMeshComponent* GrassBatch =
+            Pair.Value;
+
+        if (!IsValid(GrassBatch))
+        {
+            continue;
+        }
+
+        const TArray<FTransform>* Transforms =
+            CatalogTransformsByBatchKey.Find(Pair.Key);
+
+        if (
+            Transforms == nullptr ||
+            Transforms->IsEmpty()
+        )
+        {
+            continue;
+        }
+
+        GrassBatch->AddInstances(
+            *Transforms,
+            false,
+            false
+        );
+
+        StaticBatchTransformCount +=
+            Transforms->Num();
+    }
+
     for (const TPair<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& Pair
      : CatalogStaticBatchComponents)
-{
-    UHierarchicalInstancedStaticMeshComponent* Component =
-        Pair.Value;
-
-    if (!IsValid(Component))
     {
-        continue;
+        UHierarchicalInstancedStaticMeshComponent* Component =
+            Pair.Value;
+
+        if (!IsValid(Component))
+        {
+            continue;
+        }
+
+        const TArray<FTransform>* Transforms =
+            CatalogTransformsByBatchKey.Find(Pair.Key);
+
+        if (Transforms == nullptr || Transforms->IsEmpty())
+        {
+            continue;
+        }
+
+        if (!bForceMegaplantFoliageMaterialOverride)
+        {
+            Component->EmptyOverrideMaterials();
+        }
+
+        Component->AddInstances(*Transforms, false, false, false);
+        Component->BuildTreeIfOutdated(false, false);
+        StaticBatchTransformCount += Transforms->Num();
     }
-
-    const TArray<FTransform>* Transforms =
-        CatalogTransformsByBatchKey.Find(Pair.Key);
-
-    if (Transforms == nullptr || Transforms->IsEmpty())
-    {
-        continue;
-    }
-
-    if (!bForceMegaplantFoliageMaterialOverride)
-    {
-        Component->EmptyOverrideMaterials();
-    }
-
-    Component->AddInstances(*Transforms, false, false, false);
-    Component->BuildTreeIfOutdated(false, false);
-    StaticBatchTransformCount += Transforms->Num();
-}
 
     int32 ActiveHeroComponentCount = 0;
     int32 ActiveHeroPveActorCount = 0;
@@ -1822,6 +2026,7 @@ void ACubusWorldVegetationActor::ClearWorldVegetation()
     PublishedVegetationSettingsHash = 0;
 
     VegetationRenderer.ClearBatches(
+        CatalogGrassBatchComponents,
         CatalogStaticBatchComponents,
         CatalogSkeletalBatchComponents
     );
@@ -2161,6 +2366,7 @@ void ACubusWorldVegetationActor::RefreshVegetationBatches()
         bCastWorldPlantShadows,
         PlantStartCullDistance,
         PlantEndCullDistance,
+        CatalogGrassBatchComponents,
         CatalogStaticBatchComponents,
         CatalogSkeletalBatchComponents
     );

@@ -1,5 +1,5 @@
 #include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
-
+#include "CubusCore/Vegetation/CubusVegetationTypes.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Data/CubusBlockVoxel.h"

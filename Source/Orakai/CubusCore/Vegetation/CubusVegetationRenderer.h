@@ -15,7 +15,6 @@ class UInstancedSkinnedMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 class USkinnedMeshComponent;
 class UInstancedStaticMeshComponent;
-class UHierarchicalInstancedStaticMeshComponent;
 
 struct FCubusVegetationSpeciesCatalogEntry;
 
