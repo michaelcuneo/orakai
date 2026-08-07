@@ -84,7 +84,7 @@ protected:
     TSoftObjectPtr<UMaterialParameterCollection> DynamicWindCollectionOverride;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind")
-    bool bEnableHeroSkeletalWindMode = true;
+    bool bEnableHeroSkeletalWindMode = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind")
     bool bBridgeUdwToGlobalFoliageActor = true;
@@ -272,7 +272,7 @@ protected:
             Units = "deg"
         )
     )
-    float MaximumGrassSlopeDegrees = 42.0f;
+    float MaximumGrassSlopeDegrees = 30.0f;
 
     UPROPERTY(
         EditAnywhere,

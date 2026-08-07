@@ -146,15 +146,8 @@ void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
     }
 
     TimeUntilRefresh = FMath::Max(0.1f, RefreshInterval);
-    ResolveBlockWorld();
 
-    VegetationRenderer.ApplyShadowSettings(
-        bCastWorldPlantShadows,
-        CatalogGrassBatchComponents,
-        CatalogStaticBatchComponents,
-        CatalogSkeletalBatchComponents,
-        HeroSkeletalWindComponents
-    );
+    ResolveBlockWorld();
 
     int32 CurrentLoadedChunkCount = 0;
     const uint32 CurrentHash =
@@ -1101,17 +1094,16 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
     TMap<FIntVector, uint32> CurrentChunkVegetationSignatures;
 
-    for (
-        TActorIterator<ACubusVoxelVolumeActor> Iterator(World);
-        Iterator;
-        ++Iterator
-    )
+    const auto& RegisteredChunks =
+        BlockWorld->GetRegisteredChunks();
+
+    for (const auto& Pair : RegisteredChunks)
     {
-        const ACubusVoxelVolumeActor* Chunk = *Iterator;
+        const ACubusVoxelVolumeActor* Chunk =
+            Pair.Value.Get();
 
         if (
             !IsValid(Chunk) ||
-            Chunk->GetOwner() != BlockWorld ||
             !FCubusVegetationChunkFilter::IsWithinCameraRadius(
                 Chunk,
                 CameraLocation,
@@ -1124,7 +1116,8 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             continue;
         }
 
-        const FCubusBlockChunkData* ChunkData = Chunk->GetChunkData();
+        const FCubusBlockChunkData* ChunkData =
+            Chunk->GetChunkData();
 
         if (ChunkData == nullptr)
         {
@@ -1132,8 +1125,10 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         }
 
         CurrentChunkVegetationSignatures.Add(
-            Chunk->GetChunkCoordinate(),
-            CalculateChunkVegetationSignature(*ChunkData)
+            Pair.Key,
+            CalculateChunkVegetationSignature(
+                *ChunkData
+            )
         );
     }
 
@@ -1162,14 +1157,14 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         }
     }
 
-    if (!bAppendOnly)
-    {
-        ClearWorldVegetation();
-    }
-
     if (bEnableHeroSkeletalWindMode)
     {
         bAppendOnly = false;
+    }
+
+    if (!bAppendOnly)
+    {
+        ClearWorldVegetation();
     }
 
     TArray<FCubusVegetationRepresentationCandidate>
@@ -1217,30 +1212,26 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     float ObservedRandomScaleMin = MAX_flt;
     float ObservedRandomScaleMax = 0.0f;
 
-    for (
-        TActorIterator<ACubusVoxelVolumeActor> Iterator(World);
-        Iterator;
-        ++Iterator
-    )
+    for (const auto& Pair : RegisteredChunks)
     {
-        ACubusVoxelVolumeActor* Chunk = *Iterator;
+        ACubusVoxelVolumeActor* Chunk =
+            Pair.Value.Get();
 
-        if (
-            !IsValid(Chunk) ||
-            Chunk->GetOwner() != BlockWorld
-        )
+        if (!IsValid(Chunk))
         {
             continue;
         }
-
-        const FCubusBlockChunkData* ChunkData = Chunk->GetChunkData();
+        
+        const FCubusBlockChunkData* ChunkData =
+            Chunk->GetChunkData();
 
         if (ChunkData == nullptr)
         {
             continue;
         }
 
-        const FIntVector ChunkCoordinate = Chunk->GetChunkCoordinate();
+        const FIntVector& ChunkCoordinate =
+            Pair.Key;
 
         if (
             !FCubusVegetationChunkFilter::IsWithinCameraRadius(
@@ -1355,6 +1346,8 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             FVector SurfaceNormal =
                 FVector::UpVector;
 
+            bool bFoundTerrainSurface = false;
+
             const float FinalScale =
                 ResolvedPlacement.Scale;
 
@@ -1397,8 +1390,13 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                     )
                 )
                 {
-                    FinalLocation = SurfaceHit.ImpactPoint;
-                    SurfaceNormal = SurfaceHit.ImpactNormal.GetSafeNormal();
+                    FinalLocation =
+                        SurfaceHit.ImpactPoint;
+
+                    SurfaceNormal =
+                        SurfaceHit.ImpactNormal.GetSafeNormal();
+
+                    bFoundTerrainSurface = true;
                 }
             }
 
@@ -1422,6 +1420,14 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
             const bool bGrassType =
                 Instance.TypeId == CubusVegetationType::Grass;
+
+            if (
+                (bGrassType || bTreeType) &&
+                !bFoundTerrainSurface
+            )
+            {
+                continue;
+            }
 
             if (
                 bTreeType &&
@@ -1970,13 +1976,31 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     }
 }
 
-    int32 SignatureLoadedChunkCount = 0;
-    const uint32 SignatureHash =
-        CalculateLoadedPlacementHash(SignatureLoadedChunkCount);
+    LoadedChunkCount =
+        CurrentChunkVegetationSignatures.Num();
 
-    LoadedChunkCount = SignatureLoadedChunkCount;
-    PublishedPlacementHash = static_cast<int64>(SignatureHash);
-    PublishedVegetationSettingsHash = CurrentVegetationSettingsHash;
+    uint32 SignatureHash = 0;
+
+    for (const TPair<FIntVector, uint32>& Pair
+        : CurrentChunkVegetationSignatures)
+    {
+        SignatureHash = HashCombineFast(
+            SignatureHash,
+            GetTypeHash(Pair.Key)
+        );
+
+        SignatureHash = HashCombineFast(
+            SignatureHash,
+            Pair.Value
+        );
+    }
+
+    PublishedPlacementHash =
+        static_cast<int64>(SignatureHash);
+
+    PublishedVegetationSettingsHash =
+        CurrentVegetationSettingsHash;
+
     PublishedChunkVegetationSignatures =
         MoveTemp(CurrentChunkVegetationSignatures);
 
@@ -2303,23 +2327,21 @@ uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(
         ? PlayerController->PlayerCameraManager->GetCameraLocation()
         : FVector::ZeroVector;
 
-    for (
-        TActorIterator<ACubusVoxelVolumeActor> Iterator(World);
-        Iterator;
-        ++Iterator
-    )
-    {
-        const ACubusVoxelVolumeActor* Chunk = *Iterator;
+    const auto& RegisteredChunks =
+        BlockWorld->GetRegisteredChunks();
 
-        if (
-            !IsValid(Chunk) ||
-            Chunk->GetOwner() != BlockWorld
-        )
+    for (const auto& Pair : RegisteredChunks)
+    {
+        const ACubusVoxelVolumeActor* Chunk =
+            Pair.Value.Get();
+
+        if (!IsValid(Chunk))
         {
             continue;
         }
 
-        const FCubusBlockChunkData* ChunkData = Chunk->GetChunkData();
+        const FCubusBlockChunkData* ChunkData =
+            Chunk->GetChunkData();
 
         if (ChunkData == nullptr)
         {
@@ -2343,26 +2365,44 @@ uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(
 
         Hash = HashCombineFast(
             Hash,
-            GetTypeHash(Chunk->GetChunkCoordinate())
-        );
-        Hash = HashCombineFast(
-            Hash,
-            GetTypeHash(ChunkData->GetVegetationInstances().Num())
+            GetTypeHash(Pair.Key)
         );
 
         const auto Instances =
             ChunkData->GetVegetationInstances();
 
+        Hash = HashCombineFast(
+            Hash,
+            GetTypeHash(Instances.Num())
+        );
+
         if (!Instances.IsEmpty())
         {
-            const FCubusVegetationInstance& FirstInstance = Instances[0];
+            const FCubusVegetationInstance& FirstInstance =
+                Instances[0];
+
             const FCubusVegetationInstance& LastInstance =
                 Instances[Instances.Num() - 1];
 
-            Hash = HashCombineFast(Hash, GetTypeHash(FirstInstance.WorldVoxel));
-            Hash = HashCombineFast(Hash, GetTypeHash(FirstInstance.TypeId));
-            Hash = HashCombineFast(Hash, GetTypeHash(LastInstance.WorldVoxel));
-            Hash = HashCombineFast(Hash, GetTypeHash(LastInstance.TypeId));
+            Hash = HashCombineFast(
+                Hash,
+                GetTypeHash(FirstInstance.WorldVoxel)
+            );
+
+            Hash = HashCombineFast(
+                Hash,
+                GetTypeHash(FirstInstance.TypeId)
+            );
+
+            Hash = HashCombineFast(
+                Hash,
+                GetTypeHash(LastInstance.WorldVoxel)
+            );
+
+            Hash = HashCombineFast(
+                Hash,
+                GetTypeHash(LastInstance.TypeId)
+            );
         }
     }
 

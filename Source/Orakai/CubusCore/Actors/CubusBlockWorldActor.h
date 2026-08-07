@@ -40,6 +40,13 @@ public:
     void UnregisterChunk(ACubusVoxelVolumeActor* ChunkActor);
 
     ACubusVoxelVolumeActor* FindChunk(const FIntVector& ChunkCoordinate) const;
+    const TMap<
+        FIntVector,
+        TWeakObjectPtr<ACubusVoxelVolumeActor>
+    >& GetRegisteredChunks() const
+    {
+        return ChunksByCoordinate;
+    }
     void RebuildChunkAndNeighbours(const FIntVector& ChunkCoordinate);
     void QueueChunkForRebuild(const FIntVector& ChunkCoordinate);
     void QueueChunkAndFaceNeighboursForRebuild(const FIntVector& ChunkCoordinate);
