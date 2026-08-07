@@ -1,7 +1,7 @@
 #include "CubusCore/Vegetation/CubusVegetationRenderer.h"
 #include "CubusCore/Vegetation/CubusVegetationTypes.h"
 #include "CubusCore/Vegetation/CubusVegetationWindUtilities.h"
-
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/ActorComponent.h"
 #include "Components/SkinnedMeshComponent.h"
 #include "Engine/World.h"
@@ -90,6 +90,51 @@ FCubusVegetationRenderer::CreateStaticBatch(
     Component->SetCollisionEnabled(
         ECollisionEnabled::NoCollision
     );
+    Component->SetGenerateOverlapEvents(false);
+    Component->SetCanEverAffectNavigation(false);
+    Component->SetCastShadow(bCastShadow);
+    Component->SetMobility(EComponentMobility::Movable);
+
+    Component->SetCullDistances(
+        FMath::Max(0, StartCullDistance),
+        FMath::Max(StartCullDistance, EndCullDistance)
+    );
+
+    Component->RegisterComponent();
+    Owner->AddInstanceComponent(Component);
+
+    return Component;
+}
+
+UInstancedStaticMeshComponent*
+FCubusVegetationRenderer::CreateGrassBatch(
+    AActor* Owner,
+    USceneComponent* Root,
+    const FName ComponentName,
+    const bool bCastShadow,
+    const int32 StartCullDistance,
+    const int32 EndCullDistance
+) const
+{
+    if (!IsValid(Owner) || !IsValid(Root))
+    {
+        return nullptr;
+    }
+
+    UInstancedStaticMeshComponent* Component =
+        NewObject<UInstancedStaticMeshComponent>(
+            Owner,
+            ComponentName,
+            RF_Transient
+        );
+
+    if (!IsValid(Component))
+    {
+        return nullptr;
+    }
+
+    Component->SetupAttachment(Root);
+    Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Component->SetGenerateOverlapEvents(false);
     Component->SetCanEverAffectNavigation(false);
     Component->SetCastShadow(bCastShadow);
@@ -219,6 +264,10 @@ void FCubusVegetationRenderer::ApplyShadowSettings(
     const bool bCastShadow,
     const TMap<
         int64,
+        TObjectPtr<UInstancedStaticMeshComponent>
+    >& GrassBatchComponents,
+    const TMap<
+        int64,
         TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
     >& StaticBatchComponents,
     const TMap<
@@ -228,6 +277,19 @@ void FCubusVegetationRenderer::ApplyShadowSettings(
     const TArray<TObjectPtr<USkeletalMeshComponent>>& HeroComponents
 ) const
 {
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<UInstancedStaticMeshComponent>
+        >& Pair : GrassBatchComponents
+    )
+    {
+        if (IsValid(Pair.Value))
+        {
+            Pair.Value->SetCastShadow(bCastShadow);
+        }
+    }
+
     for (
         const TPair<
             int64,
@@ -266,6 +328,10 @@ void FCubusVegetationRenderer::ApplyShadowSettings(
 void FCubusVegetationRenderer::ClearBatches(
     const TMap<
         int64,
+        TObjectPtr<UInstancedStaticMeshComponent>
+    >& GrassBatchComponents,
+    const TMap<
+        int64,
         TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
     >& StaticBatchComponents,
     const TMap<
@@ -274,6 +340,19 @@ void FCubusVegetationRenderer::ClearBatches(
     >& SkeletalBatchComponents
 ) const
 {
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<UInstancedStaticMeshComponent>
+        >& Pair : GrassBatchComponents
+    )
+    {
+        if (IsValid(Pair.Value))
+        {
+            Pair.Value->ClearInstances();
+        }
+    }
+
     for (
         const TPair<
             int64,
@@ -312,9 +391,11 @@ void FCubusVegetationRenderer::EnsureBatches(
     const int32 EndCullDistance,
     TMap<
         int64,
-        TObjectPtr<
-            UHierarchicalInstancedStaticMeshComponent
-        >
+        TObjectPtr<UInstancedStaticMeshComponent>
+    >& GrassBatchComponents,
+    TMap<
+        int64,
+        TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
     >& StaticBatchComponents,
     TMap<
         int64,
@@ -322,6 +403,7 @@ void FCubusVegetationRenderer::EnsureBatches(
     >& SkeletalBatchComponents
 ) const
 {
+    TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>> NewGrassBatches;
     TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> NewStaticBatches;
     TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>> NewSkeletalBatches;
 
@@ -376,6 +458,66 @@ void FCubusVegetationRenderer::EnsureBatches(
                     SkeletalBatchComponents.Remove(BatchKey);
                 }
 
+                const bool bGrass =
+                    Entry.TypeId == CubusVegetationType::Grass;
+
+                if (bGrass)
+                {
+                    if (UHierarchicalInstancedStaticMeshComponent* OldHism =
+                            StaticBatchComponents.FindRef(BatchKey))
+                    {
+                        OldHism->ClearInstances();
+                        OldHism->DestroyComponent();
+                        StaticBatchComponents.Remove(BatchKey);
+                    }
+
+                    UInstancedStaticMeshComponent* Component =
+                        GrassBatchComponents.FindRef(BatchKey);
+
+                    if (!IsValid(Component))
+                    {
+                        const FName ComponentName(
+                            *FString::Printf(
+                                TEXT("CubusWorldGrassISM_%s_%d"),
+                                *SpeciesToken,
+                                StageIndex
+                            )
+                        );
+
+                        Component = CreateGrassBatch(
+                            Owner,
+                            Root,
+                            ComponentName,
+                            bCastShadow,
+                            StartCullDistance,
+                            EndCullDistance
+                        );
+                    }
+
+                    if (!IsValid(Component))
+                    {
+                        continue;
+                    }
+
+                    Component->SetStaticMesh(StaticMesh);
+                    Component->SetCastShadow(bCastShadow);
+                    Component->SetCullDistances(
+                        FMath::Max(0, StartCullDistance),
+                        FMath::Max(StartCullDistance, EndCullDistance)
+                    );
+
+                    NewGrassBatches.Add(BatchKey, Component);
+                    continue;
+                }
+
+                if (UInstancedStaticMeshComponent* OldGrass =
+                        GrassBatchComponents.FindRef(BatchKey))
+                {
+                    OldGrass->ClearInstances();
+                    OldGrass->DestroyComponent();
+                    GrassBatchComponents.Remove(BatchKey);
+                }
+
                 UHierarchicalInstancedStaticMeshComponent* Component =
                     StaticBatchComponents.FindRef(BatchKey);
 
@@ -389,7 +531,14 @@ void FCubusVegetationRenderer::EnsureBatches(
                         )
                     );
 
-                    Component = CreateStaticBatch(Owner, Root, ComponentName, bCastShadow, StartCullDistance, EndCullDistance);
+                    Component = CreateStaticBatch(
+                        Owner,
+                        Root,
+                        ComponentName,
+                        bCastShadow,
+                        StartCullDistance,
+                        EndCullDistance
+                    );
                 }
 
                 if (!IsValid(Component))
@@ -407,9 +556,17 @@ void FCubusVegetationRenderer::EnsureBatches(
                 NewStaticBatches.Add(BatchKey, Component);
                 continue;
             }
-
+            
             if (USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(MeshAsset))
             {
+                if (UInstancedStaticMeshComponent* OldGrass =
+                        GrassBatchComponents.FindRef(BatchKey))
+                {
+                    OldGrass->ClearInstances();
+                    OldGrass->DestroyComponent();
+                    GrassBatchComponents.Remove(BatchKey);
+                }
+
                 if (UHierarchicalInstancedStaticMeshComponent* OldStatic =
                         StaticBatchComponents.FindRef(BatchKey))
                 {
@@ -611,6 +768,26 @@ void FCubusVegetationRenderer::EnsureBatches(
         }
     }
 
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<UInstancedStaticMeshComponent>
+        >& Pair : GrassBatchComponents
+    )
+    {
+        if (
+            NewGrassBatches.Contains(Pair.Key) ||
+            !IsValid(Pair.Value)
+        )
+        {
+            continue;
+        }
+
+        Pair.Value->ClearInstances();
+        Pair.Value->DestroyComponent();
+    }
+
+
     for (const TPair<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& Pair
          : StaticBatchComponents)
     {
@@ -635,6 +812,7 @@ void FCubusVegetationRenderer::EnsureBatches(
         Pair.Value->DestroyComponent();
     }
 
+    GrassBatchComponents = MoveTemp(NewGrassBatches);
     StaticBatchComponents = MoveTemp(NewStaticBatches);
     SkeletalBatchComponents = MoveTemp(NewSkeletalBatches);
 

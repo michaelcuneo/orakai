@@ -2,6 +2,7 @@
 
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
+#include "CubusCore/Generation/CubusTerrainClutterGenerator.h"
 #include "CubusCore/Storage/CubusChunkStore.h"
 
 #include "ProceduralMeshComponent.h"
@@ -112,6 +113,11 @@ void ACubusVoxelVolumeActor::RegenerateVegetationData()
     FCubusBlockVegetationGenerator::Generate(
         *ChunkData,
         GeologyProfile
+    );
+    FCubusTerrainClutterGenerator::Append(
+        *ChunkData,
+        MaterialRegistry,
+        VoxelSize
     );
 }
 

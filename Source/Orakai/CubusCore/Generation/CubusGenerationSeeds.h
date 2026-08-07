@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 3: vegetation now uses sparse biome-specific grove placement
-    // and carries biome affinity into runtime species selection.
-    static constexpr uint32 CurrentGenerationVersion = 3;
+    // Bumped to 10: deterministic terrain clutter is now appended from the
+    // terrain material library's surface-layer settings.
+    static constexpr uint32 CurrentGenerationVersion = 10;
 
     int64 World = 1;
     int32 Terrain = 0;

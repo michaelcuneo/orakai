@@ -13,8 +13,8 @@
  *
  * Game code calls this subsystem; it throttles high-frequency player position
  * updates, forwards discrete edits immediately, and delegates all transport to
- * a swappable IOrakaiPersistenceBackend. A logging backend is installed by
- * default so nothing depends on the SpacetimeDB SDK being present. Call
+ * a swappable IOrakaiPersistenceBackend. A local delta backend is installed by
+ * default so offline worlds survive restarts. Call
  * SetBackend() to install the SpacetimeDB backend once it is available.
  */
 UCLASS()
@@ -38,7 +38,7 @@ public:
 
     /**
      * Install and connect the SpacetimeDB backend, replacing the default
-     * logging backend. Safe to call from Blueprints at startup.
+     * local backend. Safe to call from Blueprints at startup.
      */
     UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence")
     void ConnectToSpacetimeDB(
@@ -78,6 +78,26 @@ public:
         const FIntVector& LocalCoordinate
     );
 
+    void RecordDensityEdit(
+        const FIntVector& WorldSample,
+        float DensityDelta,
+        int32 MaterialId
+    );
+
+    void ClearDensityEdit(const FIntVector& WorldSample);
+
+    void GetVoxelEditsForChunk(
+        const FIntVector& ChunkCoordinate,
+        TArray<FOrakaiVoxelEdit>& OutEdits
+    ) const;
+
+    void GetDensityEdits(TArray<FOrakaiDensityEdit>& OutEdits) const;
+
+    void GetFoliageEditsForChunk(
+        const FIntVector& ChunkCoordinate,
+        TArray<FOrakaiFoliageEdit>& OutEdits
+    ) const;
+
     /** Forward a foliage delta immediately. */
     void RecordFoliageEdit(
         const FIntVector& WorldVoxel,
@@ -89,6 +109,65 @@ public:
 
     /** Remove a foliage delta immediately. */
     void ClearFoliageEdit(const FIntVector& WorldVoxel);
+
+    UFUNCTION(BlueprintPure, Category = "Orakai|Persistence|Inventory")
+    int32 GetInventoryQuantity(FName ItemId) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|Inventory")
+    void SetInventoryQuantity(FName ItemId, int32 Quantity);
+
+    /** Stable ID for a deterministic generated object such as a tree or rock. */
+    UFUNCTION(BlueprintPure, Category = "Orakai|Persistence|World Objects")
+    FString MakeGeneratedWorldObjectId(
+        int64 WorldSeed,
+        FName TypeId,
+        FIntVector StableCoordinate
+    ) const;
+
+    /** Store or replace a complete object delta. */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    void RecordWorldObject(const FOrakaiWorldObjectRecord& Record);
+
+    /** Create and persist a player-authored object record. */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    FString RecordPlacedWorldObject(
+        FName TypeId,
+        FIntVector ChunkCoordinate,
+        FTransform Transform,
+        const FString& Payload
+    );
+
+    /** Persist a tombstone for a reproducible generated object. */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    FString TombstoneGeneratedWorldObject(
+        int64 WorldSeed,
+        FName TypeId,
+        FIntVector StableCoordinate,
+        FIntVector ChunkCoordinate,
+        FTransform GeneratedTransform
+    );
+
+    /**
+     * Destroy an object delta. Generated objects become tombstones; placed
+     * objects are removed because they have no generated baseline.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    bool DestroyWorldObject(const FString& ObjectId);
+
+    /** Remove a delta and reveal the deterministic generated baseline again. */
+    UFUNCTION(BlueprintCallable, Category = "Orakai|Persistence|World Objects")
+    void ClearWorldObjectDelta(const FString& ObjectId);
+
+    UFUNCTION(BlueprintPure, Category = "Orakai|Persistence|World Objects")
+    bool GetWorldObject(
+        const FString& ObjectId,
+        FOrakaiWorldObjectRecord& OutRecord
+    ) const;
+
+    UFUNCTION(BlueprintPure, Category = "Orakai|Persistence|World Objects")
+    TArray<FOrakaiWorldObjectRecord> GetWorldObjectsForChunk(
+        FIntVector ChunkCoordinate
+    ) const;
 
     /** Minimum seconds between forwarded player position updates. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|Persistence")

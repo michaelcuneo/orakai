@@ -9,6 +9,7 @@
 #include "Factories/MaterialFactoryNew.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialExpressionAdd.h"
+#include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionMultiply.h"
@@ -168,6 +169,26 @@ namespace CubusMaterialBuilder
     )
     {
         UMaterialExpressionSaturate* Node = AddExpression<UMaterialExpressionSaturate>(Material, X, Y);
+        Connect(Node->Input, Input);
+        return Node;
+    }
+
+    UMaterialExpressionComponentMask* Mask(
+        UMaterial* Material,
+        UMaterialExpression* Input,
+        const bool bR,
+        const bool bG,
+        const bool bB,
+        const int32 X,
+        const int32 Y
+    )
+    {
+        UMaterialExpressionComponentMask* Node =
+            AddExpression<UMaterialExpressionComponentMask>(Material, X, Y);
+        Node->R = bR;
+        Node->G = bG;
+        Node->B = bB;
+        Node->A = false;
         Connect(Node->Input, Input);
         return Node;
     }
@@ -361,6 +382,29 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial()
     UMaterialExpressionMultiply* TintedBase =
         Multiply(Material, FinalBase, Tint, 100, -800);
 
+    UMaterialExpressionScalarParameter* WeatherWetness =
+        Scalar(Material, TEXT("CubusWeatherWetness"), 0.0f, 100, -1050);
+    UMaterialExpressionScalarParameter* WeatherWetDarkening =
+        Scalar(Material, TEXT("CubusWeatherWetDarkening"), 0.65f, 350, -1050);
+    UMaterialExpressionMultiply* WetBase =
+        Multiply(Material, TintedBase, WeatherWetDarkening, 350, -800);
+    UMaterialExpressionLinearInterpolate* WeatherBase =
+        Lerp(Material, TintedBase, WetBase, WeatherWetness, 650, -800);
+
+    UMaterialExpressionComponentMask* DryRoughness =
+        Mask(Material, FinalORM, false, true, false, 100, -150);
+    UMaterialExpressionScalarParameter* WeatherWetRoughness =
+        Scalar(Material, TEXT("CubusWeatherWetRoughness"), 0.12f, 350, -50);
+    UMaterialExpressionLinearInterpolate* WeatherRoughness =
+        Lerp(
+            Material,
+            DryRoughness,
+            WeatherWetRoughness,
+            WeatherWetness,
+            650,
+            -100
+        );
+
     UMaterialExpressionVectorParameter* EmissiveColor =
         Vector(Material, TEXT("EmissiveColor"), FLinearColor::Black, -200, 250);
     UMaterialExpressionScalarParameter* EmissiveStrength =
@@ -369,10 +413,10 @@ UMaterial* UCubusMaterialBuilderLibrary::BuildCubusBlockPbrMaterial()
         Multiply(Material, EmissiveColor, EmissiveStrength, 100, 300);
 
     UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
-    Connect(Data->BaseColor, TintedBase);
+    Connect(Data->BaseColor, WeatherBase);
     Connect(Data->Normal, FinalNormal);
     Connect(Data->AmbientOcclusion, FinalORM, 1);
-    Connect(Data->Roughness, FinalORM, 2);
+    Connect(Data->Roughness, WeatherRoughness);
     Connect(Data->Metallic, FinalORM, 3);
     Connect(Data->EmissiveColor, Emissive);
 

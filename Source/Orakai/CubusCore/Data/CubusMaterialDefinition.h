@@ -6,9 +6,6 @@
 class UMaterialInterface;
 class UTexture2D;
 
-/**
- * Broad physical state of a voxel material.
- */
 UENUM(BlueprintType)
 enum class ECubusMatterState : uint8
 {
@@ -19,203 +16,118 @@ enum class ECubusMatterState : uint8
 };
 
 /**
- * PBR texture set used by one face group of a block material.
- * ORM uses red=ambient occlusion, green=roughness and blue=metallic.
+ * Rendering data for one terrain material used by both smooth density terrain
+ * and block-shaped terrain edits. Construction pieces will use a separate
+ * building-material asset and are intentionally not represented here.
  */
 USTRUCT(BlueprintType)
-struct ORAKAI_API FCubusBlockSurfaceTextures
+struct ORAKAI_API FCubusDensitySurfaceTextures
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PBR")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Textures")
     TObjectPtr<UTexture2D> BaseColor = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PBR")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Textures")
     TObjectPtr<UTexture2D> Normal = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PBR")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Textures")
     TObjectPtr<UTexture2D> ORM = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PBR")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Textures")
     TObjectPtr<UTexture2D> Height = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Textures")
+    TObjectPtr<UTexture2D> MacroColor = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Textures")
+    TObjectPtr<UTexture2D> DetailNormal = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projection", meta = (ClampMin = "0.0001"))
+    float WorldScale = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projection", meta = (ClampMin = "0.1"))
+    float TriplanarSharpness = 6.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Macro Detail", meta = (ClampMin = "0.000001"))
+    float MacroScale = 0.0005f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Macro Detail", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MacroStrength = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Micro Detail", meta = (ClampMin = "0.0001"))
+    float DetailScale = 0.08f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Micro Detail", meta = (ClampMin = "0.0"))
+    float DetailNormalStrength = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blending", meta = (ClampMin = "0.0"))
+    float HeightStrength = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blending", meta = (ClampMin = "0.01"))
+    float BlendContrast = 4.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
+    FLinearColor Tint = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
+    FLinearColor EmissiveColor = FLinearColor::Black;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance", meta = (ClampMin = "0.0"))
+    float EmissiveStrength = 0.0f;
 
     FORCEINLINE bool HasAnyTexture() const
     {
-        return
-            IsValid(BaseColor.Get()) ||
-            IsValid(Normal.Get()) ||
-            IsValid(ORM.Get()) ||
-            IsValid(Height.Get());
+        return IsValid(BaseColor.Get()) || IsValid(Normal.Get()) ||
+            IsValid(ORM.Get()) || IsValid(Height.Get()) ||
+            IsValid(MacroColor.Get()) || IsValid(DetailNormal.Get());
     }
 };
 
-/**
- * Shared definition referenced by voxel MaterialId.
- */
 USTRUCT(BlueprintType)
 struct ORAKAI_API FCubusMaterialDefinition
 {
     GENERATED_BODY()
 
 public:
-    /**
-     * Stable identifier stored inside voxel data.
-     *
-     * ID 0 is reserved for empty air.
-     */
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Identity",
-        meta = (
-            ClampMin = "0",
-            ClampMax = "65535"
-        )
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Identity", meta = (ClampMin = "0", ClampMax = "65535"))
     int32 MaterialId = 0;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Identity"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Identity")
     FName Name = NAME_None;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Identity"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Identity")
     FText DisplayName;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Physical"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physical")
     ECubusMatterState State = ECubusMatterState::Empty;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Rendering"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering")
     bool bRenderable = false;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Rendering"
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering")
     bool bOccludesBlockFaces = false;
 
-    /**
-     * Parent material used for this block. Point this at M_CubusBlockPBR.
-     */
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Rendering"
-    )
+    /** Optional fallback material used when the generated terrain material is unavailable. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering")
     TObjectPtr<UMaterialInterface> Material = nullptr;
 
-    /** Side is also the fallback for empty top or bottom texture sets. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
-    FCubusBlockSurfaceTextures SideSurface;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering", meta = (DisplayName = "Terrain Surface", ShowOnlyInnerProperties))
+    FCubusDensitySurfaceTextures DensitySurface;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
-    FCubusBlockSurfaceTextures TopSurface;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
-    FCubusBlockSurfaceTextures BottomSurface;
-
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Rendering|PBR",
-        meta = (ClampMin = "0.01")
-    )
-    float TextureScale = 1.0f;
-
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Rendering|PBR",
-        meta = (ClampMin = "0.0")
-    )
-    float HeightStrength = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
-    FLinearColor Tint = FLinearColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|PBR")
-    FLinearColor EmissiveColor = FLinearColor::Black;
-
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Rendering|PBR",
-        meta = (ClampMin = "0.0")
-    )
-    float EmissiveStrength = 0.0f;
-
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Rendering|PBR",
-        meta = (ClampMin = "0.0", ClampMax = "1.0")
-    )
-    float SideTopBlendStart = 0.7f;
-
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Rendering|PBR",
-        meta = (ClampMin = "0.01")
-    )
-    float SideTopBlendSharpness = 4.0f;
-
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Physical",
-        meta = (ClampMin = "0.0")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physical", meta = (ClampMin = "0.0"))
     float Density = 0.0f;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadOnly,
-        Category = "Physical",
-        meta = (ClampMin = "0.0")
-    )
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physical", meta = (ClampMin = "0.0"))
     float Hardness = 0.0f;
 
-    FORCEINLINE bool UsesPbrTextures() const
+    FORCEINLINE bool UsesDensityTextures() const
     {
-        return
-            SideSurface.HasAnyTexture() ||
-            TopSurface.HasAnyTexture() ||
-            BottomSurface.HasAnyTexture();
+        return DensitySurface.HasAnyTexture();
     }
 
-    FORCEINLINE bool IsEmpty() const
-    {
-        return State == ECubusMatterState::Empty;
-    }
-
-    FORCEINLINE bool IsSolid() const
-    {
-        return State == ECubusMatterState::Solid;
-    }
-
-    FORCEINLINE bool IsLiquid() const
-    {
-        return State == ECubusMatterState::Liquid;
-    }
-
-    FORCEINLINE bool IsGas() const
-    {
-        return State == ECubusMatterState::Gas;
-    }
+    FORCEINLINE bool IsEmpty() const { return State == ECubusMatterState::Empty; }
+    FORCEINLINE bool IsSolid() const { return State == ECubusMatterState::Solid; }
+    FORCEINLINE bool IsLiquid() const { return State == ECubusMatterState::Liquid; }
+    FORCEINLINE bool IsGas() const { return State == ECubusMatterState::Gas; }
 };

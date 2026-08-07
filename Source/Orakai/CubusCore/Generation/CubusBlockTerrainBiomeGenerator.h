@@ -23,15 +23,4 @@ private:
         int32 LocalY
     );
 
-    static float SampleBiomeNoise(
-        int32 WorldX,
-        int32 WorldY,
-        float Frequency
-    );
-
-    static float SampleRiverDistance(
-        int32 WorldX,
-        int32 WorldY,
-        const UCubusGeologyProfile* GeologyProfile
-    );
 };

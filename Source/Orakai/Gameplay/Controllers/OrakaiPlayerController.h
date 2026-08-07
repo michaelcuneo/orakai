@@ -8,15 +8,21 @@
 
 class UInputMappingContext;
 class UUserWidget;
+struct FHitResult;
 
 /**
- *  Basic PlayerController class for a third person game
- *  Manages input mappings
+ * Basic PlayerController class for a third person game.
+ * Manages input mappings and terrain material inspection diagnostics.
  */
 UCLASS(abstract)
 class AOrakaiPlayerController : public APlayerController
 {
 	GENERATED_BODY()
+
+public:
+	AOrakaiPlayerController();
+
+	virtual void Tick(float DeltaSeconds) override;
 	
 protected:
 
@@ -40,6 +46,14 @@ protected:
 	UPROPERTY(EditAnywhere, Config, Category = "Input|Touch Controls")
 	bool bForceTouchControls = false;
 
+	/** Shows the rendered density material ID under the centre of the view. */
+	UPROPERTY(EditAnywhere, Category = "Debug|Terrain Material")
+	bool bShowTerrainMaterialInspector = true;
+
+	/** Maximum camera trace distance in centimetres. */
+	UPROPERTY(EditAnywhere, Category = "Debug|Terrain Material", meta = (ClampMin = "100.0", Units = "cm"))
+	float TerrainMaterialTraceDistance = 10000.0f;
+
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
 
@@ -49,4 +63,7 @@ protected:
 	/** Returns true if the player should use UMG touch controls */
 	bool ShouldUseTouchControls() const;
 
+private:
+	void UpdateTerrainMaterialInspector();
+	int32 ResolveRenderedTerrainMaterialId(const FHitResult& Hit) const;
 };

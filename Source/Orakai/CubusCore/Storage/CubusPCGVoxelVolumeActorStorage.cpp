@@ -1,13 +1,36 @@
 #include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 
+#include "CubusCore/Actors/CubusBlockWorldActor.h"
+
 void ACubusPCGVoxelVolumeActor::GenerateTerrainData()
 {
+    // Runtime chunks are configured by the world immediately after SpawnActor.
+    // Apply the authoritative seed explicitly before cache lookup or terrain
+    // sampling instead of depending on the global actor-spawn delegate order.
+    if (ACubusBlockWorldActor* BlockWorld = GetOwningBlockWorld())
+    {
+        ConfigureGenerationSeeds(
+            BlockWorld->GetGenerationSeeds()
+        );
+    }
+
+    const FIntVector Coordinate = GetChunkCoordinate();
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("Cubus streamed chunk class=%s coordinate=(%d, %d, %d) renderMode=%d"),
+        *GetClass()->GetName(),
+        Coordinate.X,
+        Coordinate.Y,
+        Coordinate.Z,
+        static_cast<int32>(GetEffectiveRenderMode())
+    );
+
     // The procedural mesh is about to be replaced. Remove it from the ray
     // tracing scene first; the near-field manager will restore it after the
     // world actor has rebuilt the completed mesh.
     SetTerrainRayTracingEnabled(false);
-
-    const FIntVector Coordinate = GetChunkCoordinate();
 
     if (TryLoadCachedChunk())
     {

@@ -4,6 +4,8 @@
 #include "GameFramework/Actor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
+#include "CubusCore/Meshing/CubusDensityLod.h"
+#include "CubusCore/Rendering/CubusVoxelRenderMode.h"
 #include "CubusVoxelVolumeActor.generated.h"
 
 class ACubusBlockWorldActor;
@@ -16,7 +18,7 @@ UCLASS(
     BlueprintType,
     Blueprintable,
     ClassGroup = "Cubus",
-    meta = (DisplayName = "Cubus Block Chunk")
+    meta = (DisplayName = "Cubus Voxel Chunk")
 )
 class ORAKAI_API ACubusVoxelVolumeActor : public AActor
 {
@@ -31,6 +33,9 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Rendering")
     void RebuildVolume();
 
+    UFUNCTION(BlueprintPure, Category = "Cubus|Rendering")
+    ECubusVoxelRenderMode GetEffectiveRenderMode() const;
+
     const FIntVector& GetChunkCoordinate() const
     {
         return ChunkCoordinate;
@@ -41,6 +46,19 @@ public:
         return VoxelSize;
     }
 
+    int32 GetDensitySubdivisionsPerVoxel() const
+    {
+        return DensitySubdivisionsPerVoxel;
+    }
+
+    float GetDensitySampleSpacing() const
+    {
+        return FCubusDensityLod::GetSampleSpacing(
+            VoxelSize,
+            DensitySubdivisionsPerVoxel
+        );
+    }
+
     const FCubusBlockChunkData* GetChunkData() const
     {
         return ChunkData.Get();
@@ -49,6 +67,16 @@ public:
     FCubusBlockChunkData* GetMutableChunkData()
     {
         return ChunkData.Get();
+    }
+
+    UProceduralMeshComponent* GetTerrainMeshComponent() const
+    {
+        return ProceduralMesh.Get();
+    }
+
+    bool HasBuiltTerrainCollision() const
+    {
+        return bLastBuildHadCollision;
     }
 
     bool TryLoadCachedChunk();
@@ -70,7 +98,7 @@ public:
     {
         return OwningBlockWorld;
     }
-    
+
     void SetGenerateCollision(const bool bEnabled)
     {
         bGenerateCollision = bEnabled;
@@ -87,6 +115,9 @@ public:
         float InVoxelSize,
         ACubusBlockWorldActor* InBlockWorld
     );
+
+    /** Returns true when the chunk needs a density remesh. */
+    bool ConfigureDensityResolution(int32 InSubdivisionsPerVoxel);
 
     void ConfigureRendering(
         UCubusMaterialRegistry* InMaterialRegistry
@@ -129,6 +160,13 @@ public:
     );
 
 protected:
+    /**
+     * The single authoritative terrain render component for every mode.
+     *
+     * Block, density and hybrid sections are all submitted here so collision,
+     * hit resolution, streaming, ray tracing and teardown operate on the same
+     * component.
+     */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<UProceduralMeshComponent> ProceduralMesh;
 
@@ -153,6 +191,23 @@ protected:
         meta = (Units = "cm")
     )
     float VoxelSize = 100.0f;
+
+    UPROPERTY(
+        VisibleInstanceOnly,
+        BlueprintReadOnly,
+        Category = "Cubus|Density LOD",
+        meta = (AllowPrivateAccess = "true")
+    )
+    int32 DensitySubdivisionsPerVoxel = 1;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Rendering",
+        meta = (ToolTip = "Used only when this chunk has no owning Cubus Block World.")
+    )
+    ECubusVoxelRenderMode StandaloneRenderMode =
+        ECubusVoxelRenderMode::Blocks;
 
     bool bUseHeightTerrain = true;
 
@@ -283,6 +338,19 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
     int32 GeneratedMaterialSectionCount = 0;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+    int32 GeneratedBlockSectionCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+    int32 GeneratedDensitySectionCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+    int32 GeneratedDensityTriangleCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+    ECubusVoxelRenderMode LastBuiltRenderMode =
+        ECubusVoxelRenderMode::Blocks;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics", meta = (Units = "ms"))
     float LastBuildTimeMilliseconds = 0.0f;
 
@@ -292,9 +360,25 @@ protected:
 private:
     TUniquePtr<FCubusBlockChunkData> ChunkData;
     bool bChunkCacheDirty = false;
+    bool bLastBuildHadCollision = false;
 
     void EnsureChunkData();
     void SynchronizeChunkState();
+
+    void RebuildBlockMesh(
+        bool bGenerateBlockCollision,
+        int32& InOutMeshSectionIndex
+    );
+
+    void RebuildDensityMesh(
+        bool bGenerateDensityCollision,
+        int32& InOutMeshSectionIndex
+    );
+
+    void RebuildBlockEditOverlay(
+        bool bGenerateBlockCollision,
+        int32& InOutMeshSectionIndex
+    );
 
     const FCubusBlockChunkData* FindNeighbourChunkData(
         const FIntVector& CoordinateOffset

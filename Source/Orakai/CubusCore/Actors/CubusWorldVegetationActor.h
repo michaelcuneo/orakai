@@ -10,6 +10,7 @@
 #include "CubusWorldVegetationActor.generated.h"
 
 class ACubusBlockWorldActor;
+class UInstancedStaticMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 class UInstancedSkinnedMeshComponent;
 class UMaterialParameterCollection;
@@ -50,6 +51,22 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation")
     void ClearWorldVegetation();
 
+    /**
+     * Invalidates only the cached wind/weather targets and last published
+     * values. The next ordinary actor tick reapplies the existing bridge to
+     * every currently available foliage component, material collection and
+     * Global Foliage Actor without changing any authored vegetation settings.
+     */
+    void InvalidateDynamicWindBridgeTargets();
+
+    /** Resolve a visible generated tree without enabling collision per instance. */
+    bool FindInteractiveTreeAlongRay(
+        const FVector& TraceStart,
+        const FVector& TraceEnd,
+        float SelectionRadius,
+        FIntVector& OutWorldVoxel
+    );
+
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<USceneComponent> Root;
@@ -67,7 +84,7 @@ protected:
     TSoftObjectPtr<UMaterialParameterCollection> DynamicWindCollectionOverride;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind")
-    bool bEnableHeroSkeletalWindMode = true;
+    bool bEnableHeroSkeletalWindMode = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind")
     bool bBridgeUdwToGlobalFoliageActor = true;
@@ -210,7 +227,7 @@ protected:
     float RandomYawJitterDegrees = 35.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering", meta = (ClampMin = "0"))
-    int32 MaximumRenderedPlants = 4096;
+    int32 MaximumRenderedPlants = 100000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0.1", Units = "s"))
     float RefreshInterval = 1.0f;
@@ -233,13 +250,65 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int64 PublishedPlacementHash = 0;
 
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Placement",
+        meta = (
+            ClampMin = "0.0",
+            ClampMax = "89.0",
+            Units = "deg"
+        )
+    )
+    float MaximumTreeSlopeDegrees = 32.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Placement",
+        meta = (
+            ClampMin = "0.0",
+            ClampMax = "89.0",
+            Units = "deg"
+        )
+    )
+    float MaximumGrassSlopeDegrees = 30.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Grass",
+        meta = (ClampMin = "1", ClampMax = "16")
+    )
+    int32 GrassInstancesPerPlacement = 6;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Grass",
+        meta = (ClampMin = "0.0", Units = "cm")
+    )
+    float GrassScatterRadius = 80.0f;
+
 private:
 
     UPROPERTY(Transient)
-    TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> CatalogStaticBatchComponents;
+    TMap<
+        int64,
+        TObjectPtr<UInstancedStaticMeshComponent>
+    > CatalogGrassBatchComponents;
 
     UPROPERTY(Transient)
-    TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>> CatalogSkeletalBatchComponents;
+    TMap<
+        int64,
+        TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+    > CatalogStaticBatchComponents;
+
+    UPROPERTY(Transient)
+    TMap<
+        int64,
+        TObjectPtr<UInstancedSkinnedMeshComponent>
+    > CatalogSkeletalBatchComponents;
 
     UPROPERTY(Transient)
     TArray<TObjectPtr<USkeletalMeshComponent>> HeroSkeletalWindComponents;

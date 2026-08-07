@@ -5,10 +5,13 @@
 #include "CubusCore/Actors/CubusWorldVegetationActor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
+#include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
+#include "CubusCore/Meshing/CubusDensityLod.h"
 #include "CubusCore/Persistence/OrakaiPersistenceSubsystem.h"
 #include "CubusCore/Persistence/OrakaiPersistenceTypes.h"
 #include "CubusCore/Storage/CubusChunkStore.h"
+#include "CubusCore/Weather/CubusWeatherMaterialUtilities.h"
 
 #include "Components/SceneComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -57,6 +60,26 @@ void ACubusBlockWorldActor::OnConstruction(
     GridDimensions.Z = FMath::Max(1, GridDimensions.Z);
 
     GeneratedVoxelSize = FMath::Max(1.0f, GeneratedVoxelSize);
+    DensityNearSampleSpacing = FMath::Clamp(
+        DensityNearSampleSpacing,
+        1.0f,
+        GeneratedVoxelSize
+    );
+    DensityMiddleSampleSpacing = FMath::Clamp(
+        DensityMiddleSampleSpacing,
+        DensityNearSampleSpacing,
+        GeneratedVoxelSize
+    );
+    DensityFarSampleSpacing = FMath::Clamp(
+        DensityFarSampleSpacing,
+        DensityMiddleSampleSpacing,
+        GeneratedVoxelSize
+    );
+    DensityNearChunkRadius = FMath::Max(0, DensityNearChunkRadius);
+    DensityMiddleChunkRadius = FMath::Max(
+        DensityNearChunkRadius,
+        DensityMiddleChunkRadius
+    );
 
     TerrainContinentAmplitude = FMath::Max(0.0f, TerrainContinentAmplitude);
     TerrainContinentFrequency = FMath::Max(0.000001f, TerrainContinentFrequency);
@@ -94,7 +117,16 @@ void ACubusBlockWorldActor::OnConstruction(
     VerticalViewRadius = FMath::Max(1, VerticalViewRadius);
     MaxChunksGeneratedPerTick = FMath::Max(1, MaxChunksGeneratedPerTick);
     MaxChunksRemovedPerTick = FMath::Max(1, MaxChunksRemovedPerTick);
+    MaxDirtyChunksRebuiltPerTick = FMath::Max(1, MaxDirtyChunksRebuiltPerTick);
     StreamingUpdateInterval = FMath::Max(0.05f, StreamingUpdateInterval);
+    WeatherMaterialUpdateInterval =
+        FMath::Max(0.01f, WeatherMaterialUpdateInterval);
+    WeatherWettingRate = FMath::Max(0.0f, WeatherWettingRate);
+    WeatherDryingRate = FMath::Max(0.0f, WeatherDryingRate);
+    WeatherWetDarkening = FMath::Clamp(WeatherWetDarkening, 0.0f, 1.0f);
+    WeatherWetRoughness = FMath::Clamp(WeatherWetRoughness, 0.0f, 1.0f);
+    WeatherRainIntensityOverride =
+        FMath::Clamp(WeatherRainIntensityOverride, 0.0f, 1.0f);
 
     RefreshChunkRegistry();
 }
@@ -117,8 +149,35 @@ void ACubusBlockWorldActor::BeginPlay()
     }
 
     PublishWorldConfig();
+    RestoreDensityEdits();
+
+    CurrentMaterialWetness = 0.0f;
+    CurrentWeatherRainIntensity = 0.0f;
+    TimeUntilWeatherMaterialUpdate = 0.0f;
+    WeatherMaterialElapsedSeconds = 0.0f;
+    if (IsValid(MaterialRegistry))
+    {
+        MaterialRegistry->SetWeatherMaterialState(
+            CurrentMaterialWetness,
+            WeatherWetDarkening,
+            WeatherWetRoughness
+        );
+    }
 
     EnsureWorldVegetationActor();
+
+    // Level-authored fixed chunks and editor-generated chunks need the same
+    // baseline -> persisted deltas -> mesh load path as streamed chunks.
+    RefreshChunkRegistry();
+    for (const TPair<FIntVector, TWeakObjectPtr<ACubusVoxelVolumeActor>>& Pair
+         : ChunksByCoordinate)
+    {
+        if (ACubusVoxelVolumeActor* Chunk = Pair.Value.Get())
+        {
+            ApplyPersistedEditsToChunk(*Chunk);
+            Chunk->RebuildVolume();
+        }
+    }
 
     if (!bEnableRuntimeStreaming)
     {
@@ -135,8 +194,6 @@ void ACubusBlockWorldActor::BeginPlay()
         MaxChunksGeneratedPerTick,
         StreamingUpdateInterval
     );
-
-    RefreshChunkRegistry();
 
     APawn* PlayerPawn =
         UGameplayStatics::GetPlayerPawn(this, 0);
@@ -229,6 +286,11 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
+    UpdateWeatherMaterials(DeltaSeconds);
+
+    // Editing is valid in both fixed-grid and streamed worlds.
+    ProcessDirtyChunkQueue();
+
     if (!bEnableRuntimeStreaming)
     {
         return;
@@ -281,6 +343,77 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
     RecordTrackedPawnCoordinate();
 }
 
+void ACubusBlockWorldActor::UpdateWeatherMaterials(const float DeltaSeconds)
+{
+    if (!bEnableWeatherMaterialBridge || !IsValid(MaterialRegistry))
+    {
+        bWeatherMaterialBridgeConnected = false;
+        return;
+    }
+
+    WeatherMaterialElapsedSeconds += FMath::Max(0.0f, DeltaSeconds);
+    TimeUntilWeatherMaterialUpdate -= DeltaSeconds;
+
+    if (TimeUntilWeatherMaterialUpdate > 0.0f)
+    {
+        return;
+    }
+
+    TimeUntilWeatherMaterialUpdate =
+        FMath::Max(0.01f, WeatherMaterialUpdateInterval);
+    const float MaterialDeltaSeconds = WeatherMaterialElapsedSeconds;
+    WeatherMaterialElapsedSeconds = 0.0f;
+
+    if (!IsValid(CachedWeatherActor))
+    {
+        CachedWeatherActor =
+            FCubusWeatherMaterialUtilities::ResolveWeatherActor(GetWorld());
+    }
+
+    FCubusWeatherMaterialSample WeatherSample;
+    if (IsValid(CachedWeatherActor))
+    {
+        WeatherSample = FCubusWeatherMaterialUtilities::Sample(
+            GetWorld(),
+            CachedWeatherActor
+        );
+    }
+
+    if (bOverrideWeatherRainIntensity)
+    {
+        WeatherSample.bHasSurfaceWetness = false;
+        WeatherSample.bHasRainIntensity = true;
+        WeatherSample.RainIntensity =
+            FMath::Clamp(WeatherRainIntensityOverride, 0.0f, 1.0f);
+    }
+
+    bWeatherMaterialBridgeConnected =
+        bOverrideWeatherRainIntensity ||
+        (
+            IsValid(CachedWeatherActor) &&
+            (WeatherSample.bHasRainIntensity || WeatherSample.bHasSurfaceWetness)
+        );
+
+    CurrentWeatherRainIntensity = WeatherSample.bHasRainIntensity
+        ? FMath::Clamp(WeatherSample.RainIntensity, 0.0f, 1.0f)
+        : 0.0f;
+
+    CurrentMaterialWetness =
+        FCubusWeatherMaterialUtilities::AdvanceWetness(
+            CurrentMaterialWetness,
+            WeatherSample,
+            MaterialDeltaSeconds,
+            WeatherWettingRate,
+            WeatherDryingRate
+        );
+
+    MaterialRegistry->SetWeatherMaterialState(
+        CurrentMaterialWetness,
+        WeatherWetDarkening,
+        WeatherWetRoughness
+    );
+}
+
 void ACubusBlockWorldActor::RegisterChunk(
     ACubusVoxelVolumeActor* ChunkActor
 )
@@ -303,6 +436,14 @@ void ACubusBlockWorldActor::RegisterChunk(
     const FIntVector Coordinate = ChunkActor->GetChunkCoordinate();
     ChunksByCoordinate.Add(Coordinate, ChunkActor);
     RegisteredChunkCount = ChunksByCoordinate.Num();
+
+    // A newly available block neighbour changes which boundary faces should
+    // exist. Density chunks are independent, but sharing this cheap queue keeps
+    // hybrid mode border-safe as well.
+    for (const FIntVector& Offset : CubusBlockWorldActor::NeighbourOffsets)
+    {
+        QueueChunkForRebuild(Coordinate + Offset);
+    }
 }
 
 void ACubusBlockWorldActor::UnregisterChunk(
@@ -314,15 +455,28 @@ void ACubusBlockWorldActor::UnregisterChunk(
         return;
     }
 
+    TArray<FIntVector> RemovedCoordinates;
+
     for (auto Iterator = ChunksByCoordinate.CreateIterator(); Iterator; ++Iterator)
     {
         if (Iterator.Value().Get() == ChunkActor)
         {
+            RemovedCoordinates.Add(Iterator.Key());
             Iterator.RemoveCurrent();
         }
     }
 
     RegisteredChunkCount = ChunksByCoordinate.Num();
+
+    // When a block chunk disappears, adjacent chunks must expose their border
+    // faces. Queue after removal so their neighbourhood snapshot sees null.
+    for (const FIntVector& Coordinate : RemovedCoordinates)
+    {
+        for (const FIntVector& Offset : CubusBlockWorldActor::NeighbourOffsets)
+        {
+            QueueChunkForRebuild(Coordinate + Offset);
+        }
+    }
 }
 
 ACubusVoxelVolumeActor* ACubusBlockWorldActor::FindChunk(
@@ -357,12 +511,119 @@ void ACubusBlockWorldActor::RebuildChunkAndNeighbours(
     const FIntVector& ChunkCoordinate
 )
 {
-    RebuildChunkAtCoordinate(ChunkCoordinate);
+    QueueChunkAndFaceNeighboursForRebuild(ChunkCoordinate);
+}
+
+void ACubusBlockWorldActor::QueueChunkForRebuild(
+    const FIntVector& ChunkCoordinate
+)
+{
+    DirtyChunkCoordinates.Add(ChunkCoordinate);
+}
+
+void ACubusBlockWorldActor::QueueChunkAndFaceNeighboursForRebuild(
+    const FIntVector& ChunkCoordinate
+)
+{
+    QueueChunkForRebuild(ChunkCoordinate);
 
     for (const FIntVector& Offset : CubusBlockWorldActor::NeighbourOffsets)
     {
-        RebuildChunkAtCoordinate(ChunkCoordinate + Offset);
+        QueueChunkForRebuild(ChunkCoordinate + Offset);
     }
+}
+
+void ACubusBlockWorldActor::QueueDensityEditDependenciesForRebuild(
+    const FIntVector& ChunkCoordinate
+)
+{
+    // The density sampling buffer has a one-sample gradient halo. A sample on
+    // a corner can therefore affect normals in all 26 surrounding chunks.
+    for (int32 Z = -1; Z <= 1; ++Z)
+    {
+        for (int32 Y = -1; Y <= 1; ++Y)
+        {
+            for (int32 X = -1; X <= 1; ++X)
+            {
+                QueueChunkForRebuild(
+                    ChunkCoordinate + FIntVector(X, Y, Z)
+                );
+            }
+        }
+    }
+}
+
+FCubusDensityEditMap ACubusBlockWorldActor::BuildDensityEditSnapshot(
+    const FIntVector& ChunkCoordinate
+) const
+{
+    FCubusDensityEditMap Snapshot;
+
+    const FIntVector SampleMinimum =
+        ChunkCoordinate * Cubus::ChunkSize +
+        FIntVector(
+            FCubusDensitySamplingBuffer::MinimumLocalSample,
+            FCubusDensitySamplingBuffer::MinimumLocalSample,
+            FCubusDensitySamplingBuffer::MinimumLocalSample
+        );
+
+    const FIntVector SampleMaximum =
+        ChunkCoordinate * Cubus::ChunkSize +
+        FIntVector(
+            FCubusDensitySamplingBuffer::MaximumLocalSample,
+            FCubusDensitySamplingBuffer::MaximumLocalSample,
+            FCubusDensitySamplingBuffer::MaximumLocalSample
+        );
+
+    for (const auto& Entry : DensityEdits)
+    {
+        const FIntVector& Coordinate = Entry.Key;
+
+        if (
+            Coordinate.X >= SampleMinimum.X && Coordinate.X <= SampleMaximum.X &&
+            Coordinate.Y >= SampleMinimum.Y && Coordinate.Y <= SampleMaximum.Y &&
+            Coordinate.Z >= SampleMinimum.Z && Coordinate.Z <= SampleMaximum.Z
+        )
+        {
+            Snapshot.Add(Coordinate, Entry.Value);
+        }
+    }
+
+    return Snapshot;
+}
+
+bool ACubusBlockWorldActor::BuildBlockEditOverlayChunk(
+    const FIntVector& ChunkCoordinate,
+    FCubusBlockChunkData& OutChunk
+) const
+{
+    OutChunk.SetChunkCoordinate(ChunkCoordinate);
+    OutChunk.Clear();
+
+    const UOrakaiPersistenceSubsystem* Persistence =
+        UOrakaiPersistenceSubsystem::Get(this);
+    if (Persistence == nullptr)
+    {
+        return false;
+    }
+
+    TArray<FOrakaiVoxelEdit> StoredEdits;
+    Persistence->GetVoxelEditsForChunk(ChunkCoordinate, StoredEdits);
+
+    for (const FOrakaiVoxelEdit& Edit : StoredEdits)
+    {
+        if (Edit.MaterialId <= 0)
+        {
+            continue;
+        }
+
+        FCubusBlockVoxel Voxel;
+        Voxel.MaterialId = FMath::Clamp(Edit.MaterialId, 1, 65535);
+        Voxel.SetWater(Edit.bIsWater);
+        OutChunk.SetVoxel(Edit.LocalCoordinate, Voxel);
+    }
+
+    return OutChunk.HasAnyOccupiedVoxel();
 }
 
 void ACubusBlockWorldActor::PublishWorldConfig()
@@ -374,6 +635,80 @@ void ACubusBlockWorldActor::PublishWorldConfig()
             WorldSeed,
             FCubusGenerationSeeds::CurrentGenerationVersion
         );
+    }
+}
+
+void ACubusBlockWorldActor::RestoreDensityEdits()
+{
+    DensityEdits.Reset();
+
+    UOrakaiPersistenceSubsystem* Persistence =
+        UOrakaiPersistenceSubsystem::Get(this);
+
+    if (Persistence == nullptr)
+    {
+        return;
+    }
+
+    TArray<FOrakaiDensityEdit> StoredEdits;
+    Persistence->GetDensityEdits(StoredEdits);
+
+    for (const FOrakaiDensityEdit& StoredEdit : StoredEdits)
+    {
+        if (FMath::IsNearlyZero(StoredEdit.DensityDelta))
+        {
+            continue;
+        }
+
+        FCubusDensityEdit Edit;
+        Edit.DensityDelta = StoredEdit.DensityDelta;
+        Edit.MaterialId = StoredEdit.MaterialId;
+        DensityEdits.Add(StoredEdit.WorldSample, Edit);
+    }
+}
+
+void ACubusBlockWorldActor::ApplyPersistedEditsToChunk(
+    ACubusVoxelVolumeActor& ChunkActor
+)
+{
+    UOrakaiPersistenceSubsystem* Persistence =
+        UOrakaiPersistenceSubsystem::Get(this);
+    FCubusBlockChunkData* ChunkData = ChunkActor.GetMutableChunkData();
+
+    if (Persistence == nullptr || ChunkData == nullptr)
+    {
+        return;
+    }
+
+    const FIntVector ChunkCoordinate = ChunkActor.GetChunkCoordinate();
+    TArray<FOrakaiVoxelEdit> VoxelEdits;
+    Persistence->GetVoxelEditsForChunk(ChunkCoordinate, VoxelEdits);
+
+    for (const FOrakaiVoxelEdit& Edit : VoxelEdits)
+    {
+        FCubusBlockVoxel Voxel;
+        Voxel.MaterialId = FMath::Clamp(Edit.MaterialId, 0, 65535);
+        Voxel.SetWater(Edit.bIsWater);
+        ChunkData->SetVoxel(Edit.LocalCoordinate, Voxel);
+    }
+
+    TArray<FOrakaiFoliageEdit> FoliageEdits;
+    Persistence->GetFoliageEditsForChunk(ChunkCoordinate, FoliageEdits);
+
+    for (const FOrakaiFoliageEdit& Edit : FoliageEdits)
+    {
+        if (Edit.bRemoved)
+        {
+            ChunkData->RemoveVegetationAtWorldVoxel(Edit.WorldVoxel);
+            continue;
+        }
+
+        FCubusVegetationInstance Instance;
+        Instance.WorldVoxel = Edit.WorldVoxel;
+        Instance.TypeId = Edit.TypeId;
+        Instance.RotationYaw = Edit.RotationYaw;
+        Instance.Scale = Edit.Scale;
+        ChunkData->AddOrReplaceVegetationInstance(Instance);
     }
 }
 
@@ -410,50 +745,186 @@ bool ACubusBlockWorldActor::EditVoxelAtWorldVoxel(
     const bool bIsWater
 )
 {
-    const FIntVector ChunkCoordinate =
-        OrakaiPersistence::WorldVoxelToChunk(WorldVoxel);
-    const FIntVector LocalCoordinate =
-        WorldVoxel - ChunkCoordinate * Cubus::ChunkSize;
+    return EditBlockSphereAtWorldVoxel(
+        WorldVoxel,
+        0,
+        MaterialId,
+        bIsWater
+    ) > 0;
+}
 
-    ACubusVoxelVolumeActor* Chunk = FindChunk(ChunkCoordinate);
-
-    if (!IsValid(Chunk))
+int32 ACubusBlockWorldActor::EditBlockSphereAtWorldVoxel(
+    const FIntVector CentreWorldVoxel,
+    const int32 BrushRadius,
+    const int32 MaterialId,
+    const bool bIsWater
+)
+{
+    if (MaterialId < 0)
     {
-        return false;
+        return 0;
     }
 
-    FCubusBlockChunkData* Data = Chunk->GetMutableChunkData();
+    const int32 SafeRadius = FMath::Max(0, BrushRadius);
+    const int32 RadiusSquared = SafeRadius * SafeRadius;
+    TSet<FIntVector> TouchedChunks;
+    int32 ChangedVoxelCount = 0;
 
-    if (Data == nullptr)
+    UOrakaiPersistenceSubsystem* Persistence =
+        UOrakaiPersistenceSubsystem::Get(this);
+
+    for (int32 Z = -SafeRadius; Z <= SafeRadius; ++Z)
     {
-        return false;
+        for (int32 Y = -SafeRadius; Y <= SafeRadius; ++Y)
+        {
+            for (int32 X = -SafeRadius; X <= SafeRadius; ++X)
+            {
+                if (X * X + Y * Y + Z * Z > RadiusSquared)
+                {
+                    continue;
+                }
+
+                const FIntVector WorldVoxel =
+                    CentreWorldVoxel + FIntVector(X, Y, Z);
+
+                const FIntVector ChunkCoordinate =
+                    OrakaiPersistence::WorldVoxelToChunk(WorldVoxel);
+
+                const FIntVector LocalCoordinate =
+                    WorldVoxel - ChunkCoordinate * Cubus::ChunkSize;
+
+                ACubusVoxelVolumeActor* Chunk =
+                    FindChunk(ChunkCoordinate);
+
+                if (!IsValid(Chunk))
+                {
+                    continue;
+                }
+
+                FCubusBlockChunkData* Data =
+                    Chunk->GetMutableChunkData();
+
+                if (Data == nullptr)
+                {
+                    continue;
+                }
+
+                FCubusBlockVoxel Voxel;
+                Voxel.MaterialId = MaterialId;
+                Voxel.SetWater(bIsWater);
+
+                const FCubusBlockVoxel* Existing =
+                    Data->GetVoxel(LocalCoordinate);
+
+                if (Existing == nullptr || *Existing == Voxel)
+                {
+                    continue;
+                }
+
+                if (!Data->SetVoxel(LocalCoordinate, Voxel))
+                {
+                    continue;
+                }
+
+                TouchedChunks.Add(ChunkCoordinate);
+                ++ChangedVoxelCount;
+
+                if (Persistence != nullptr)
+                {
+                    Persistence->RecordVoxelEdit(
+                        ChunkCoordinate,
+                        LocalCoordinate,
+                        MaterialId,
+                        bIsWater
+                    );
+                }
+            }
+        }
     }
 
-    FCubusBlockVoxel Voxel;
-    Voxel.MaterialId = MaterialId;
-    Voxel.SetWater(bIsWater);
-
-    if (!Data->SetVoxel(LocalCoordinate, Voxel))
+    for (const FIntVector& ChunkCoordinate : TouchedChunks)
     {
-        return false;
+        QueueChunkAndFaceNeighboursForRebuild(ChunkCoordinate);
     }
 
-    Chunk->MarkChunkCacheDirty();
-    Chunk->SaveCachedChunk();
-    RebuildChunkAndNeighbours(ChunkCoordinate);
+    return ChangedVoxelCount;
+}
 
-    if (UOrakaiPersistenceSubsystem* Persistence =
-            UOrakaiPersistenceSubsystem::Get(this))
+int32 ACubusBlockWorldActor::EditDensitySphereAtWorldSample(
+    const FIntVector CentreWorldSample,
+    const int32 BrushRadius,
+    const float DensityDelta,
+    const int32 MaterialId
+)
+{
+    if (FMath::IsNearlyZero(DensityDelta))
     {
-        Persistence->RecordVoxelEdit(
-            ChunkCoordinate,
-            LocalCoordinate,
-            MaterialId,
-            bIsWater
-        );
+        return 0;
     }
 
-    return true;
+    const int32 SafeRadius = FMath::Max(0, BrushRadius);
+    const int32 RadiusSquared = SafeRadius * SafeRadius;
+    TSet<FIntVector> TouchedChunks;
+    int32 ChangedSampleCount = 0;
+
+    for (int32 Z = -SafeRadius; Z <= SafeRadius; ++Z)
+    {
+        for (int32 Y = -SafeRadius; Y <= SafeRadius; ++Y)
+        {
+            for (int32 X = -SafeRadius; X <= SafeRadius; ++X)
+            {
+                if (X * X + Y * Y + Z * Z > RadiusSquared)
+                {
+                    continue;
+                }
+
+                const FIntVector WorldSample =
+                    CentreWorldSample + FIntVector(X, Y, Z);
+
+                FCubusDensityEdit& Edit =
+                    DensityEdits.FindOrAdd(WorldSample);
+
+                Edit.DensityDelta += DensityDelta;
+
+                if (DensityDelta > 0.0f && MaterialId > 0)
+                {
+                    Edit.MaterialId = MaterialId;
+                }
+
+                if (FMath::IsNearlyZero(Edit.DensityDelta))
+                {
+                    DensityEdits.Remove(WorldSample);
+
+                    if (UOrakaiPersistenceSubsystem* Persistence =
+                            UOrakaiPersistenceSubsystem::Get(this))
+                    {
+                        Persistence->ClearDensityEdit(WorldSample);
+                    }
+                }
+                else if (UOrakaiPersistenceSubsystem* Persistence =
+                             UOrakaiPersistenceSubsystem::Get(this))
+                {
+                    Persistence->RecordDensityEdit(
+                        WorldSample,
+                        Edit.DensityDelta,
+                        Edit.MaterialId
+                    );
+                }
+
+                TouchedChunks.Add(
+                    OrakaiPersistence::WorldVoxelToChunk(WorldSample)
+                );
+                ++ChangedSampleCount;
+            }
+        }
+    }
+
+    for (const FIntVector& ChunkCoordinate : TouchedChunks)
+    {
+        QueueDensityEditDependenciesForRebuild(ChunkCoordinate);
+    }
+
+    return ChangedSampleCount;
 }
 
 bool ACubusBlockWorldActor::ClearVoxelEditAtWorldVoxel(const FIntVector WorldVoxel)
@@ -506,6 +977,147 @@ void ACubusBlockWorldActor::RemoveFoliageAtWorldVoxel(const FIntVector WorldVoxe
             1.0f
         );
     }
+
+    const FIntVector ChunkCoordinate =
+        OrakaiPersistence::WorldVoxelToChunk(WorldVoxel);
+
+    if (ACubusVoxelVolumeActor* Chunk = FindChunk(ChunkCoordinate))
+    {
+        if (FCubusBlockChunkData* Data = Chunk->GetMutableChunkData())
+        {
+            Data->RemoveVegetationAtWorldVoxel(WorldVoxel);
+        }
+    }
+
+    if (ACubusWorldVegetationActor* VegetationActor =
+            WorldVegetationActor.Get())
+    {
+        VegetationActor->RebuildWorldVegetation();
+    }
+}
+
+void ACubusBlockWorldActor::RecordGeneratedTreeTombstone(
+    const FIntVector& WorldVoxel
+)
+{
+    if (UOrakaiPersistenceSubsystem* Persistence =
+            UOrakaiPersistenceSubsystem::Get(this))
+    {
+        // Trees remain rendered by the existing foliage system. This parallel
+        // object tombstone gives the same generated tree a stable identity for
+        // later replication, loot, regrowth and object-specific state.
+        Persistence->TombstoneGeneratedWorldObject(
+            WorldSeed,
+            TEXT("Tree"),
+            WorldVoxel,
+            OrakaiPersistence::WorldVoxelToChunk(WorldVoxel),
+            FTransform::Identity
+        );
+    }
+}
+
+bool ACubusBlockWorldActor::HarvestTreeAlongRay(
+    const FVector TraceStart,
+    const FVector TraceEnd,
+    const float SelectionRadius,
+    FIntVector& OutTreeWorldVoxel
+)
+{
+    OutTreeWorldVoxel = FIntVector::ZeroValue;
+
+    if (ACubusWorldVegetationActor* VegetationActor =
+            WorldVegetationActor.Get())
+    {
+        if (
+            VegetationActor->FindInteractiveTreeAlongRay(
+                TraceStart,
+                TraceEnd,
+                SelectionRadius,
+                OutTreeWorldVoxel
+            )
+        )
+        {
+            RecordGeneratedTreeTombstone(OutTreeWorldVoxel);
+            RemoveFoliageAtWorldVoxel(OutTreeWorldVoxel);
+            return true;
+        }
+    }
+
+    const FVector Segment = TraceEnd - TraceStart;
+    const double SegmentLengthSquared = Segment.SizeSquared();
+    if (SegmentLengthSquared <= static_cast<double>(SMALL_NUMBER))
+    {
+        return false;
+    }
+
+    const double SafeRadiusSquared =
+        FMath::Square(FMath::Max(1.0f, SelectionRadius));
+    double BestAlongSegment = TNumericLimits<double>::Max();
+    bool bFound = false;
+
+    for (const TPair<FIntVector, TWeakObjectPtr<ACubusVoxelVolumeActor>>& Pair
+         : ChunksByCoordinate)
+    {
+        const ACubusVoxelVolumeActor* Chunk = Pair.Value.Get();
+        if (!IsValid(Chunk) || Chunk->GetChunkData() == nullptr)
+        {
+            continue;
+        }
+
+        const float SafeVoxelSize = FMath::Max(1.0f, Chunk->GetVoxelSize());
+        const double ChunkHalfWorldExtent =
+            static_cast<double>(Cubus::ChunkSize) * SafeVoxelSize * 0.5;
+
+        for (const FCubusVegetationInstance& Instance
+             : Chunk->GetChunkData()->GetVegetationInstances())
+        {
+            if (Instance.TypeId != 3 && Instance.TypeId != 6)
+            {
+                continue;
+            }
+
+            const FVector TreeLocation(
+                (static_cast<double>(Instance.WorldVoxel.X) + 0.5) * SafeVoxelSize -
+                    ChunkHalfWorldExtent,
+                (static_cast<double>(Instance.WorldVoxel.Y) + 0.5) * SafeVoxelSize -
+                    ChunkHalfWorldExtent,
+                static_cast<double>(Instance.WorldVoxel.Z) * SafeVoxelSize -
+                    ChunkHalfWorldExtent + SafeVoxelSize
+            );
+
+            const double Along = FVector::DotProduct(
+                TreeLocation - TraceStart,
+                Segment
+            ) / SegmentLengthSquared;
+
+            if (Along < 0.0 || Along > 1.0)
+            {
+                continue;
+            }
+
+            const FVector ClosestPoint = TraceStart + Segment * Along;
+            if (FVector::DistSquared(TreeLocation, ClosestPoint) > SafeRadiusSquared)
+            {
+                continue;
+            }
+
+            if (Along < BestAlongSegment)
+            {
+                BestAlongSegment = Along;
+                OutTreeWorldVoxel = Instance.WorldVoxel;
+                bFound = true;
+            }
+        }
+    }
+
+    if (!bFound)
+    {
+        return false;
+    }
+
+    RecordGeneratedTreeTombstone(OutTreeWorldVoxel);
+    RemoveFoliageAtWorldVoxel(OutTreeWorldVoxel);
+    return true;
 }
 
 ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
@@ -580,6 +1192,10 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
         this
     );
 
+    ChunkActor->ConfigureDensityResolution(
+        ResolveDensitySubdivisions(Coordinate)
+    );
+
     ChunkActor->ConfigureRendering(
         MaterialRegistry
     );
@@ -640,6 +1256,7 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
     RegisterChunk(ChunkActor);
 
     ChunkActor->GenerateTerrainData();
+    ApplyPersistedEditsToChunk(*ChunkActor);
     ChunkActor->RebuildVolume();
 
     if (
@@ -701,6 +1318,7 @@ void ACubusBlockWorldActor::ClearGeneratedChunks()
     GeneratedChunks.Reset();
     PendingChunkGeneration.Reset();
     PendingChunkRemoval.Reset();
+    DirtyChunkCoordinates.Reset();
     RequiredChunkCoordinates.Reset();
     InitialRequiredCoordinates.Reset();
 
@@ -923,6 +1541,8 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 
     LastTrackedChunk = CentreCoordinate;
 
+    UpdateDensityLods(CentreCoordinate);
+
     BuildRequiredCoordinates(
         CentreCoordinate,
         HorizontalViewRadius,
@@ -978,6 +1598,77 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
     }
 
     PendingRuntimeChunkCount = PendingChunkGeneration.Num();
+}
+
+int32 ACubusBlockWorldActor::ResolveDensitySubdivisions(
+    const FIntVector& ChunkCoordinate
+) const
+{
+    if (!bEnableDensityLod)
+    {
+        return 1;
+    }
+
+    const bool bHasTrackedChunk =
+        LastTrackedChunk.X != MAX_int32 &&
+        LastTrackedChunk.Y != MAX_int32 &&
+        LastTrackedChunk.Z != MAX_int32;
+
+    float TargetSpacing = DensityFarSampleSpacing;
+
+    if (bHasTrackedChunk)
+    {
+        const int32 Distance = FCubusDensityLod::ChunkDistance(
+            ChunkCoordinate,
+            LastTrackedChunk
+        );
+
+        if (Distance <= DensityNearChunkRadius)
+        {
+            TargetSpacing = DensityNearSampleSpacing;
+        }
+        else if (Distance <= DensityMiddleChunkRadius)
+        {
+            TargetSpacing = DensityMiddleSampleSpacing;
+        }
+    }
+
+    return FCubusDensityLod::ResolveSubdivisionsForSpacing(
+        GeneratedVoxelSize,
+        TargetSpacing
+    );
+}
+
+void ACubusBlockWorldActor::UpdateDensityLods(
+    const FIntVector& CentreCoordinate
+)
+{
+    (void)CentreCoordinate;
+
+    const ECubusVoxelRenderMode RenderMode = GetVoxelRenderMode();
+    if (
+        RenderMode != ECubusVoxelRenderMode::Density &&
+        RenderMode != ECubusVoxelRenderMode::Hybrid
+    )
+    {
+        return;
+    }
+
+    for (const auto& Entry : ChunksByCoordinate)
+    {
+        ACubusVoxelVolumeActor* ChunkActor = Entry.Value.Get();
+        if (!IsValid(ChunkActor))
+        {
+            continue;
+        }
+
+        if (ChunkActor->ConfigureDensityResolution(
+            ResolveDensitySubdivisions(Entry.Key)
+        ))
+        {
+            QueueChunkForRebuild(Entry.Key);
+        }
+    }
 }
 
 void ACubusBlockWorldActor::ProcessRuntimeQueues()
@@ -1061,6 +1752,41 @@ void ACubusBlockWorldActor::ProcessRuntimeQueues()
     }
 }
 
+void ACubusBlockWorldActor::ProcessDirtyChunkQueue()
+{
+    int32 RebuiltCount = 0;
+
+    while (
+        RebuiltCount < MaxDirtyChunksRebuiltPerTick &&
+        !DirtyChunkCoordinates.IsEmpty()
+    )
+    {
+        // Choose a stable coordinate so remesh order is deterministic across
+        // runs rather than depending on TSet iteration order.
+        FIntVector NextCoordinate(MAX_int32, MAX_int32, MAX_int32);
+
+        for (const FIntVector& Coordinate : DirtyChunkCoordinates)
+        {
+            if (
+                Coordinate.X < NextCoordinate.X ||
+                (Coordinate.X == NextCoordinate.X && Coordinate.Y < NextCoordinate.Y) ||
+                (Coordinate.X == NextCoordinate.X && Coordinate.Y == NextCoordinate.Y && Coordinate.Z < NextCoordinate.Z)
+            )
+            {
+                NextCoordinate = Coordinate;
+            }
+        }
+
+        DirtyChunkCoordinates.Remove(NextCoordinate);
+
+        if (IsValid(FindChunk(NextCoordinate)))
+        {
+            RebuildChunkAtCoordinate(NextCoordinate);
+            ++RebuiltCount;
+        }
+    }
+}
+
 void ACubusBlockWorldActor::HoldPawnForInitialStreaming()
 {
     APawn* PlayerPawn = TrackedPawn.Get();
@@ -1072,6 +1798,7 @@ void ACubusBlockWorldActor::HoldPawnForInitialStreaming()
 
     HeldPawnLocation = PlayerPawn->GetActorLocation();
     HeldPawnElapsedSeconds = 0.0f;
+    bSpawnTimeoutReported = false;
     PlayerPawn->SetActorEnableCollision(false);
     PlayerPawn->SetActorTickEnabled(false);
     bPawnHeldForStreaming = true;
@@ -1137,6 +1864,11 @@ void ACubusBlockWorldActor::TryReleasePawnToTerrain()
                 ACubusVoxelVolumeActor* ChunkActor = Entry.Value.Get();
 
                 if (!IsValid(ChunkActor))
+                {
+                    continue;
+                }
+
+                if (!ChunkActor->HasBuiltTerrainCollision())
                 {
                     continue;
                 }
@@ -1221,20 +1953,60 @@ void ACubusBlockWorldActor::TryReleasePawnToTerrain()
         HeldPawnLocation.Z - ChunkWorldSize * 8.0f
     );
 
-    FHitResult HitResult;
     FCollisionQueryParams QueryParams(
         SCENE_QUERY_STAT(CubusSpawnSurfaceTrace),
         false,
         PlayerPawn
     );
 
-    const bool bHitTerrain = World->LineTraceSingleByChannel(
-        HitResult,
-        TraceStart,
-        TraceEnd,
-        ECC_Visibility,
-        QueryParams
-    );
+    FHitResult HitResult;
+    bool bHitTerrain = false;
+
+    // Visibility is shared by gameplay objects, so keep tracing through
+    // unrelated blockers until the hit is proven to be a collision mesh owned
+    // by this terrain world. This prevents a prop, foliage actor or another
+    // world instance from becoming the player's spawn surface.
+    for (int32 TraceAttempt = 0; TraceAttempt < 64; ++TraceAttempt)
+    {
+        FHitResult CandidateHit;
+
+        if (!World->LineTraceSingleByChannel(
+            CandidateHit,
+            TraceStart,
+            TraceEnd,
+            ECC_Visibility,
+            QueryParams
+        ))
+        {
+            break;
+        }
+
+        ACubusVoxelVolumeActor* HitChunk =
+            Cast<ACubusVoxelVolumeActor>(CandidateHit.GetActor());
+
+        if (
+            IsValid(HitChunk) &&
+            HitChunk->HasBuiltTerrainCollision() &&
+            (
+                HitChunk->GetOwningBlockWorld() == this ||
+                HitChunk->GetOwner() == this
+            )
+        )
+        {
+            HitResult = CandidateHit;
+            bHitTerrain = true;
+            break;
+        }
+
+        AActor* BlockingActor = CandidateHit.GetActor();
+
+        if (!IsValid(BlockingActor))
+        {
+            break;
+        }
+
+        QueryParams.AddIgnoredActor(BlockingActor);
+    }
 
     if (!bHitTerrain)
     {
@@ -1315,21 +2087,32 @@ void ACubusBlockWorldActor::TryReleasePawnToTerrain()
 
         double DataSurfaceZ = 0.0;
 
-        if (TryFindSurfaceFromChunkData(DataSurfaceZ))
+        if (
+            GetVoxelRenderMode() != ECubusVoxelRenderMode::Density &&
+            TryFindSurfaceFromChunkData(DataSurfaceZ)
+        )
         {
             ReleasePawnAtSurfaceZ(DataSurfaceZ, TEXT("voxel-data fallback"));
             return;
         }
 
-        if (bSpawnHoldTimedOut)
+        if (bSpawnHoldTimedOut && !bSpawnTimeoutReported)
         {
-            ReleasePawnAtSurfaceZ(HeldPawnLocation.Z, TEXT("timeout fallback"));
+            bSpawnTimeoutReported = true;
+            UE_LOG(
+                LogTemp,
+                Error,
+                TEXT("Cubus spawn hold timed out without collision from this terrain world; pawn remains held rather than being released into invalid space.")
+            );
         }
 
         return;
     }
 
-    ReleasePawnAtSurfaceZ(HitResult.ImpactPoint.Z, TEXT("line-trace"));
+    ReleasePawnAtSurfaceZ(
+        HitResult.ImpactPoint.Z,
+        TEXT("terrain-line-trace")
+    );
 }
 
 void ACubusBlockWorldActor::RemoveInvalidChunks()

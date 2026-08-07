@@ -1,0 +1,176 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+namespace CubusMarchingCubesTables
+{
+    /**
+     * Canonical classic 256-case Marching Cubes triangulation table.
+     *
+     * Each edge index occupies one hexadecimal nibble. The value `f` is the
+     * row terminator, while `0` through `b` identify the twelve cube edges.
+     */
+    inline constexpr ANSICHAR EncodedTriangleTable[] =
+        "ffffffffffffffff083fffffffffffff019fffffffffffff183981ffffffffff12afffffffffffff08312affffffffff"
+        "92a029ffffffffff2832a8a98fffffff3b2fffffffffffff0b28b0ffffffffff19023bffffffffff1b219b98bfffffff"
+        "3a1ba3ffffffffff0a108a8bafffffff3903b9ba9fffffff98aa8bffffffffff478fffffffffffff430734ffffffffff"
+        "019847ffffffffff419471731fffffff12a847ffffffffff34730412afffffff92a902847fffffff2a9297273794ffff"
+        "8473b2ffffffffffb47b24204fffffff90184723bfffffff47b94b9b2921ffff3a13ba784fffffff1ba14b1047b4ffff"
+        "47890b9bab03ffff47b4b99bafffffff954fffffffffffff954083ffffffffff054150ffffffffff854835315fffffff"
+        "12a954ffffffffff30812a495fffffff52a542402fffffff2a5325354348ffff95423bffffffffff0b208b495fffffff"
+        "05401523bfffffff21525828b485ffffa3ba13954fffffff4950818a18baffff54050b5bab03ffff54858aa8bfffffff"
+        "978579ffffffffff930953573fffffff078017157fffffff153357ffffffffff978957a12fffffffa12950530573ffff"
+        "802825857a52ffff2a5253357fffffff7957893b2fffffff95797292027bffff23b018178157ffffb21b17715fffffff"
+        "958857a13a3bffff5705097b010aba0fba0b03a50807570fba57b5ffffffffffa65fffffffffffff0835a6ffffffffff"
+        "9015a6ffffffffff1831985a6fffffff165261ffffffffff165126308fffffff965906026fffffff598582526328ffff"
+        "23ba65ffffffffffb08b20a65fffffff01923b5a6fffffff5a61929b298bffff63b653513fffffff08b0b50515b6ffff"
+        "3b6036065059ffff65969bb98fffffff5a6478ffffffffff43047365afffffff1905a6847fffffffa65197173794ffff"
+        "612651478fffffff125526304347ffff847905065026ffff739794329596269f3b2784a65fffffff5a647242027bffff"
+        "01947823b5a6ffff9219b294b7b45a6f8473b53515b6ffff51b5b610b7b404bf059065036b63847f65969b4797b9ffff"
+        "a4964affffffffff4a649a083fffffffa01a60640fffffff83181686461affff149124264fffffff308129249264ffff"
+        "024426ffffffffff832824426fffffffa49a64b23fffffff08228b49a4a6ffff3b201606461affff64161a48121b8b1f"
+        "964936913b63ffff8b1810b61914641f3b6360064fffffff648b68ffffffffff7a678a89afffffff0730a709a67affff"
+        "a671a7178180ffffa67a71173fffffff126168189867ffff269291679093739f780706602fffffff732672ffffffffff"
+        "23ba68a89867ffff20727b09767a9a7f1801781a767a23bfb21b17a61671ffff896867916b63136f091b67ffffffffff"
+        "7807063b0b60ffff7b6fffffffffffff76bfffffffffffff308b76ffffffffff019b76ffffffffff819831b76fffffff"
+        "a126b7ffffffffff12a3086b7fffffff2902a96b7fffffff6b72a3a83a98ffff723627ffffffffff708760620fffffff"
+        "276237019fffffff162186198876ffffa76a17137fffffffa7617a187108ffff03707a0a96a7ffff76a7a88a9fffffff"
+        "684b86ffffffffff36b306046fffffff86b846901fffffff946963931b36ffff6846b82a1fffffff12a30b06b046ffff"
+        "4b846b0292a9ffffa93a32943b36463f823842462fffffff042462ffffffffff190234246438ffff194142246fffffff"
+        "8138618466a1ffffa10a06604fffffff4634386a3039a93fa946a4ffffffffff49576bffffffffff083495b76fffffff"
+        "50154076bfffffffb76834354315ffff954a1276bfffffff6b712a083495ffff76b54a42a402ffff348354325a52b76f"
+        "723762549fffffff954086062687ffff362376150540ffff628687218485158f954a16176137ffff16a176107870954f"
+        "40a4a503a6a737af76a7a854a48affff6956b9b89fffffff36b063056095ffff0b805b01556bffff6b3635531fffffff"
+        "12a95b9b8b56ffff0b306b09656912afb85b56805a52025f6b36352a3a53ffff589528562382ffff956960062fffffff"
+        "158180568382628f156216ffffffffff13616a386569896fa10a06950560ffff03856affffffffffa56fffffffffffff"
+        "b5a75bffffffffffb5ab75830fffffff5b75ab190fffffffa75ab7981831ffffb12b71751fffffff08312717572bffff"
+        "9759279022b7ffff75272b592328982f25a235375fffffff820852875a25ffff9015a35373a2ffff982921872a25752f"
+        "135375ffffffffff087071175fffffff903935537fffffff987597ffffffffff5845a8ab8fffffff5045b05abb30ffff"
+        "01984a8aba45ffffab4a45b34941314f2512852b8458ffff04b0b345b2b151bf0250592b5458b85f9452b3ffffffffff"
+        "25a352345384ffff5a2524420fffffff3a235a385458019f5a2524192942ffff845853351fffffff045105ffffffffff"
+        "845853905035ffff945fffffffffffff4b749b9abfffffff0834979b79abffff1ab1b414074bffff3143481a474bab4f"
+        "4b79b492b912ffff9749b791b2b1083fb74b42240fffffffb74b42834324ffff29a279237749ffff9a7974a27870207f"
+        "37a3a274a1a040af1a2874ffffffffff491417713fffffff491417081871ffff403743ffffffffff487fffffffffffff"
+        "9a8ab8ffffffffff30939bb9afffffff01a0a88abfffffff31ab3affffffffff12b1b99b8fffffff30939b1292b9ffff"
+        "02b80bffffffffff32bfffffffffffff23828aa89fffffff9a2092ffffffffff23828a0181a8ffff1a2fffffffffffff"
+        "138918ffffffffff091fffffffffffff038fffffffffffffffffffffffffffff";
+
+    static_assert(
+        UE_ARRAY_COUNT(EncodedTriangleTable) - 1 == 256 * 16,
+        "The Cubus Marching Cubes table must contain 256 rows of 16 entries."
+    );
+
+    constexpr bool IsEncodedEdge(const ANSICHAR Value)
+    {
+        return
+            (Value >= '0' && Value <= '9') ||
+            (Value >= 'a' && Value <= 'b');
+    }
+
+    constexpr bool ValidateTriangleTable()
+    {
+        for (int CaseIndex = 0; CaseIndex < 256; ++CaseIndex)
+        {
+            bool bReachedTerminator = false;
+            int EdgeCount = 0;
+
+            for (int EntryIndex = 0; EntryIndex < 16; ++EntryIndex)
+            {
+                const ANSICHAR Value =
+                    EncodedTriangleTable[
+                        CaseIndex * 16 +
+                        EntryIndex
+                    ];
+
+                if (Value == 'f')
+                {
+                    bReachedTerminator = true;
+                    continue;
+                }
+
+                if (
+                    bReachedTerminator ||
+                    !IsEncodedEdge(Value)
+                )
+                {
+                    return false;
+                }
+
+                ++EdgeCount;
+            }
+
+            if ((EdgeCount % 3) != 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    constexpr uint64 HashTriangleTable()
+    {
+        uint64 Hash = 14695981039346656037ull;
+
+        for (int Index = 0; Index < 256 * 16; ++Index)
+        {
+            Hash ^=
+                static_cast<uint8>(
+                    EncodedTriangleTable[Index]
+                );
+            Hash *= 1099511628211ull;
+        }
+
+        return Hash;
+    }
+
+    static_assert(
+        ValidateTriangleTable(),
+        "Every Marching Cubes row must contain complete edge triplets followed only by terminators."
+    );
+
+    static_assert(
+        HashTriangleTable() == 0xc11773bd50433487ull,
+        "The Cubus Marching Cubes table no longer matches the canonical classic 256-case table."
+    );
+
+    FORCEINLINE int8 GetTriangleEdge(
+        const int32 CaseIndex,
+        const int32 EntryIndex
+    )
+    {
+        check(CaseIndex >= 0 && CaseIndex < 256);
+        check(EntryIndex >= 0 && EntryIndex < 16);
+
+        const ANSICHAR EncodedValue =
+            EncodedTriangleTable[
+                CaseIndex * 16 +
+                EntryIndex
+            ];
+
+        if (EncodedValue == 'f')
+        {
+            return -1;
+        }
+
+        if (EncodedValue >= '0' && EncodedValue <= '9')
+        {
+            return static_cast<int8>(
+                EncodedValue -
+                '0'
+            );
+        }
+
+        if (EncodedValue >= 'a' && EncodedValue <= 'b')
+        {
+            return static_cast<int8>(
+                10 +
+                EncodedValue -
+                'a'
+            );
+        }
+
+        checkNoEntry();
+        return -1;
+    }
+}
