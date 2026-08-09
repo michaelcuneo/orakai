@@ -135,11 +135,6 @@ void ACubusVoxelVolumeActor::GenerateTerrainData()
         ECubusVoxelRenderMode::Density
     )
     {
-        /*
-         * Natural terrain in Density mode is represented entirely by the
-         * scalar density field. ChunkData remains available for explicit
-         * block/building edits and vegetation metadata only.
-         */
         bChunkCacheDirty = false;
         return;
     }

@@ -1228,7 +1228,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     }
 
     int32 InstancedSkeletalFallbackCount = 0;
-    int32 RejectedTreeSurfaceTraceCount = 0;
     int32 FoliageMaterialOverrideComponentCount = 0;
     int32 BoundSpeciesTransformProviderCount = 0;
     int32 RejectedTreeSurfaceCount = 0;
@@ -1452,11 +1451,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 !bFoundTerrainSurface
             )
             {
-                if (bTreeType)
-                {
-                    ++RejectedTreeSurfaceTraceCount;
-                }
-
                 continue;
             }
 
@@ -2022,8 +2016,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
     PublishedChunkVegetationSignatures =
         MoveTemp(CurrentChunkVegetationSignatures);
-
-    UE_LOG( LogTemp, Display, TEXT( "Cubus vegetation debug: rejected tree surface traces=%d" ), RejectedTreeSurfaceTraceCount );
 
     UE_LOG(
         LogTemp,

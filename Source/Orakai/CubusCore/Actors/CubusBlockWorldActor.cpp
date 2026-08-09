@@ -568,33 +568,46 @@ ACubusBlockWorldActor::BuildDensityEditSnapshot(
 {
     FCubusDensityEditMap Snapshot;
 
+    /*
+    * Adaptive density gradients sample one fine step beyond the chunk.
+    * SampleContinuous() then evaluates a four-point cubic B-spline,
+    * requiring one additional integer edit sample beyond that.
+    *
+    * For a 32-voxel chunk this means the edit snapshot must cover
+    * local integer coordinates -2..34, not merely the density
+    * buffer's -1..33 range.
+    */
+    constexpr int32 DensityEditInterpolationHalo = 1;
+
+    const int32 MinimumEditSample =
+        FCubusDensitySamplingBuffer::MinimumLocalSample -
+        DensityEditInterpolationHalo;
+
+    const int32 MaximumEditSample =
+        FCubusDensitySamplingBuffer::MaximumLocalSample +
+        DensityEditInterpolationHalo;
+
     const FIntVector SampleMinimum =
         ChunkCoordinate * Cubus::ChunkSize +
         FIntVector(
-            FCubusDensitySamplingBuffer::
-                MinimumLocalSample,
-            FCubusDensitySamplingBuffer::
-                MinimumLocalSample,
-            FCubusDensitySamplingBuffer::
-                MinimumLocalSample
+            MinimumEditSample,
+            MinimumEditSample,
+            MinimumEditSample
         );
 
     const FIntVector SampleMaximum =
         ChunkCoordinate * Cubus::ChunkSize +
         FIntVector(
-            FCubusDensitySamplingBuffer::
-                MaximumLocalSample,
-            FCubusDensitySamplingBuffer::
-                MaximumLocalSample,
-            FCubusDensitySamplingBuffer::
-                MaximumLocalSample
+            MaximumEditSample,
+            MaximumEditSample,
+            MaximumEditSample
         );
 
     /*
-     * Density sampling uses a one-sample halo,
-     * therefore a chunk can only depend on edits
-     * stored in itself or one of its 26 neighbours.
-     */
+    * The interpolation halo extends two integer samples beyond
+    * the owned chunk, which still lies entirely within the
+    * immediately adjacent 26 chunk buckets.
+    */
     for (int32 Z = -1; Z <= 1; ++Z)
     {
         for (int32 Y = -1; Y <= 1; ++Y)

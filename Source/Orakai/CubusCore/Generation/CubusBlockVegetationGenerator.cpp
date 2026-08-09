@@ -30,58 +30,6 @@ void FCubusBlockVegetationGenerator::Generate(
     const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
     const int32 VegetationSeed = Chunk.GetGenerationSeeds().Vegetation;
 
-    const int32 DebugWorldX =
-        BaseX + Cubus::ChunkSize / 2;
-
-    const int32 DebugWorldY =
-        BaseY + Cubus::ChunkSize / 2;
-
-    if (DensityField != nullptr)
-    {
-        const float DebugSurfaceWorldZ =
-            DensityField->SampleSurfaceVoxelHeight(
-                static_cast<float>(DebugWorldX),
-                static_cast<float>(DebugWorldY)
-            );
-
-        const int32 DebugRoundedSurfaceWorldZ =
-            FMath::RoundToInt(DebugSurfaceWorldZ);
-
-        const int32 DebugSurfaceLocalZ =
-            DebugRoundedSurfaceWorldZ - BaseZ;
-
-        UE_LOG(
-            LogTemp,
-            Display,
-            TEXT(
-                "Cubus vegetation surface debug chunk=(%d,%d,%d) "
-                "density=yes baseZ=%d surface=%.3f rounded=%d local=%d"
-            ),
-            ChunkCoordinate.X,
-            ChunkCoordinate.Y,
-            ChunkCoordinate.Z,
-            BaseZ,
-            DebugSurfaceWorldZ,
-            DebugRoundedSurfaceWorldZ,
-            DebugSurfaceLocalZ
-        );
-    }
-    else
-    {
-        UE_LOG(
-            LogTemp,
-            Display,
-            TEXT(
-                "Cubus vegetation surface debug chunk=(%d,%d,%d) "
-                "density=NO baseZ=%d"
-            ),
-            ChunkCoordinate.X,
-            ChunkCoordinate.Y,
-            ChunkCoordinate.Z,
-            BaseZ
-        );
-    }
-
     const FCubusBiomeFieldSettings BiomeSettings =
         FCubusBiomeField::MakeSettings(
             GeologyProfile,
@@ -103,12 +51,6 @@ void FCubusBlockVegetationGenerator::Generate(
         ) / Cubus::ChunkSize) * Cubus::ChunkSize;
 
     int32 CountsByType[CubusVegetationType::Count] = {};
-
-    int32 SupportedSurfaceCount = 0;
-    int32 LandmarkRejectedCount = 0;
-    int32 NoTypeCount = 0;
-    int32 SlopeRejectedCount = 0;
-    int32 DensityRejectedCount = 0;
 
     constexpr int32 SurfaceColumnCount =
     Cubus::ChunkSize *
@@ -236,8 +178,6 @@ void FCubusBlockVegetationGenerator::Generate(
                 continue;
             }
 
-            ++SupportedSurfaceCount;
-
             const FCubusBlockVoxel* SurfaceVoxel =
                 Chunk.GetVoxel(
                     LocalX,
@@ -286,8 +226,6 @@ void FCubusBlockVegetationGenerator::Generate(
                 continue;
             }
 
-            ++SupportedSurfaceCount;
-
             const int32 WorldX = BaseX + LocalX;
             const int32 WorldY = BaseY + LocalY;
             const int32 WorldZ = BaseZ + SurfaceLocalZ + 1;
@@ -300,7 +238,6 @@ void FCubusBlockVegetationGenerator::Generate(
 
             if (LandmarkSample.IsInside())
             {
-                ++LandmarkRejectedCount;
                 continue;
             }
 
@@ -519,11 +456,6 @@ void FCubusBlockVegetationGenerator::Generate(
                     : 0.012f;
             }
 
-            if (TypeId <= 0)
-            {
-                ++NoTypeCount;
-            }
-
             float MaximumAllowedSlopeDegrees = 89.0f;
 
             switch (TypeId)
@@ -568,7 +500,6 @@ void FCubusBlockVegetationGenerator::Generate(
                 MaximumAllowedSlopeDegrees
             )
             {
-                ++SlopeRejectedCount;
                 continue;
             }
 
@@ -577,7 +508,6 @@ void FCubusBlockVegetationGenerator::Generate(
                 ActivePlacementRoll > FMath::Clamp(Density, 0.0f, 1.0f)
             )
             {
-                ++DensityRejectedCount;
                 continue;
             }
 
@@ -601,28 +531,11 @@ void FCubusBlockVegetationGenerator::Generate(
         }
     }
 
-    UE_LOG(
-        LogTemp,
-        Display,
-        TEXT(
-            "Cubus vegetation gates (%d,%d,%d): "
-            "surface=%d landmark=%d noType=%d slope=%d density=%d"
-        ),
-        ChunkCoordinate.X,
-        ChunkCoordinate.Y,
-        ChunkCoordinate.Z,
-        SupportedSurfaceCount,
-        LandmarkRejectedCount,
-        NoTypeCount,
-        SlopeRejectedCount,
-        DensityRejectedCount
-    );
-
     Chunk.SetVegetationInstances(MoveTemp(Instances));
 
     UE_LOG(
         LogTemp,
-        Display,
+        Verbose,
         TEXT("Cubus vegetation chunk (%d, %d, %d), seed %d: grass %d, shrubs %d, broadleaf %d, conifers %d, reeds %d, alpine %d%s"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
