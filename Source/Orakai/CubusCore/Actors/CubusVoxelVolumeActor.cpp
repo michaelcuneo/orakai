@@ -129,6 +129,21 @@ void ACubusVoxelVolumeActor::GenerateTerrainData()
 {
     EnsureChunkData();
     ChunkData->Clear();
+
+    if (
+        GetEffectiveRenderMode() ==
+        ECubusVoxelRenderMode::Density
+    )
+    {
+        /*
+         * Natural terrain in Density mode is represented entirely by the
+         * scalar density field. ChunkData remains available for explicit
+         * block/building edits and vegetation metadata only.
+         */
+        bChunkCacheDirty = false;
+        return;
+    }
+
     bChunkCacheDirty = true;
 
     if (bUseHeightTerrain)
@@ -258,7 +273,7 @@ void ACubusVoxelVolumeActor::RebuildVolume()
 
     UE_LOG(
         LogTemp,
-        Display,
+        Verbose,
         TEXT("Cubus chunk (%d, %d, %d) built mode=%d densityStep=%.1fcm rootSections=%d blockSections=%d densitySections=%d vertices=%d triangles=%d densityTriangles=%d collision=%s time=%.2fms"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
@@ -389,73 +404,100 @@ void ACubusVoxelVolumeActor::RebuildBlockEditOverlay(
         );
 }
 
-void ACubusVoxelVolumeActor::RebuildDensityMesh(
-    const bool bGenerateDensityCollision,
-    int32& InOutMeshSectionIndex
-)
+FCubusTerrainDensitySettings
+ACubusVoxelVolumeActor::BuildDensitySettings() const
 {
     FCubusTerrainDensitySettings DensitySettings;
 
     DensitySettings.bUseHeightTerrain =
         bUseHeightTerrain;
+
     DensitySettings.FlatSurfaceWorldZ =
-        static_cast<float>(TerrainSurfaceWorldZ);
+        static_cast<float>(
+            TerrainSurfaceWorldZ
+        );
+
     DensitySettings.BaseHeight =
-        static_cast<float>(TerrainBaseHeight);
+        static_cast<float>(
+            TerrainBaseHeight
+        );
 
     DensitySettings.ContinentAmplitude =
         TerrainContinentAmplitude;
+
     DensitySettings.ContinentFrequency =
         TerrainContinentFrequency;
+
     DensitySettings.HillAmplitude =
         TerrainHillAmplitude;
+
     DensitySettings.HillFrequency =
         TerrainHillFrequency;
+
     DensitySettings.DetailAmplitude =
         TerrainDetailAmplitude;
+
     DensitySettings.DetailFrequency =
         TerrainDetailFrequency;
+
     DensitySettings.RidgeAmplitude =
         TerrainRidgeAmplitude;
+
     DensitySettings.RidgeFrequency =
         TerrainRidgeFrequency;
 
     DensitySettings.ValleyDepth =
         TerrainValleyDepth;
+
     DensitySettings.ValleyFrequency =
         TerrainValleyFrequency;
+
     DensitySettings.ValleyWidth =
         TerrainValleyWidth;
+
     DensitySettings.ValleyFalloff =
         TerrainValleyFalloff;
+
     DensitySettings.ValleyWarpAmplitude =
         TerrainValleyWarpAmplitude;
+
     DensitySettings.ValleyWarpFrequency =
         TerrainValleyWarpFrequency;
 
     DensitySettings.RegionFrequency =
         TerrainRegionFrequency;
+
     DensitySettings.PlainsThreshold =
         TerrainPlainsThreshold;
+
     DensitySettings.PlainsBlend =
         TerrainPlainsBlend;
+
     DensitySettings.MountainThreshold =
         TerrainMountainThreshold;
+
     DensitySettings.MountainBlend =
         TerrainMountainBlend;
 
     DensitySettings.SurfaceMaterialId =
         TerrainSurfaceMaterialId;
+
     DensitySettings.SubsurfaceMaterialId =
         TerrainSubsurfaceMaterialId;
+
     DensitySettings.RockMaterialId =
         TerrainRockMaterialId;
+
     DensitySettings.SnowMaterialId =
         TerrainSnowMaterialId;
+
     DensitySettings.RockSlopeThreshold =
         TerrainRockSlopeThreshold;
+
     DensitySettings.SnowMinimumHeight =
-        static_cast<float>(TerrainSnowMinimumHeight);
+        static_cast<float>(
+            TerrainSnowMinimumHeight
+        );
 
     const FCubusGenerationSeeds& Seeds =
         ChunkData->GetGenerationSeeds();
@@ -516,38 +558,63 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
     {
         DensitySettings.bGenerateRivers =
             GeologyProfile->bGenerateRivers;
+
         DensitySettings.RiverFrequency =
             GeologyProfile->RiverFrequency;
+
         DensitySettings.RiverChannelWidth =
             GeologyProfile->RiverChannelWidth;
+
         DensitySettings.RiverValleyWidth =
             GeologyProfile->RiverValleyWidth;
+
         DensitySettings.RiverValleyDepth =
             GeologyProfile->RiverValleyDepth;
+
         DensitySettings.RiverChannelDepth =
             static_cast<float>(
                 GeologyProfile->RiverChannelDepth
             );
+
         DensitySettings.RiverWarpAmplitude =
             GeologyProfile->RiverWarpAmplitude;
+
         DensitySettings.RiverWarpFrequency =
             GeologyProfile->RiverWarpFrequency;
 
         DensitySettings.bGenerateCaves =
             GeologyProfile->bGenerateCaves;
+
         DensitySettings.CaveMinimumWorldZ =
             GeologyProfile->CaveMinimumWorldZ;
+
         DensitySettings.CaveMaximumWorldZ =
             GeologyProfile->CaveMaximumWorldZ;
+
         DensitySettings.CaveSurfaceClearance =
             GeologyProfile->CaveSurfaceClearance;
+
         DensitySettings.CavePrimaryFrequency =
             GeologyProfile->CavePrimaryFrequency;
+
         DensitySettings.CaveSecondaryFrequency =
             GeologyProfile->CaveSecondaryFrequency;
+
         DensitySettings.CaveThreshold =
             GeologyProfile->CaveThreshold;
     }
+
+    return DensitySettings;
+}
+
+void ACubusVoxelVolumeActor::RebuildDensityMesh(
+    const bool bGenerateDensityCollision,
+    int32& InOutMeshSectionIndex
+)
+{
+    const FCubusTerrainDensitySettings
+        DensitySettings =
+            BuildDensitySettings();
 
     const FCubusTerrainDensityField DensityField(
         DensitySettings
@@ -659,11 +726,6 @@ void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(
     OwningBlockWorld = InBlockWorld;
 
     SynchronizeChunkState();
-
-    if (IsValid(OwningBlockWorld.Get()))
-    {
-        OwningBlockWorld->RegisterChunk(this);
-    }
 }
 
 bool ACubusVoxelVolumeActor::ConfigureDensityResolution(

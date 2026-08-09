@@ -61,14 +61,6 @@ public:
         TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>>& SkeletalBatchComponents
     ) const;
 
-    void ApplyShadowSettings(
-        bool bCastShadow,
-        const TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>>& GrassBatchComponents,
-        const TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& StaticBatchComponents,
-        const TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>>& SkeletalBatchComponents,
-        const TArray<TObjectPtr<USkeletalMeshComponent>>& HeroComponents
-    ) const;
-
     void ApplyFoliageMaterialOverride(
         USkinnedMeshComponent* Component,
         UMaterialInterface* OverrideMaterial

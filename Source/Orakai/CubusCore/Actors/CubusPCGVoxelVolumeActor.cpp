@@ -29,21 +29,3 @@ void ACubusPCGVoxelVolumeActor::OnConstruction(
 {
     Super::OnConstruction(Transform);
 }
-
-void ACubusPCGVoxelVolumeActor::ConfigureVegetationPCG(
-    UPCGGraphInterface* InVegetationGraph,
-    const bool bInGenerateVegetationPCG
-)
-{
-    // Deprecated compatibility method. Intentionally ignored.
-}
-
-void ACubusPCGVoxelVolumeActor::RegenerateVegetationPCG()
-{
-    // Deprecated compatibility method. Intentionally ignored.
-}
-
-void ACubusPCGVoxelVolumeActor::CleanupVegetationPCG()
-{
-    // Deprecated compatibility method. Intentionally ignored.
-}

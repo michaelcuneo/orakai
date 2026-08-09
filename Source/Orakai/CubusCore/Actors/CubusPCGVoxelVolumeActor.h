@@ -5,8 +5,6 @@
 
 #include "CubusPCGVoxelVolumeActor.generated.h"
 
-class UPCGGraphInterface;
-
 /**
  * Compatibility chunk class retained for existing Blueprint references.
  * Vegetation rendering is owned exclusively by ACubusWorldVegetationActor.
@@ -34,16 +32,6 @@ public:
     {
         return bTerrainRayTracingRequested;
     }
-
-    // Deprecated compatibility entry points. They intentionally do nothing;
-    // vegetation is generated and rendered by the world vegetation actor.
-    void ConfigureVegetationPCG(
-        UPCGGraphInterface* InVegetationGraph,
-        bool bInGenerateVegetationPCG
-    );
-
-    void RegenerateVegetationPCG();
-    void CleanupVegetationPCG();
 
 private:
     bool bTerrainRayTracingRequested = false;

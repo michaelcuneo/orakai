@@ -1,4 +1,5 @@
 #include "CubusCore/Generation/CubusTerrainClutterGenerator.h"
+#include "CubusCore/Generation/CubusTerrainDensityField.h"
 
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
@@ -93,7 +94,10 @@ namespace CubusTerrainClutterGenerator
 void FCubusTerrainClutterGenerator::Append(
     FCubusBlockChunkData& Chunk,
     const UCubusMaterialRegistry* MaterialRegistry,
-    const float VoxelSize
+    const float VoxelSize,
+    const FCubusTerrainDensityField* DensityField,
+    const bool bGenerateWater,
+    const int32 WaterLevel
 )
 {
     if (!IsValid(MaterialRegistry) || VoxelSize <= 0.0f)
@@ -122,37 +126,182 @@ void FCubusTerrainClutterGenerator::Append(
     const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
     const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
 
-    int32 GrassCount = 0;
-    int32 StoneCount = 0;
-    int32 OrganicCount = 0;
+int32 GrassCount = 0;
+int32 StoneCount = 0;
+int32 OrganicCount = 0;
 
-    for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
+constexpr int32 SurfaceColumnCount =
+    Cubus::ChunkSize *
+    Cubus::ChunkSize;
+
+TArray<int32> SurfaceLocalZByColumn;
+SurfaceLocalZByColumn.SetNumUninitialized(
+    SurfaceColumnCount
+);
+
+TArray<uint8> SurfaceSupportsClutter;
+SurfaceSupportsClutter.SetNumZeroed(
+    SurfaceColumnCount
+);
+
+const auto SurfaceIndex =
+    [](const int32 LocalX, const int32 LocalY)
     {
-        for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
-        {
-            const int32 SurfaceLocalZ = FindSurfaceLocalZ(
-                Chunk,
+        return
+            LocalY * Cubus::ChunkSize +
+            LocalX;
+    };
+
+for (
+    int32 LocalY = 0;
+    LocalY < Cubus::ChunkSize;
+    ++LocalY
+)
+{
+    for (
+        int32 LocalX = 0;
+        LocalX < Cubus::ChunkSize;
+        ++LocalX
+    )
+    {
+        const int32 ColumnIndex =
+            SurfaceIndex(
                 LocalX,
                 LocalY
             );
+
+        if (DensityField != nullptr)
+        {
+            const int32 WorldX =
+                BaseX + LocalX;
+
+            const int32 WorldY =
+                BaseY + LocalY;
+
+            const int32 SurfaceWorldZ =
+                FMath::RoundToInt(
+                    DensityField->
+                        SampleSurfaceVoxelHeight(
+                            static_cast<float>(
+                                WorldX
+                            ),
+                            static_cast<float>(
+                                WorldY
+                            )
+                        )
+                );
+
+            const int32 SurfaceLocalZ =
+                SurfaceWorldZ - BaseZ;
+
+            SurfaceLocalZByColumn[
+                ColumnIndex
+            ] = SurfaceLocalZ;
+
+            const bool bInsideChunk =
+                SurfaceLocalZ >= 0 &&
+                SurfaceLocalZ <
+                    Cubus::ChunkSize - 1;
+
+            SurfaceSupportsClutter[
+                ColumnIndex
+            ] =
+                bInsideChunk
+                    ? 1
+                    : 0;
+
+            continue;
+        }
+
+        int32 SurfaceLocalZ =
+            INDEX_NONE;
+
+        for (
+            int32 LocalZ =
+                Cubus::ChunkSize - 1;
+            LocalZ >= 0;
+            --LocalZ
+        )
+        {
+            const FCubusBlockVoxel* Voxel =
+                Chunk.GetVoxel(
+                    LocalX,
+                    LocalY,
+                    LocalZ
+                );
+
             if (
-                SurfaceLocalZ == INDEX_NONE ||
-                SurfaceLocalZ >= Cubus::ChunkSize - 1
+                Voxel == nullptr ||
+                Voxel->MaterialId <= 0 ||
+                Voxel->IsWater()
             )
             {
                 continue;
             }
 
-            const FCubusBlockVoxel* Above = Chunk.GetVoxel(
+            SurfaceLocalZ = LocalZ;
+            break;
+        }
+
+        SurfaceLocalZByColumn[
+            ColumnIndex
+        ] = SurfaceLocalZ;
+
+        if (
+            SurfaceLocalZ == INDEX_NONE ||
+            SurfaceLocalZ >=
+                Cubus::ChunkSize - 1
+        )
+        {
+            continue;
+        }
+
+        const FCubusBlockVoxel* Above =
+            Chunk.GetVoxel(
                 LocalX,
                 LocalY,
                 SurfaceLocalZ + 1
             );
-            if (Above == nullptr || Above->MaterialId > 0 || Above->IsWater())
-            {
-                continue;
-            }
 
+        SurfaceSupportsClutter[
+            ColumnIndex
+        ] =
+            Above != nullptr &&
+            Above->MaterialId <= 0 &&
+            !Above->IsWater()
+                ? 1
+                : 0;
+    }
+}
+
+for (
+    int32 LocalY = 0;
+    LocalY < Cubus::ChunkSize;
+    ++LocalY
+)
+    {
+        for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
+        {
+const int32 ColumnIndex =
+    SurfaceIndex(
+        LocalX,
+        LocalY
+    );
+
+const int32 SurfaceLocalZ =
+    SurfaceLocalZByColumn[
+        ColumnIndex
+    ];
+
+if (
+    SurfaceLocalZ == INDEX_NONE ||
+    !SurfaceSupportsClutter[
+        ColumnIndex
+    ]
+)
+{
+    continue;
+}
             const int32 WorldX = BaseX + LocalX;
             const int32 WorldY = BaseY + LocalY;
             const int32 WorldZ = BaseZ + SurfaceLocalZ + 1;
@@ -162,27 +311,61 @@ void FCubusTerrainClutterGenerator::Append(
                 continue;
             }
 
-            const int32 West = FindSurfaceLocalZ(
-                Chunk,
-                FMath::Max(0, LocalX - 1),
-                LocalY
-            );
-            const int32 East = FindSurfaceLocalZ(
-                Chunk,
-                FMath::Min(Cubus::ChunkSize - 1, LocalX + 1),
-                LocalY
-            );
-            const int32 South = FindSurfaceLocalZ(
-                Chunk,
-                LocalX,
-                FMath::Max(0, LocalY - 1)
-            );
-            const int32 North = FindSurfaceLocalZ(
-                Chunk,
-                LocalX,
-                FMath::Min(Cubus::ChunkSize - 1, LocalY + 1)
-            );
+const int32 WestX =
+    FMath::Max(
+        0,
+        LocalX - 1
+    );
 
+const int32 EastX =
+    FMath::Min(
+        Cubus::ChunkSize - 1,
+        LocalX + 1
+    );
+
+const int32 SouthY =
+    FMath::Max(
+        0,
+        LocalY - 1
+    );
+
+const int32 NorthY =
+    FMath::Min(
+        Cubus::ChunkSize - 1,
+        LocalY + 1
+    );
+
+const int32 West =
+    SurfaceLocalZByColumn[
+        SurfaceIndex(
+            WestX,
+            LocalY
+        )
+    ];
+
+const int32 East =
+    SurfaceLocalZByColumn[
+        SurfaceIndex(
+            EastX,
+            LocalY
+        )
+    ];
+
+const int32 South =
+    SurfaceLocalZByColumn[
+        SurfaceIndex(
+            LocalX,
+            SouthY
+        )
+    ];
+
+const int32 North =
+    SurfaceLocalZByColumn[
+        SurfaceIndex(
+            LocalX,
+            NorthY
+        )
+    ];
             const float GradientX =
                 West != INDEX_NONE && East != INDEX_NONE
                     ? static_cast<float>(East - West) * 0.5f
@@ -291,20 +474,3 @@ void FCubusTerrainClutterGenerator::Append(
     );
 }
 
-int32 FCubusTerrainClutterGenerator::FindSurfaceLocalZ(
-    const FCubusBlockChunkData& Chunk,
-    const int32 LocalX,
-    const int32 LocalY
-)
-{
-    for (int32 LocalZ = Cubus::ChunkSize - 1; LocalZ >= 0; --LocalZ)
-    {
-        const FCubusBlockVoxel* Voxel = Chunk.GetVoxel(LocalX, LocalY, LocalZ);
-        if (Voxel != nullptr && Voxel->MaterialId > 0 && !Voxel->IsWater())
-        {
-            return LocalZ;
-        }
-    }
-
-    return INDEX_NONE;
-}

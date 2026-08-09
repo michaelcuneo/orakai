@@ -68,7 +68,49 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
         return 0;
     }
 
-    const FCubusDensityEditMap SourceEdits = DensityEdits;
+    FCubusDensityEditMap SourceEdits;
+
+    const int32 SourceRadius =
+        SafeRadius + 1;
+
+    for (
+        int32 Z = -SourceRadius;
+        Z <= SourceRadius;
+        ++Z
+    )
+    {
+        for (
+            int32 Y = -SourceRadius;
+            Y <= SourceRadius;
+            ++Y
+        )
+        {
+            for (
+                int32 X = -SourceRadius;
+                X <= SourceRadius;
+                ++X
+            )
+            {
+                const FIntVector Sample =
+                    CentreWorldSample +
+                    FIntVector(X, Y, Z);
+
+                const FCubusDensityEdit* Edit =
+                    DensityEdits.Find(
+                        Sample
+                    );
+
+                if (Edit != nullptr)
+                {
+                    SourceEdits.Add(
+                        Sample,
+                        *Edit
+                    );
+                }
+            }
+        }
+    }
+
     FCubusDensityEditMap PendingEdits;
     TSet<FIntVector> TouchedChunks;
 
@@ -122,15 +164,42 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
     int32 ChangedCount = 0;
     for (const TPair<FIntVector, FCubusDensityEdit>& Pair : PendingEdits)
     {
-        if (FMath::IsNearlyZero(Pair.Value.DensityDelta))
+        if (
+            FMath::IsNearlyZero(
+                Pair.Value.DensityDelta
+            )
+        )
         {
-            DensityEdits.Remove(Pair.Key);
-            CubusDensityTools::PersistDensityEdit(this, Pair.Key, nullptr);
+            DensityEdits.Remove(
+                Pair.Key
+            );
+
+            ReindexDensityEditSample(
+                Pair.Key
+            );
+
+            CubusDensityTools::PersistDensityEdit(
+                this,
+                Pair.Key,
+                nullptr
+            );
         }
         else
         {
-            DensityEdits.Add(Pair.Key, Pair.Value);
-            CubusDensityTools::PersistDensityEdit(this, Pair.Key, &Pair.Value);
+            DensityEdits.Add(
+                Pair.Key,
+                Pair.Value
+            );
+
+            ReindexDensityEditSample(
+                Pair.Key
+            );
+
+            CubusDensityTools::PersistDensityEdit(
+                this,
+                Pair.Key,
+                &Pair.Value
+            );
         }
 
         TouchedChunks.Add(OrakaiPersistence::WorldVoxelToChunk(Pair.Key));
@@ -188,14 +257,37 @@ int32 ACubusBlockWorldActor::LevelDensityEditsAtWorldSample(
                     Edit.MaterialId = MaterialId;
                 }
 
-                if (FMath::IsNearlyZero(Edit.DensityDelta))
+                if (
+                    FMath::IsNearlyZero(
+                        Edit.DensityDelta
+                    )
+                )
                 {
-                    DensityEdits.Remove(Sample);
-                    CubusDensityTools::PersistDensityEdit(this, Sample, nullptr);
+                    DensityEdits.Remove(
+                        Sample
+                    );
+
+                    ReindexDensityEditSample(
+                        Sample
+                    );
+
+                    CubusDensityTools::PersistDensityEdit(
+                        this,
+                        Sample,
+                        nullptr
+                    );
                 }
                 else
                 {
-                    CubusDensityTools::PersistDensityEdit(this, Sample, &Edit);
+                    ReindexDensityEditSample(
+                        Sample
+                    );
+
+                    CubusDensityTools::PersistDensityEdit(
+                        this,
+                        Sample,
+                        &Edit
+                    );
                 }
 
                 TouchedChunks.Add(OrakaiPersistence::WorldVoxelToChunk(Sample));
@@ -253,14 +345,38 @@ int32 ACubusBlockWorldActor::RestoreDensityEditsAtWorldSample(
                     BlendStrength * Weight
                 );
 
-                if (FMath::IsNearlyZero(Existing->DensityDelta, 0.001f))
+                if (
+                    FMath::IsNearlyZero(
+                        Existing->DensityDelta,
+                        0.001f
+                    )
+                )
                 {
-                    DensityEdits.Remove(Sample);
-                    CubusDensityTools::PersistDensityEdit(this, Sample, nullptr);
+                    DensityEdits.Remove(
+                        Sample
+                    );
+
+                    ReindexDensityEditSample(
+                        Sample
+                    );
+
+                    CubusDensityTools::PersistDensityEdit(
+                        this,
+                        Sample,
+                        nullptr
+                    );
                 }
                 else
                 {
-                    CubusDensityTools::PersistDensityEdit(this, Sample, Existing);
+                    ReindexDensityEditSample(
+                        Sample
+                    );
+
+                    CubusDensityTools::PersistDensityEdit(
+                        this,
+                        Sample,
+                        Existing
+                    );
                 }
 
                 TouchedChunks.Add(OrakaiPersistence::WorldVoxelToChunk(Sample));

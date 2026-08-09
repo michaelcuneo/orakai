@@ -1,6 +1,4 @@
 #include "CubusCore/Actors/CubusBlockWorldActor.h"
-
-#include "CubusCore/Actors/CubusPCGVoxelVolumeActor.h"
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Actors/CubusWorldVegetationActor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
@@ -289,7 +287,10 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
     UpdateWeatherMaterials(DeltaSeconds);
 
     // Editing is valid in both fixed-grid and streamed worlds.
-    ProcessDirtyChunkQueue();
+    if (!DirtyChunkCoordinates.IsEmpty())
+    {
+        ProcessDirtyChunkQueue();
+    }
 
     if (!bEnableRuntimeStreaming)
     {
@@ -337,7 +338,14 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
         UpdateRuntimeStreaming(false);
     }
 
-    ProcessRuntimeQueues();
+    if (
+        !PendingChunkGeneration.IsEmpty() ||
+        !PendingChunkRemoval.IsEmpty()
+    )
+    {
+        ProcessRuntimeQueues();
+    }
+
     TryReleasePawnToTerrain();
 
     RecordTrackedPawnCoordinate();
@@ -553,7 +561,8 @@ void ACubusBlockWorldActor::QueueDensityEditDependenciesForRebuild(
     }
 }
 
-FCubusDensityEditMap ACubusBlockWorldActor::BuildDensityEditSnapshot(
+FCubusDensityEditMap
+ACubusBlockWorldActor::BuildDensityEditSnapshot(
     const FIntVector& ChunkCoordinate
 ) const
 {
@@ -562,30 +571,86 @@ FCubusDensityEditMap ACubusBlockWorldActor::BuildDensityEditSnapshot(
     const FIntVector SampleMinimum =
         ChunkCoordinate * Cubus::ChunkSize +
         FIntVector(
-            FCubusDensitySamplingBuffer::MinimumLocalSample,
-            FCubusDensitySamplingBuffer::MinimumLocalSample,
-            FCubusDensitySamplingBuffer::MinimumLocalSample
+            FCubusDensitySamplingBuffer::
+                MinimumLocalSample,
+            FCubusDensitySamplingBuffer::
+                MinimumLocalSample,
+            FCubusDensitySamplingBuffer::
+                MinimumLocalSample
         );
 
     const FIntVector SampleMaximum =
         ChunkCoordinate * Cubus::ChunkSize +
         FIntVector(
-            FCubusDensitySamplingBuffer::MaximumLocalSample,
-            FCubusDensitySamplingBuffer::MaximumLocalSample,
-            FCubusDensitySamplingBuffer::MaximumLocalSample
+            FCubusDensitySamplingBuffer::
+                MaximumLocalSample,
+            FCubusDensitySamplingBuffer::
+                MaximumLocalSample,
+            FCubusDensitySamplingBuffer::
+                MaximumLocalSample
         );
 
-    for (const auto& Entry : DensityEdits)
+    /*
+     * Density sampling uses a one-sample halo,
+     * therefore a chunk can only depend on edits
+     * stored in itself or one of its 26 neighbours.
+     */
+    for (int32 Z = -1; Z <= 1; ++Z)
     {
-        const FIntVector& Coordinate = Entry.Key;
-
-        if (
-            Coordinate.X >= SampleMinimum.X && Coordinate.X <= SampleMaximum.X &&
-            Coordinate.Y >= SampleMinimum.Y && Coordinate.Y <= SampleMaximum.Y &&
-            Coordinate.Z >= SampleMinimum.Z && Coordinate.Z <= SampleMaximum.Z
-        )
+        for (int32 Y = -1; Y <= 1; ++Y)
         {
-            Snapshot.Add(Coordinate, Entry.Value);
+            for (int32 X = -1; X <= 1; ++X)
+            {
+                const FIntVector EditChunk =
+                    ChunkCoordinate +
+                    FIntVector(X, Y, Z);
+
+                const FCubusDensityEditMap*
+                    ChunkEdits =
+                        DensityEditsByChunk.Find(
+                            EditChunk
+                        );
+
+                if (ChunkEdits == nullptr)
+                {
+                    continue;
+                }
+
+                for (
+                    const TPair<
+                        FIntVector,
+                        FCubusDensityEdit
+                    >& Entry
+                    : *ChunkEdits
+                )
+                {
+                    const FIntVector& Coordinate =
+                        Entry.Key;
+
+                    if (
+                        Coordinate.X <
+                            SampleMinimum.X ||
+                        Coordinate.X >
+                            SampleMaximum.X ||
+                        Coordinate.Y <
+                            SampleMinimum.Y ||
+                        Coordinate.Y >
+                            SampleMaximum.Y ||
+                        Coordinate.Z <
+                            SampleMinimum.Z ||
+                        Coordinate.Z >
+                            SampleMaximum.Z
+                    )
+                    {
+                        continue;
+                    }
+
+                    Snapshot.Add(
+                        Coordinate,
+                        Entry.Value
+                    );
+                }
+            }
         }
     }
 
@@ -638,9 +703,81 @@ void ACubusBlockWorldActor::PublishWorldConfig()
     }
 }
 
+void ACubusBlockWorldActor::RebuildDensityEditIndex()
+{
+    DensityEditsByChunk.Reset();
+
+    for (
+        const TPair<
+            FIntVector,
+            FCubusDensityEdit
+        >& Pair : DensityEdits
+    )
+    {
+        const FIntVector ChunkCoordinate =
+            OrakaiPersistence::WorldVoxelToChunk(
+                Pair.Key
+            );
+
+        DensityEditsByChunk
+            .FindOrAdd(ChunkCoordinate)
+            .Add(
+                Pair.Key,
+                Pair.Value
+            );
+    }
+}
+
+void ACubusBlockWorldActor::ReindexDensityEditSample(
+    const FIntVector& WorldSample
+)
+{
+    const FIntVector ChunkCoordinate =
+        OrakaiPersistence::WorldVoxelToChunk(
+            WorldSample
+        );
+
+    FCubusDensityEditMap* ChunkEdits =
+        DensityEditsByChunk.Find(
+            ChunkCoordinate
+        );
+
+    const FCubusDensityEdit* Edit =
+        DensityEdits.Find(
+            WorldSample
+        );
+
+    if (Edit == nullptr)
+    {
+        if (ChunkEdits != nullptr)
+        {
+            ChunkEdits->Remove(
+                WorldSample
+            );
+
+            if (ChunkEdits->IsEmpty())
+            {
+                DensityEditsByChunk.Remove(
+                    ChunkCoordinate
+                );
+            }
+        }
+
+        return;
+    }
+
+    DensityEditsByChunk
+        .FindOrAdd(ChunkCoordinate)
+        .Add(
+            WorldSample,
+            *Edit
+        );
+}
+
 void ACubusBlockWorldActor::RestoreDensityEdits()
 {
     DensityEdits.Reset();
+    DensityEditsByChunk.Reset();
 
     UOrakaiPersistenceSubsystem* Persistence =
         UOrakaiPersistenceSubsystem::Get(this);
@@ -653,18 +790,35 @@ void ACubusBlockWorldActor::RestoreDensityEdits()
     TArray<FOrakaiDensityEdit> StoredEdits;
     Persistence->GetDensityEdits(StoredEdits);
 
-    for (const FOrakaiDensityEdit& StoredEdit : StoredEdits)
+    for (
+        const FOrakaiDensityEdit& StoredEdit
+        : StoredEdits
+    )
     {
-        if (FMath::IsNearlyZero(StoredEdit.DensityDelta))
+        if (
+            FMath::IsNearlyZero(
+                StoredEdit.DensityDelta
+            )
+        )
         {
             continue;
         }
 
         FCubusDensityEdit Edit;
-        Edit.DensityDelta = StoredEdit.DensityDelta;
-        Edit.MaterialId = StoredEdit.MaterialId;
-        DensityEdits.Add(StoredEdit.WorldSample, Edit);
+
+        Edit.DensityDelta =
+            StoredEdit.DensityDelta;
+
+        Edit.MaterialId =
+            StoredEdit.MaterialId;
+
+        DensityEdits.Add(
+            StoredEdit.WorldSample,
+            Edit
+        );
     }
+
+    RebuildDensityEditIndex();
 }
 
 void ACubusBlockWorldActor::ApplyPersistedEditsToChunk(
@@ -893,22 +1047,47 @@ int32 ACubusBlockWorldActor::EditDensitySphereAtWorldSample(
 
                 if (FMath::IsNearlyZero(Edit.DensityDelta))
                 {
-                    DensityEdits.Remove(WorldSample);
+                    DensityEdits.Remove(
+                        WorldSample
+                    );
 
-                    if (UOrakaiPersistenceSubsystem* Persistence =
-                            UOrakaiPersistenceSubsystem::Get(this))
+                    ReindexDensityEditSample(
+                        WorldSample
+                    );
+
+                    if (
+                        UOrakaiPersistenceSubsystem*
+                            Persistence =
+                                UOrakaiPersistenceSubsystem::Get(
+                                    this
+                                )
+                    )
                     {
-                        Persistence->ClearDensityEdit(WorldSample);
+                        Persistence->ClearDensityEdit(
+                            WorldSample
+                        );
                     }
                 }
-                else if (UOrakaiPersistenceSubsystem* Persistence =
-                             UOrakaiPersistenceSubsystem::Get(this))
+                else
                 {
-                    Persistence->RecordDensityEdit(
-                        WorldSample,
-                        Edit.DensityDelta,
-                        Edit.MaterialId
+                    ReindexDensityEditSample(
+                        WorldSample
                     );
+
+                    if (
+                        UOrakaiPersistenceSubsystem*
+                            Persistence =
+                                UOrakaiPersistenceSubsystem::Get(
+                                    this
+                                )
+                    )
+                    {
+                        Persistence->RecordDensityEdit(
+                            WorldSample,
+                            Edit.DensityDelta,
+                            Edit.MaterialId
+                        );
+                    }
                 }
 
                 TouchedChunks.Add(
@@ -1029,7 +1208,7 @@ bool ACubusBlockWorldActor::HarvestTreeAlongRay(
             WorldVegetationActor.Get())
     {
         if (
-            VegetationActor->FindInteractiveTreeAlongRay(
+            !VegetationActor->FindInteractiveTreeAlongRay(
                 TraceStart,
                 TraceEnd,
                 SelectionRadius,
@@ -1037,14 +1216,28 @@ bool ACubusBlockWorldActor::HarvestTreeAlongRay(
             )
         )
         {
-            RecordGeneratedTreeTombstone(OutTreeWorldVoxel);
-            RemoveFoliageAtWorldVoxel(OutTreeWorldVoxel);
-            return true;
+            return false;
         }
+
+        RecordGeneratedTreeTombstone(
+            OutTreeWorldVoxel
+        );
+
+        RemoveFoliageAtWorldVoxel(
+            OutTreeWorldVoxel
+        );
+
+        return true;
     }
 
-    const FVector Segment = TraceEnd - TraceStart;
+    /*
+    * Legacy fallback for worlds where the world vegetation actor
+    * is deliberately unavailable.
+    */
+    const FVector Segment =
+        TraceEnd - TraceStart;
     const double SegmentLengthSquared = Segment.SizeSquared();
+
     if (SegmentLengthSquared <= static_cast<double>(SMALL_NUMBER))
     {
         return false;
@@ -1236,17 +1429,6 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
         TerrainWaterMaterialId
     );
 
-    if (
-        ACubusPCGVoxelVolumeActor* PCGChunk =
-            Cast<ACubusPCGVoxelVolumeActor>(ChunkActor)
-    )
-    {
-        PCGChunk->ConfigureVegetationPCG(
-            VegetationPCGGraph,
-            bGenerateVegetationPCG && bGenerateVegetation
-        );
-    }
-
     ChunkActor->SetOwner(this);
     ChunkActor->AttachToComponent(
         WorldRoot,
@@ -1259,20 +1441,6 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
     ApplyPersistedEditsToChunk(*ChunkActor);
     ChunkActor->RebuildVolume();
 
-    if (
-        bGenerateVegetation &&
-        bGenerateVegetationPCG
-    )
-    {
-        if (
-            ACubusPCGVoxelVolumeActor* PCGChunk =
-                Cast<ACubusPCGVoxelVolumeActor>(ChunkActor)
-        )
-        {
-            PCGChunk->RegenerateVegetationPCG();
-        }
-    }
-
     GeneratedChunkCount = GeneratedChunks.Num();
     return ChunkActor;
 }
@@ -1281,25 +1449,41 @@ void ACubusBlockWorldActor::GenerateChunkGrid()
 {
     ClearGeneratedChunks();
 
-    GridDimensions.X = FMath::Max(1, GridDimensions.X);
-    GridDimensions.Y = FMath::Max(1, GridDimensions.Y);
-    GridDimensions.Z = FMath::Max(1, GridDimensions.Z);
+    GridDimensions.X =
+        FMath::Max(1, GridDimensions.X);
 
-    for (int32 Z = 0; Z < GridDimensions.Z; ++Z)
+    GridDimensions.Y =
+        FMath::Max(1, GridDimensions.Y);
+
+    GridDimensions.Z =
+        FMath::Max(1, GridDimensions.Z);
+
+    for (
+        int32 Z = 0;
+        Z < GridDimensions.Z;
+        ++Z
+    )
     {
-        for (int32 Y = 0; Y < GridDimensions.Y; ++Y)
+        for (
+            int32 Y = 0;
+            Y < GridDimensions.Y;
+            ++Y
+        )
         {
-            for (int32 X = 0; X < GridDimensions.X; ++X)
+            for (
+                int32 X = 0;
+                X < GridDimensions.X;
+                ++X
+            )
             {
                 SpawnChunkAtCoordinate(
-                    GridOrigin + FIntVector(X, Y, Z),
+                    GridOrigin +
+                        FIntVector(X, Y, Z),
                     true
                 );
             }
         }
     }
-
-    RefreshChunkRegistry();
 }
 
 void ACubusBlockWorldActor::ClearGeneratedChunks()
@@ -1341,30 +1525,46 @@ void ACubusBlockWorldActor::RefreshChunkRegistry()
         return;
     }
 
-    for (TActorIterator<ACubusVoxelVolumeActor> Iterator(World); Iterator; ++Iterator)
+    for (
+        TActorIterator<ACubusVoxelVolumeActor> Iterator(World);
+        Iterator;
+        ++Iterator
+    )
     {
-        ACubusVoxelVolumeActor* ChunkActor = *Iterator;
+        ACubusVoxelVolumeActor* ChunkActor =
+            *Iterator;
 
         if (!IsValid(ChunkActor))
         {
             continue;
         }
 
-        const bool bOwnedByThisWorld = ChunkActor->GetOwner() == this;
+        const bool bOwnedByThisWorld =
+            ChunkActor->GetOwner() == this;
+
         const bool bAttachedToThisWorld =
             ChunkActor->GetAttachParentActor() == this;
 
-        if (!bOwnedByThisWorld && !bAttachedToThisWorld)
+        if (
+            !bOwnedByThisWorld &&
+            !bAttachedToThisWorld
+        )
         {
             continue;
         }
 
         ChunkActor->SetOwningBlockWorld(this);
-        RegisterChunk(ChunkActor);
+
+        ChunksByCoordinate.Add(
+            ChunkActor->GetChunkCoordinate(),
+            ChunkActor
+        );
     }
 
     RemoveInvalidChunks();
-    RegisteredChunkCount = ChunksByCoordinate.Num();
+
+    RegisteredChunkCount =
+        ChunksByCoordinate.Num();
 }
 
 void ACubusBlockWorldActor::RebuildAllChunks()
@@ -1431,27 +1631,8 @@ void ACubusBlockWorldActor::RegenerateTerrain()
             TerrainWaterMaterialId
         );
 
-        if (
-            ACubusPCGVoxelVolumeActor* PCGChunk =
-                Cast<ACubusPCGVoxelVolumeActor>(ChunkActor)
-        )
-        {
-            PCGChunk->ConfigureVegetationPCG(
-                VegetationPCGGraph,
-                bGenerateVegetationPCG
-            );
-        }
-
         ChunkActor->GenerateTerrainData();
         ChunkActor->RebuildVolume();
-
-        if (
-            ACubusPCGVoxelVolumeActor* PCGChunk =
-                Cast<ACubusPCGVoxelVolumeActor>(ChunkActor)
-        )
-        {
-            PCGChunk->RegenerateVegetationPCG();
-        }
     }
 }
 
@@ -1541,7 +1722,7 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 
     LastTrackedChunk = CentreCoordinate;
 
-    UpdateDensityLods(CentreCoordinate);
+    UpdateDensityLods();
 
     BuildRequiredCoordinates(
         CentreCoordinate,
@@ -1639,12 +1820,8 @@ int32 ACubusBlockWorldActor::ResolveDensitySubdivisions(
     );
 }
 
-void ACubusBlockWorldActor::UpdateDensityLods(
-    const FIntVector& CentreCoordinate
-)
+void ACubusBlockWorldActor::UpdateDensityLods()
 {
-    (void)CentreCoordinate;
-
     const ECubusVoxelRenderMode RenderMode = GetVoxelRenderMode();
     if (
         RenderMode != ECubusVoxelRenderMode::Density &&

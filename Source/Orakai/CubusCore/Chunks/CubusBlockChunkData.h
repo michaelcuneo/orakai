@@ -77,17 +77,27 @@ public:
     )
     {
         VegetationInstances = MoveTemp(InInstances);
+        ++VegetationRevision;
     }
 
     void ClearVegetationInstances()
     {
-        VegetationInstances.Reset();
+        if (!VegetationInstances.IsEmpty())
+        {
+            VegetationInstances.Reset();
+            ++VegetationRevision;
+        }
     }
 
     TConstArrayView<FCubusVegetationInstance>
     GetVegetationInstances() const
     {
         return MakeArrayView(VegetationInstances);
+    }
+
+    uint32 GetVegetationRevision() const
+    {
+        return VegetationRevision;
     }
 
     bool RemoveVegetationAtWorldVoxel(const FIntVector& WorldVoxel);
@@ -98,6 +108,8 @@ private:
     FCubusGenerationSeeds GenerationSeeds;
     TArray<FCubusBlockVoxel> Voxels;
     TArray<FCubusVegetationInstance> VegetationInstances;
+    
+    uint32 VegetationRevision = 0;
 
     mutable bool bOccupiedStateKnown = false;
     mutable bool bHasAnyOccupiedVoxel = false;

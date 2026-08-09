@@ -78,45 +78,97 @@ namespace CubusDensityMesher
     }
 
     void AddWeightedMaterial(
-        TArray<FWeightedMaterial>& Materials,
+        FWeightedMaterial (&Materials)[8],
+        int32& MaterialCount,
         const int32 MaterialId,
         const float Weight
     )
     {
-        if (MaterialId <= 0 || Weight <= UE_SMALL_NUMBER)
+        if (
+            MaterialId <= 0 ||
+            Weight <= UE_SMALL_NUMBER
+        )
         {
             return;
         }
 
-        const int32 ClampedMaterialId = ClampDensityMaterialId(MaterialId);
-        for (FWeightedMaterial& Existing : Materials)
+        const int32 ClampedMaterialId =
+            ClampDensityMaterialId(MaterialId);
+
+        for (
+            int32 Index = 0;
+            Index < MaterialCount;
+            ++Index
+        )
         {
-            if (Existing.MaterialId == ClampedMaterialId)
+            if (
+                Materials[Index].MaterialId ==
+                ClampedMaterialId
+            )
             {
-                Existing.Weight += Weight;
+                Materials[Index].Weight += Weight;
                 return;
             }
         }
 
-        FWeightedMaterial& Added = Materials.AddDefaulted_GetRef();
-        Added.MaterialId = ClampedMaterialId;
-        Added.Weight = Weight;
+        if (MaterialCount >= 8)
+        {
+            return;
+        }
+
+        Materials[MaterialCount].MaterialId =
+            ClampedMaterialId;
+
+        Materials[MaterialCount].Weight =
+            Weight;
+
+        ++MaterialCount;
     }
 
-    void SortWeightedMaterials(TArray<FWeightedMaterial>& Materials)
+    void SortWeightedMaterials(
+        FWeightedMaterial (&Materials)[8],
+        const int32 MaterialCount
+    )
     {
-        Materials.Sort([](
-            const FWeightedMaterial& A,
-            const FWeightedMaterial& B
+        for (
+            int32 Index = 1;
+            Index < MaterialCount;
+            ++Index
         )
         {
-            if (!FMath::IsNearlyEqual(A.Weight, B.Weight))
+            const FWeightedMaterial Value =
+                Materials[Index];
+
+            int32 InsertIndex = Index;
+
+            while (InsertIndex > 0)
             {
-                return A.Weight > B.Weight;
+                const FWeightedMaterial& Previous =
+                    Materials[InsertIndex - 1];
+
+                const bool bValueComesFirst =
+                    !FMath::IsNearlyEqual(
+                        Value.Weight,
+                        Previous.Weight
+                    )
+                        ? Value.Weight >
+                            Previous.Weight
+                        : Value.MaterialId <
+                            Previous.MaterialId;
+
+                if (!bValueComesFirst)
+                {
+                    break;
+                }
+
+                Materials[InsertIndex] =
+                    Previous;
+
+                --InsertIndex;
             }
 
-            return A.MaterialId < B.MaterialId;
-        });
+            Materials[InsertIndex] = Value;
+        }
     }
 
     void SetSingleMaterialBlend(
@@ -157,8 +209,8 @@ namespace CubusDensityMesher
             FMath::Clamp(LocalAlpha.Z, 0.0, 1.0)
         );
 
-        TArray<FWeightedMaterial> Accumulated;
-        Accumulated.Reserve(8);
+        FWeightedMaterial Accumulated[8];
+        int32 AccumulatedCount = 0;
 
         for (int32 CornerIndex = 0; CornerIndex < 8; ++CornerIndex)
         {
@@ -181,22 +233,32 @@ namespace CubusDensityMesher
 
             AddWeightedMaterial(
                 Accumulated,
+                AccumulatedCount,
                 Sample.MaterialId,
                 WeightX * WeightY * WeightZ
             );
         }
 
-        if (Accumulated.IsEmpty())
+        if (AccumulatedCount <= 0)
         {
             return Blend;
         }
 
-        SortWeightedMaterials(Accumulated);
+        SortWeightedMaterials(
+            Accumulated,
+            AccumulatedCount
+        );
 
         float TotalWeight = 0.0f;
+
         // Keep blends stable and readable by limiting each vertex to the
         // two strongest terrain materials.
-        const int32 BlendCount = FMath::Min(Accumulated.Num(), 2);
+        const int32 BlendCount =
+            FMath::Min(
+                AccumulatedCount,
+                2
+            );
+
         for (int32 Slot = 0; Slot < BlendCount; ++Slot)
         {
             Blend.MaterialIds[Slot] = Accumulated[Slot].MaterialId;
@@ -228,49 +290,136 @@ namespace CubusDensityMesher
         const FInterpolatedVertex (&Vertices)[3]
     )
     {
-        TArray<int32> UniqueMaterialIds;
-        UniqueMaterialIds.Reserve(12);
+        int32 UniqueMaterialIds[12] = {};
+        int32 UniqueMaterialCount = 0;
 
-        for (const FInterpolatedVertex& Vertex : Vertices)
+        for (
+            const FInterpolatedVertex& Vertex
+            : Vertices
+        )
         {
             for (int32 Slot = 0; Slot < 4; ++Slot)
             {
-                if (Vertex.MaterialBlend.Weights[Slot] <= UE_SMALL_NUMBER)
+                if (
+                    Vertex.MaterialBlend.Weights[Slot] <=
+                    UE_SMALL_NUMBER
+                )
                 {
                     continue;
                 }
 
-                const int32 MaterialId = ClampDensityMaterialId(
-                    Vertex.MaterialBlend.MaterialIds[Slot]
-                );
-                UniqueMaterialIds.AddUnique(MaterialId);
+                const int32 MaterialId =
+                    ClampDensityMaterialId(
+                        Vertex.MaterialBlend
+                            .MaterialIds[Slot]
+                    );
+
+                bool bAlreadyPresent = false;
+
+                for (
+                    int32 ExistingIndex = 0;
+                    ExistingIndex <
+                        UniqueMaterialCount;
+                    ++ExistingIndex
+                )
+                {
+                    if (
+                        UniqueMaterialIds[
+                            ExistingIndex
+                        ] == MaterialId
+                    )
+                    {
+                        bAlreadyPresent = true;
+                        break;
+                    }
+                }
+
+                if (
+                    !bAlreadyPresent &&
+                    UniqueMaterialCount < 12
+                )
+                {
+                    UniqueMaterialIds[
+                        UniqueMaterialCount
+                    ] = MaterialId;
+
+                    ++UniqueMaterialCount;
+                }
             }
         }
 
-        UniqueMaterialIds.Sort();
+        for (
+            int32 Index = 1;
+            Index < UniqueMaterialCount;
+            ++Index
+        )
+        {
+            const int32 Value =
+                UniqueMaterialIds[Index];
+
+            int32 InsertIndex = Index;
+
+            while (
+                InsertIndex > 0 &&
+                UniqueMaterialIds[
+                    InsertIndex - 1
+                ] > Value
+            )
+            {
+                UniqueMaterialIds[
+                    InsertIndex
+                ] =
+                    UniqueMaterialIds[
+                        InsertIndex - 1
+                    ];
+
+                --InsertIndex;
+            }
+
+            UniqueMaterialIds[
+                InsertIndex
+            ] = Value;
+        }
 
         FTriangleMaterialPalette Palette;
-        Palette.Count = FMath::Clamp(UniqueMaterialIds.Num(), 1, 4);
 
-        if (UniqueMaterialIds.IsEmpty())
+        if (UniqueMaterialCount <= 0)
         {
-            Palette.MaterialIds[0] = ClampDensityMaterialId(
-                Vertices[0].MaterialId
-            );
+            Palette.MaterialIds[0] =
+                ClampDensityMaterialId(
+                    Vertices[0].MaterialId
+                );
+
             Palette.Count = 1;
         }
         else
         {
-            for (int32 Slot = 0; Slot < Palette.Count; ++Slot)
+            Palette.Count =
+                FMath::Clamp(
+                    UniqueMaterialCount,
+                    1,
+                    4
+                );
+
+            for (
+                int32 Slot = 0;
+                Slot < Palette.Count;
+                ++Slot
+            )
             {
                 Palette.MaterialIds[Slot] =
                     UniqueMaterialIds[Slot];
             }
         }
 
-        for (int32 Slot = Palette.Count; Slot < 4; ++Slot)
+        for (
+            int32 Slot = Palette.Count;
+            Slot < 4;
+            ++Slot
+        )
         {
-            Palette.MaterialIds[Slot] = Palette.MaterialIds[0];
+            Palette.MaterialIds[Slot] =
+                Palette.MaterialIds[0];
         }
 
         return Palette;
@@ -460,14 +609,19 @@ namespace CubusDensityMesher
                 FineCoordinate.Z == 0 ||
                 FineCoordinate.Z == FineChunkSize;
 
-            Samples.Add(
-                FineCoordinate,
-                bOnChunkBoundary
-                    ? SampleCanonicalBoundary(GlobalCoordinate)
-                    : DensityField.SampleContinuous(GlobalCoordinate)
-            );
+            FCubusDensitySample& AddedSample =
+                Samples.Add(
+                    FineCoordinate,
+                    bOnChunkBoundary
+                        ? SampleCanonicalBoundary(
+                            GlobalCoordinate
+                        )
+                        : DensityField.SampleContinuous(
+                            GlobalCoordinate
+                        )
+                );
 
-            return Samples.FindChecked(FineCoordinate);
+            return AddedSample;
         }
 
         FVector GetGradient(const FIntVector& FineCoordinate)
@@ -502,15 +656,16 @@ namespace CubusDensityMesher
                 PositiveZ - NegativeZ
             );
 
-            Gradients.Add(
-                FineCoordinate,
-                Gradient / FMath::Max(
-                    2.0f * SampleSpacing,
-                    UE_SMALL_NUMBER
-                )
-            );
+            FVector& AddedGradient =
+                Gradients.Add(
+                    FineCoordinate,
+                    Gradient / FMath::Max(
+                        2.0f * SampleSpacing,
+                        UE_SMALL_NUMBER
+                    )
+                );
 
-            return Gradients.FindChecked(FineCoordinate);
+            return AddedGradient;
         }
 
         FVector GetGlobalCoordinate(
@@ -903,6 +1058,12 @@ void FCubusDensityMesher::BuildChunk(
                     continue;
                 }
 
+                const FVector GlobalCellOrigin =
+                    ToVector(
+                        GlobalChunkOrigin +
+                        CellOrigin
+                    );
+
                 FInterpolatedVertex EdgeVertices[12];
                 bool bEdgeVertexBuilt[12] = {};
 
@@ -951,14 +1112,29 @@ void FCubusDensityMesher::BuildChunk(
                             const int32 CornerIndexB =
                                 EdgeCornerIndices[EdgeIndex][1];
 
-                            EdgeVertices[EdgeIndex] = InterpolateEdge(
-                                DensityBuffer,
-                                CornerCoordinates[CornerIndexA],
-                                CornerCoordinates[CornerIndexB],
-                                ChunkMinimum,
-                                VoxelSize,
-                                IsoLevel
-                            );
+                            EdgeVertices[EdgeIndex] =
+                                InterpolateEdge(
+                                    DensityBuffer,
+                                    CornerCoordinates[CornerIndexA],
+                                    CornerCoordinates[CornerIndexB],
+                                    ChunkMinimum,
+                                    VoxelSize,
+                                    IsoLevel
+                                );
+
+                            EdgeVertices[EdgeIndex]
+                                .MaterialBlend =
+                                    BuildCellMaterialBlend(
+                                        CornerSamples,
+                                        EdgeVertices[EdgeIndex]
+                                            .GlobalSamplePosition,
+                                        GlobalCellOrigin,
+                                        1.0f,
+                                        IsoLevel,
+                                        EdgeVertices[EdgeIndex]
+                                            .MaterialId
+                                    );
+
                             bEdgeVertexBuilt[EdgeIndex] = true;
                         }
 
@@ -969,21 +1145,6 @@ void FCubusDensityMesher::BuildChunk(
                     if (!bTriangleIsValid)
                     {
                         continue;
-                    }
-
-                    const FVector GlobalCellOrigin = ToVector(
-                        GlobalChunkOrigin + CellOrigin
-                    );
-                    for (FInterpolatedVertex& Vertex : TriangleVertices)
-                    {
-                        Vertex.MaterialBlend = BuildCellMaterialBlend(
-                            CornerSamples,
-                            Vertex.GlobalSamplePosition,
-                            GlobalCellOrigin,
-                            1.0f,
-                            IsoLevel,
-                            Vertex.MaterialId
-                        );
                     }
 
                     if (AddTriangle(
@@ -1098,6 +1259,11 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
                                 FineCoarseOrigin +
                                 FIntVector(SubX, SubY, SubZ);
 
+                            const FVector GlobalCellOrigin =
+                                SampleCache.GetGlobalCoordinate(
+                                    FineCellOrigin
+                                );
+
                             FCubusDensitySample CornerSamples[8];
                             FIntVector CornerCoordinates[8];
                             int32 CaseIndex = 0;
@@ -1184,6 +1350,21 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
                                                 CanonicalVoxelSize,
                                                 IsoLevel
                                             );
+
+                                        EdgeVertices[EdgeIndex]
+                                            .MaterialBlend =
+                                                BuildCellMaterialBlend(
+                                                    CornerSamples,
+                                                    EdgeVertices[EdgeIndex]
+                                                        .GlobalSamplePosition,
+                                                    GlobalCellOrigin,
+                                                    SampleCache
+                                                        .GetSampleSpacing(),
+                                                    IsoLevel,
+                                                    EdgeVertices[EdgeIndex]
+                                                        .MaterialId
+                                                );
+
                                         bEdgeVertexBuilt[EdgeIndex] = true;
                                     }
 
@@ -1194,23 +1375,6 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
                                 if (!bTriangleIsValid)
                                 {
                                     continue;
-                                }
-
-                                const FVector GlobalCellOrigin =
-                                    SampleCache.GetGlobalCoordinate(
-                                        FineCellOrigin
-                                    );
-                                for (FInterpolatedVertex& Vertex : TriangleVertices)
-                                {
-                                    Vertex.MaterialBlend =
-                                        BuildCellMaterialBlend(
-                                            CornerSamples,
-                                            Vertex.GlobalSamplePosition,
-                                            GlobalCellOrigin,
-                                            SampleCache.GetSampleSpacing(),
-                                            IsoLevel,
-                                            Vertex.MaterialId
-                                        );
                                 }
 
                                 if (AddTriangle(

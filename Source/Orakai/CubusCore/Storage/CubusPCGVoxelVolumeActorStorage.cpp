@@ -16,6 +16,19 @@ void ACubusPCGVoxelVolumeActor::GenerateTerrainData()
 
     const FIntVector Coordinate = GetChunkCoordinate();
 
+    if (
+        GetEffectiveRenderMode() ==
+        ECubusVoxelRenderMode::Density
+    )
+    {
+        SetTerrainRayTracingEnabled(false);
+
+        Super::GenerateTerrainData();
+        RegenerateVegetationData();
+
+        return;
+    }
+
     UE_LOG(
         LogTemp,
         Display,
@@ -37,7 +50,6 @@ void ACubusPCGVoxelVolumeActor::GenerateTerrainData()
         // Vegetation is deterministic derived data and is deliberately not
         // serialized in the voxel cache.
         RegenerateVegetationData();
-        RegenerateVegetationPCG();
 
         UE_LOG(
             LogTemp,
@@ -51,7 +63,7 @@ void ACubusPCGVoxelVolumeActor::GenerateTerrainData()
     }
 
     Super::GenerateTerrainData();
-    RegenerateVegetationPCG();
+    RegenerateVegetationData();
 
     if (SaveCachedChunk())
     {

@@ -13,6 +13,7 @@ class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
 class UProceduralMeshComponent;
 struct FCubusBlockChunkNeighborhood;
+struct FCubusTerrainDensitySettings;
 
 UCLASS(
     BlueprintType,
@@ -369,6 +370,8 @@ private:
         bool bGenerateBlockCollision,
         int32& InOutMeshSectionIndex
     );
+
+    FCubusTerrainDensitySettings BuildDensitySettings() const;
 
     void RebuildDensityMesh(
         bool bGenerateDensityCollision,

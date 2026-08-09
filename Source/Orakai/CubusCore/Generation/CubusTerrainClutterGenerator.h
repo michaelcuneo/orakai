@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 class FCubusBlockChunkData;
+class FCubusTerrainDensityField;
 class UCubusMaterialRegistry;
 
 /**
@@ -14,15 +15,11 @@ class ORAKAI_API FCubusTerrainClutterGenerator
 {
 public:
     static void Append(
-        FCubusBlockChunkData& Chunk,
-        const UCubusMaterialRegistry* MaterialRegistry,
-        float VoxelSize
-    );
-
-private:
-    static int32 FindSurfaceLocalZ(
-        const FCubusBlockChunkData& Chunk,
-        int32 LocalX,
-        int32 LocalY
+    FCubusBlockChunkData& Chunk,
+    const UCubusMaterialRegistry* MaterialRegistry,
+    float VoxelSize,
+    const FCubusTerrainDensityField* DensityField = nullptr,
+    bool bGenerateWater = false,
+    int32 WaterLevel = 0
     );
 };

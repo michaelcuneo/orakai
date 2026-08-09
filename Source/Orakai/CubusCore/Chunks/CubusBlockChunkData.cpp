@@ -294,18 +294,46 @@ bool FCubusBlockChunkData::RemoveVegetationAtWorldVoxel(
     const FIntVector& WorldVoxel
 )
 {
-    return VegetationInstances.RemoveAll(
-        [&WorldVoxel](const FCubusVegetationInstance& Instance)
-        {
-            return Instance.WorldVoxel == WorldVoxel;
-        }
-    ) > 0;
+    const int32 RemovedCount =
+        VegetationInstances.RemoveAll(
+            [&WorldVoxel](
+                const FCubusVegetationInstance& Instance
+            )
+            {
+                return Instance.WorldVoxel == WorldVoxel;
+            }
+        );
+
+    if (RemovedCount <= 0)
+    {
+        return false;
+    }
+
+    ++VegetationRevision;
+
+    return true;
 }
 
 void FCubusBlockChunkData::AddOrReplaceVegetationInstance(
     const FCubusVegetationInstance& Instance
 )
 {
-    RemoveVegetationAtWorldVoxel(Instance.WorldVoxel);
+    for (
+        FCubusVegetationInstance& ExistingInstance
+        : VegetationInstances
+    )
+    {
+        if (
+            ExistingInstance.WorldVoxel ==
+            Instance.WorldVoxel
+        )
+        {
+            ExistingInstance = Instance;
+            ++VegetationRevision;
+            return;
+        }
+    }
+
     VegetationInstances.Add(Instance);
+    ++VegetationRevision;
 }

@@ -4,6 +4,7 @@
 
 class FCubusBlockChunkData;
 class UCubusGeologyProfile;
+class FCubusTerrainDensityField;
 
 /**
  * Generates deterministic vegetation placement data without rendering meshes.
@@ -13,16 +14,13 @@ class ORAKAI_API FCubusBlockVegetationGenerator
 public:
     static void Generate(
         FCubusBlockChunkData& Chunk,
-        const UCubusGeologyProfile* GeologyProfile
+        const UCubusGeologyProfile* GeologyProfile,
+        const FCubusTerrainDensityField* DensityField = nullptr,
+        bool bGenerateWater = false,
+        int32 WaterLevel = 0
     );
 
 private:
-    static int32 FindSurfaceLocalZ(
-        const FCubusBlockChunkData& Chunk,
-        int32 LocalX,
-        int32 LocalY
-    );
-
     static bool IsSpacedTreeCandidate(
         int32 WorldX,
         int32 WorldY,

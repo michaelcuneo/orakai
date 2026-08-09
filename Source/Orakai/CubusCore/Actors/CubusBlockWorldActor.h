@@ -15,7 +15,6 @@ class APawn;
 class USceneComponent;
 class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
-class UPCGGraphInterface;
 class FCubusBlockChunkData;
 
 UCLASS(
@@ -325,9 +324,10 @@ protected:
     float CurrentMaterialWetness = 0.0f;
 
 private:
-    UPCGGraphInterface* VegetationPCGGraph = nullptr;
-    bool bGenerateVegetationPCG = false;
-    TMap<FIntVector, TWeakObjectPtr<ACubusVoxelVolumeActor>> ChunksByCoordinate;
+    TMap<
+        FIntVector,
+        TWeakObjectPtr<ACubusVoxelVolumeActor>
+    > ChunksByCoordinate;
 
     UPROPERTY(Transient)
     TArray<TObjectPtr<ACubusVoxelVolumeActor>> GeneratedChunks;
@@ -337,7 +337,13 @@ private:
     TSet<FIntVector> DirtyChunkCoordinates;
     TSet<FIntVector> RequiredChunkCoordinates;
     TSet<FIntVector> InitialRequiredCoordinates;
+
     FCubusDensityEditMap DensityEdits;
+
+    TMap<
+        FIntVector,
+        FCubusDensityEditMap
+    > DensityEditsByChunk;
 
     TWeakObjectPtr<APawn> TrackedPawn;
     TWeakObjectPtr<ACubusWorldVegetationActor> WorldVegetationActor;
@@ -357,7 +363,14 @@ private:
     void RemoveInvalidChunks();
     void RebuildChunkAtCoordinate(const FIntVector& ChunkCoordinate);
     void PublishWorldConfig();
+
     void RestoreDensityEdits();
+
+    void RebuildDensityEditIndex();
+
+    void ReindexDensityEditSample(
+        const FIntVector& WorldSample
+    );
     void ApplyPersistedEditsToChunk(ACubusVoxelVolumeActor& ChunkActor);
     void RecordTrackedPawnCoordinate();
     ACubusVoxelVolumeActor* SpawnChunkAtCoordinate(const FIntVector& Coordinate, bool bGenerateVegetation);
@@ -367,7 +380,7 @@ private:
     void BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius, TSet<FIntVector>& OutCoordinates) const;
     FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;
     int32 ResolveDensitySubdivisions(const FIntVector& ChunkCoordinate) const;
-    void UpdateDensityLods(const FIntVector& CentreCoordinate);
+    void UpdateDensityLods();
     void HoldPawnForInitialStreaming();
     void TryReleasePawnToTerrain();
     void EnsureWorldVegetationActor();

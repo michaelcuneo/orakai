@@ -8,10 +8,14 @@
 #include "CubusCore/Generation/CubusBiomeField.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Generation/CubusLandmarkField.h"
+#include "CubusCore/Generation/CubusTerrainDensityField.h"
 
 void FCubusBlockVegetationGenerator::Generate(
     FCubusBlockChunkData& Chunk,
-    const UCubusGeologyProfile* GeologyProfile
+    const UCubusGeologyProfile* GeologyProfile,
+    const FCubusTerrainDensityField* DensityField,
+    const bool bGenerateWater,
+    const int32 WaterLevel
 )
 {
     TArray<FCubusVegetationInstance> Instances;
@@ -25,6 +29,59 @@ void FCubusBlockVegetationGenerator::Generate(
     const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
     const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
     const int32 VegetationSeed = Chunk.GetGenerationSeeds().Vegetation;
+
+    const int32 DebugWorldX =
+        BaseX + Cubus::ChunkSize / 2;
+
+    const int32 DebugWorldY =
+        BaseY + Cubus::ChunkSize / 2;
+
+    if (DensityField != nullptr)
+    {
+        const float DebugSurfaceWorldZ =
+            DensityField->SampleSurfaceVoxelHeight(
+                static_cast<float>(DebugWorldX),
+                static_cast<float>(DebugWorldY)
+            );
+
+        const int32 DebugRoundedSurfaceWorldZ =
+            FMath::RoundToInt(DebugSurfaceWorldZ);
+
+        const int32 DebugSurfaceLocalZ =
+            DebugRoundedSurfaceWorldZ - BaseZ;
+
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT(
+                "Cubus vegetation surface debug chunk=(%d,%d,%d) "
+                "density=yes baseZ=%d surface=%.3f rounded=%d local=%d"
+            ),
+            ChunkCoordinate.X,
+            ChunkCoordinate.Y,
+            ChunkCoordinate.Z,
+            BaseZ,
+            DebugSurfaceWorldZ,
+            DebugRoundedSurfaceWorldZ,
+            DebugSurfaceLocalZ
+        );
+    }
+    else
+    {
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT(
+                "Cubus vegetation surface debug chunk=(%d,%d,%d) "
+                "density=NO baseZ=%d"
+            ),
+            ChunkCoordinate.X,
+            ChunkCoordinate.Y,
+            ChunkCoordinate.Z,
+            BaseZ
+        );
+    }
+
     const FCubusBiomeFieldSettings BiomeSettings =
         FCubusBiomeField::MakeSettings(
             GeologyProfile,
@@ -47,45 +104,189 @@ void FCubusBlockVegetationGenerator::Generate(
 
     int32 CountsByType[CubusVegetationType::Count] = {};
 
+    int32 SupportedSurfaceCount = 0;
+    int32 LandmarkRejectedCount = 0;
+    int32 NoTypeCount = 0;
+    int32 SlopeRejectedCount = 0;
+    int32 DensityRejectedCount = 0;
+
+    constexpr int32 SurfaceColumnCount =
+    Cubus::ChunkSize *
+    Cubus::ChunkSize;
+
+    TArray<int32> SurfaceLocalZByColumn;
+    SurfaceLocalZByColumn.SetNumUninitialized(
+        SurfaceColumnCount
+    );
+
+    TArray<uint8> SurfaceSupportsVegetation;
+    SurfaceSupportsVegetation.SetNumZeroed(
+        SurfaceColumnCount
+    );
+
+    const auto SurfaceIndex =
+        [](const int32 LocalX, const int32 LocalY)
+        {
+            return
+                LocalY * Cubus::ChunkSize +
+                LocalX;
+        };
+
+    for (
+        int32 LocalY = 0;
+        LocalY < Cubus::ChunkSize;
+        ++LocalY
+    )
+    {
+        for (
+            int32 LocalX = 0;
+            LocalX < Cubus::ChunkSize;
+            ++LocalX
+        )
+        {
+            const int32 ColumnIndex =
+                SurfaceIndex(
+                    LocalX,
+                    LocalY
+                );
+
+            if (DensityField != nullptr)
+            {
+                const int32 WorldX =
+                    BaseX + LocalX;
+
+                const int32 WorldY =
+                    BaseY + LocalY;
+
+                const int32 SurfaceWorldZ =
+                    FMath::RoundToInt(
+                        DensityField
+                            ->SampleSurfaceVoxelHeight(
+                                static_cast<float>(
+                                    WorldX
+                                ),
+                                static_cast<float>(
+                                    WorldY
+                                )
+                            )
+                    );
+
+                const int32 SurfaceLocalZ =
+                    SurfaceWorldZ - BaseZ;
+
+                SurfaceLocalZByColumn[
+                    ColumnIndex
+                ] = SurfaceLocalZ;
+
+                const bool bInsideChunk =
+                    SurfaceLocalZ >= 0 &&
+                    SurfaceLocalZ <
+                        Cubus::ChunkSize - 1;
+
+                SurfaceSupportsVegetation[
+                    ColumnIndex
+                ] =
+                    bInsideChunk
+                        ? 1
+                        : 0;
+
+                continue;
+            }
+
+            int32 SurfaceLocalZ =
+                INDEX_NONE;
+
+            for (
+                int32 LocalZ =
+                    Cubus::ChunkSize - 1;
+                LocalZ >= 0;
+                --LocalZ
+            )
+            {
+                const FCubusBlockVoxel* Voxel =
+                    Chunk.GetVoxel(
+                        LocalX,
+                        LocalY,
+                        LocalZ
+                    );
+
+                if (
+                    Voxel == nullptr ||
+                    Voxel->MaterialId <= 0 ||
+                    Voxel->IsWater()
+                )
+                {
+                    continue;
+                }
+
+                SurfaceLocalZ = LocalZ;
+                break;
+            }
+
+            SurfaceLocalZByColumn[
+                ColumnIndex
+            ] = SurfaceLocalZ;
+
+            if (
+                SurfaceLocalZ == INDEX_NONE ||
+                SurfaceLocalZ >=
+                    Cubus::ChunkSize - 1
+            )
+            {
+                continue;
+            }
+
+            ++SupportedSurfaceCount;
+
+            const FCubusBlockVoxel* SurfaceVoxel =
+                Chunk.GetVoxel(
+                    LocalX,
+                    LocalY,
+                    SurfaceLocalZ
+                );
+
+            const FCubusBlockVoxel* AboveVoxel =
+                Chunk.GetVoxel(
+                    LocalX,
+                    LocalY,
+                    SurfaceLocalZ + 1
+                );
+
+            SurfaceSupportsVegetation[
+                ColumnIndex
+            ] =
+                SurfaceVoxel != nullptr &&
+                !SurfaceVoxel->IsWater() &&
+                AboveVoxel != nullptr &&
+                AboveVoxel->MaterialId <= 0 &&
+                !AboveVoxel->IsWater()
+                    ? 1
+                    : 0;
+        }
+    }
+
     for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
     {
         for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
         {
-            const int32 SurfaceLocalZ = FindSurfaceLocalZ(
-                Chunk,
-                LocalX,
-                LocalY
-            );
+            const int32 SurfaceLocalZ = SurfaceLocalZByColumn[
+                SurfaceIndex(LocalX, LocalY)
+            ];
 
             if (
                 SurfaceLocalZ == INDEX_NONE ||
-                SurfaceLocalZ >= Cubus::ChunkSize - 1
+                !SurfaceSupportsVegetation[
+                    SurfaceIndex(
+                        LocalX,
+                        LocalY
+                    )
+                ]
             )
             {
                 continue;
             }
 
-            const FCubusBlockVoxel* SurfaceVoxel = Chunk.GetVoxel(
-                LocalX,
-                LocalY,
-                SurfaceLocalZ
-            );
-            const FCubusBlockVoxel* AboveVoxel = Chunk.GetVoxel(
-                LocalX,
-                LocalY,
-                SurfaceLocalZ + 1
-            );
-
-            if (
-                SurfaceVoxel == nullptr ||
-                SurfaceVoxel->IsWater() ||
-                AboveVoxel == nullptr ||
-                AboveVoxel->MaterialId > 0 ||
-                AboveVoxel->IsWater()
-            )
-            {
-                continue;
-            }
+            ++SupportedSurfaceCount;
 
             const int32 WorldX = BaseX + LocalX;
             const int32 WorldY = BaseY + LocalY;
@@ -99,32 +300,65 @@ void FCubusBlockVegetationGenerator::Generate(
 
             if (LandmarkSample.IsInside())
             {
+                ++LandmarkRejectedCount;
                 continue;
             }
 
-            const int32 WestSurface = FindSurfaceLocalZ(
-                Chunk,
-                FMath::Max(0, LocalX - 1),
-                LocalY
-            );
+            const int32 WestX =
+                FMath::Max(
+                    0,
+                    LocalX - 1
+                );
 
-            const int32 EastSurface = FindSurfaceLocalZ(
-                Chunk,
-                FMath::Min(Cubus::ChunkSize - 1, LocalX + 1),
-                LocalY
-            );
+            const int32 EastX =
+                FMath::Min(
+                    Cubus::ChunkSize - 1,
+                    LocalX + 1
+                );
 
-            const int32 SouthSurface = FindSurfaceLocalZ(
-                Chunk,
-                LocalX,
-                FMath::Max(0, LocalY - 1)
-            );
+            const int32 SouthY =
+                FMath::Max(
+                    0,
+                    LocalY - 1
+                );
 
-            const int32 NorthSurface = FindSurfaceLocalZ(
-                Chunk,
-                LocalX,
-                FMath::Min(Cubus::ChunkSize - 1, LocalY + 1)
-            );
+            const int32 NorthY =
+                FMath::Min(
+                    Cubus::ChunkSize - 1,
+                    LocalY + 1
+                );
+
+            const int32 WestSurface =
+                SurfaceLocalZByColumn[
+                    SurfaceIndex(
+                        WestX,
+                        LocalY
+                    )
+                ];
+
+            const int32 EastSurface =
+                SurfaceLocalZByColumn[
+                    SurfaceIndex(
+                        EastX,
+                        LocalY
+                    )
+                ];
+
+            const int32 SouthSurface =
+                SurfaceLocalZByColumn[
+                    SurfaceIndex(
+                        LocalX,
+                        SouthY
+                    )
+                ];
+
+            const int32 NorthSurface =
+                SurfaceLocalZByColumn[
+                    SurfaceIndex(
+                        LocalX,
+                        NorthY
+                    )
+                ];
 
             const float GradientX =
                 WestSurface != INDEX_NONE && EastSurface != INDEX_NONE
@@ -285,6 +519,11 @@ void FCubusBlockVegetationGenerator::Generate(
                     : 0.012f;
             }
 
+            if (TypeId <= 0)
+            {
+                ++NoTypeCount;
+            }
+
             float MaximumAllowedSlopeDegrees = 89.0f;
 
             switch (TypeId)
@@ -329,6 +568,7 @@ void FCubusBlockVegetationGenerator::Generate(
                 MaximumAllowedSlopeDegrees
             )
             {
+                ++SlopeRejectedCount;
                 continue;
             }
 
@@ -337,6 +577,7 @@ void FCubusBlockVegetationGenerator::Generate(
                 ActivePlacementRoll > FMath::Clamp(Density, 0.0f, 1.0f)
             )
             {
+                ++DensityRejectedCount;
                 continue;
             }
 
@@ -360,11 +601,28 @@ void FCubusBlockVegetationGenerator::Generate(
         }
     }
 
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT(
+            "Cubus vegetation gates (%d,%d,%d): "
+            "surface=%d landmark=%d noType=%d slope=%d density=%d"
+        ),
+        ChunkCoordinate.X,
+        ChunkCoordinate.Y,
+        ChunkCoordinate.Z,
+        SupportedSurfaceCount,
+        LandmarkRejectedCount,
+        NoTypeCount,
+        SlopeRejectedCount,
+        DensityRejectedCount
+    );
+
     Chunk.SetVegetationInstances(MoveTemp(Instances));
 
     UE_LOG(
         LogTemp,
-        Verbose,
+        Display,
         TEXT("Cubus vegetation chunk (%d, %d, %d), seed %d: grass %d, shrubs %d, broadleaf %d, conifers %d, reeds %d, alpine %d%s"),
         ChunkCoordinate.X,
         ChunkCoordinate.Y,
@@ -378,23 +636,6 @@ void FCubusBlockVegetationGenerator::Generate(
         CountsByType[CubusVegetationType::Alpine],
         bUseConfiguredBiomes ? TEXT("") : TEXT(" (fallback)")
     );
-}
-
-int32 FCubusBlockVegetationGenerator::FindSurfaceLocalZ(
-    const FCubusBlockChunkData& Chunk,
-    const int32 LocalX,
-    const int32 LocalY
-)
-{
-    for (int32 LocalZ = Cubus::ChunkSize - 1; LocalZ >= 0; --LocalZ)
-    {
-        const FCubusBlockVoxel* Voxel = Chunk.GetVoxel(LocalX, LocalY, LocalZ);
-        if (Voxel != nullptr && Voxel->MaterialId > 0 && !Voxel->IsWater())
-        {
-            return LocalZ;
-        }
-    }
-    return INDEX_NONE;
 }
 
 bool FCubusBlockVegetationGenerator::IsSpacedTreeCandidate(

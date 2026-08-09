@@ -4,6 +4,7 @@
 #include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
 #include "CubusCore/Generation/CubusTerrainClutterGenerator.h"
 #include "CubusCore/Storage/CubusChunkStore.h"
+#include "CubusCore/Generation/CubusTerrainDensityField.h"
 
 #include "ProceduralMeshComponent.h"
 
@@ -23,6 +24,14 @@ namespace CubusVoxelVolumeActorStorage
 
 bool ACubusVoxelVolumeActor::TryLoadCachedChunk()
 {
+    if (
+        GetEffectiveRenderMode() ==
+        ECubusVoxelRenderMode::Density
+    )
+    {
+        return false;
+    }
+
     EnsureChunkData();
 
     if (!ChunkData.IsValid())
@@ -64,6 +73,14 @@ bool ACubusVoxelVolumeActor::TryLoadCachedChunk()
 
 bool ACubusVoxelVolumeActor::SaveCachedChunk() const
 {
+    if (
+        GetEffectiveRenderMode() ==
+        ECubusVoxelRenderMode::Density
+    )
+    {
+        return true;
+    }
+    
     if (!ChunkData.IsValid())
     {
         return false;
@@ -110,10 +127,45 @@ void ACubusVoxelVolumeActor::RegenerateVegetationData()
         return;
     }
 
+    if (
+        GetEffectiveRenderMode() ==
+        ECubusVoxelRenderMode::Density
+    )
+    {
+        const FCubusTerrainDensitySettings
+            DensitySettings =
+                BuildDensitySettings();
+
+        const FCubusTerrainDensityField
+            DensityField(
+                DensitySettings
+            );
+
+        FCubusBlockVegetationGenerator::Generate(
+            *ChunkData,
+            GeologyProfile,
+            &DensityField,
+            bGenerateWater,
+            TerrainWaterLevel
+        );
+
+        FCubusTerrainClutterGenerator::Append(
+            *ChunkData,
+            MaterialRegistry,
+            VoxelSize,
+            &DensityField,
+            bGenerateWater,
+            TerrainWaterLevel
+        );
+
+        return;
+    }
+
     FCubusBlockVegetationGenerator::Generate(
         *ChunkData,
         GeologyProfile
     );
+
     FCubusTerrainClutterGenerator::Append(
         *ChunkData,
         MaterialRegistry,
