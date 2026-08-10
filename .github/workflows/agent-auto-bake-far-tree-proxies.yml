@@ -1,0 +1,421 @@
+name: Auto bake far tree proxies
+
+on:
+  push:
+    branches:
+      - agent/density-meshing
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+
+      - name: Apply editor proxy baker
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def once(path, old, new, label):
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected 1 match, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          build = Path('Source/Orakai/Orakai.Build.cs')
+          once(
+              build,
+              '''\t\t\tPrivateDependencyModuleNames.AddRange(new string[] {\n\t\t\t\t"UnrealEd",\n\t\t\t\t"AssetTools",\n\t\t\t\t"MaterialEditor"\n\t\t\t});''',
+              '''\t\t\tPrivateDependencyModuleNames.AddRange(new string[] {\n\t\t\t\t"UnrealEd",\n\t\t\t\t"AssetTools",\n\t\t\t\t"MaterialEditor",\n\t\t\t\t"MeshMergeUtilities"\n\t\t\t});''',
+              'editor build deps'
+          )
+
+          h = Path('Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.h')
+          once(
+              h,
+              '''    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation")\n    void ClearWorldVegetation();''',
+              '''    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation")\n    void ClearWorldVegetation();\n\n    /**\n     * Editor-only asset baker used by the runtime far-vegetation fallback.\n     * Skeletal growth stages are converted in their reference pose into\n     * deterministic whole-tree UStaticMesh assets under FarProxyPackageRoot.\n     * Existing generated assets are reused, so this is normally a one-time cost.\n     */\n    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation|Far Proxies")\n    void BakeFarVegetationProxies();''',
+              'bake button'
+          )
+
+          once(
+              h,
+              '''    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")\n    TArray<FCubusVegetationSpeciesCatalogEntry> SpeciesCatalog;''',
+              '''    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")\n    TArray<FCubusVegetationSpeciesCatalogEntry> SpeciesCatalog;\n\n    /** Automatically create/reuse static far proxies for skeletal growth stages in editor/PIE. */\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Proxies")\n    bool bAutoBakeMissingFarProxies = true;\n\n    /** Content root for deterministic generated far-tree static meshes. */\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Proxies")\n    FString FarProxyPackageRoot = TEXT("/Game/OrakaiGenerated/Vegetation/Far");''',
+              'proxy settings'
+          )
+
+          # Add private helper near the existing protected/private methods by inserting
+          # immediately before the first protected label's end is unnecessary; member can
+          # remain public because the reflected button is intentionally public. Add a
+          # non-reflected helper beside it.
+          once(
+              h,
+              '''    void BakeFarVegetationProxies();\n\n    /**\n     * Invalidates only the cached wind/weather targets''',
+              '''    void BakeFarVegetationProxies();\n\n    /** Internal implementation; editor code is compiled out of packaged targets. */\n    bool EnsureFarVegetationProxyAssets(bool bSaveGeneratedAssets);\n\n    /**\n     * Invalidates only the cached wind/weather targets''',
+              'proxy helper declaration'
+          )
+
+          cpp = Path('Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp')
+          text = cpp.read_text(encoding='utf-8')
+
+          include_anchor = '#include "UObject/SoftObjectPtr.h"\n'
+          editor_includes = '''#include "UObject/SoftObjectPtr.h"\n\n#if WITH_EDITOR\n#include "FileHelpers.h"\n#include "IMeshMergeUtilities.h"\n#include "MeshMergeModule.h"\n#include "Modules/ModuleManager.h"\n#include "Engine/MeshMerging.h"\n#include "UObject/Package.h"\n#endif\n'''
+          if text.count(include_anchor) != 1:
+              raise RuntimeError('editor include anchor mismatch')
+          text = text.replace(include_anchor, editor_includes, 1)
+
+          # Insert baker before RefreshFarVegetationBatches.
+          marker = '''void\nACubusWorldVegetationActor::RefreshFarVegetationBatches()\n{'''
+          if text.count(marker) != 1:
+              raise RuntimeError('far refresh marker mismatch')
+
+          baker = r'''bool ACubusWorldVegetationActor::EnsureFarVegetationProxyAssets(
+    const bool bSaveGeneratedAssets
+)
+{
+#if WITH_EDITOR
+    if (!bAutoBakeMissingFarProxies && !bSaveGeneratedAssets)
+    {
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+
+    if (!IsValid(World))
+    {
+        return false;
+    }
+
+    const FString SafeRoot =
+        FarProxyPackageRoot.IsEmpty()
+            ? TEXT("/Game/OrakaiGenerated/Vegetation/Far")
+            : FarProxyPackageRoot;
+
+    IMeshMergeModule& MeshMergeModule =
+        FModuleManager::LoadModuleChecked<IMeshMergeModule>(
+            TEXT("MeshMergeUtilities")
+        );
+
+    IMeshMergeUtilities& MeshMergeUtilities =
+        MeshMergeModule.GetUtilities();
+
+    TArray<UPackage*> PackagesToSave;
+    int32 ReusedProxyCount = 0;
+    int32 BakedProxyCount = 0;
+    int32 FailedProxyCount = 0;
+    bool bCatalogChanged = false;
+
+    for (
+        int32 SpeciesIndex = 0;
+        SpeciesIndex < SpeciesCatalog.Num();
+        ++SpeciesIndex
+    )
+    {
+        FCubusVegetationSpeciesCatalogEntry& Entry =
+            SpeciesCatalog[SpeciesIndex];
+
+        const int32 StageCount =
+            Entry.GrowthStageMeshes.Num();
+
+        if (StageCount <= 0)
+        {
+            continue;
+        }
+
+        if (Entry.StaticGrowthStageAssets.Num() != StageCount)
+        {
+            Entry.StaticGrowthStageAssets.SetNum(StageCount);
+            bCatalogChanged = true;
+        }
+
+        FString SpeciesToken = Entry.SpeciesId.IsNone()
+            ? FString::Printf(TEXT("Species_%d"), SpeciesIndex)
+            : Entry.SpeciesId.ToString();
+
+        SpeciesToken.ReplaceInline(TEXT(" "), TEXT("_"));
+        SpeciesToken.ReplaceInline(TEXT("/"), TEXT("_"));
+        SpeciesToken.ReplaceInline(TEXT("\\"), TEXT("_"));
+        SpeciesToken.ReplaceInline(TEXT("."), TEXT("_"));
+
+        for (
+            int32 StageIndex = 0;
+            StageIndex < StageCount;
+            ++StageIndex
+        )
+        {
+            const TSoftObjectPtr<UObject>& SourceReference =
+                Entry.GrowthStageMeshes[StageIndex];
+
+            if (SourceReference.IsNull())
+            {
+                continue;
+            }
+
+            UObject* SourceAsset =
+                SourceReference.LoadSynchronous();
+
+            if (!IsValid(SourceAsset))
+            {
+                ++FailedProxyCount;
+                continue;
+            }
+
+            // A static authored stage already is its own optimal far proxy.
+            if (UStaticMesh* SourceStaticMesh = Cast<UStaticMesh>(SourceAsset))
+            {
+                if (
+                    Entry.StaticGrowthStageAssets[StageIndex].Get() !=
+                    SourceStaticMesh
+                )
+                {
+                    Entry.StaticGrowthStageAssets[StageIndex] =
+                        TSoftObjectPtr<UObject>(SourceStaticMesh);
+                    bCatalogChanged = true;
+                }
+
+                continue;
+            }
+
+            USkeletalMesh* SourceSkeletalMesh =
+                Cast<USkeletalMesh>(SourceAsset);
+
+            if (!IsValid(SourceSkeletalMesh))
+            {
+                ++FailedProxyCount;
+                continue;
+            }
+
+            const FString AssetName =
+                FString::Printf(
+                    TEXT("%s_Stage_%d_FarProxy"),
+                    *SpeciesToken,
+                    StageIndex
+                );
+
+            const FString PackageName =
+                SafeRoot / AssetName;
+
+            const FString ObjectPath =
+                PackageName +
+                TEXT(".") +
+                AssetName;
+
+            UStaticMesh* GeneratedMesh =
+                LoadObject<UStaticMesh>(
+                    nullptr,
+                    *ObjectPath
+                );
+
+            if (!IsValid(GeneratedMesh))
+            {
+                USkeletalMeshComponent* PreviewComponent =
+                    NewObject<USkeletalMeshComponent>(
+                        this,
+                        NAME_None,
+                        RF_Transient
+                    );
+
+                if (!IsValid(PreviewComponent))
+                {
+                    ++FailedProxyCount;
+                    continue;
+                }
+
+                PreviewComponent->SetSkinnedAssetAndUpdate(
+                    SourceSkeletalMesh
+                );
+                PreviewComponent->SetWorldTransform(
+                    FTransform::Identity
+                );
+                PreviewComponent->RegisterComponent();
+                PreviewComponent->RefreshBoneTransforms();
+                PreviewComponent->UpdateComponentToWorld();
+
+                TArray<UPrimitiveComponent*> ComponentsToMerge;
+                ComponentsToMerge.Add(PreviewComponent);
+
+                FMeshMergingSettings MergeSettings;
+                TArray<UObject*> GeneratedAssets;
+                FVector MergedActorLocation = FVector::ZeroVector;
+
+                MeshMergeUtilities.MergeComponentsToStaticMesh(
+                    ComponentsToMerge,
+                    World,
+                    MergeSettings,
+                    nullptr,
+                    nullptr,
+                    PackageName,
+                    GeneratedAssets,
+                    MergedActorLocation,
+                    1.0f,
+                    true
+                );
+
+                PreviewComponent->DestroyComponent();
+
+                for (UObject* GeneratedAsset : GeneratedAssets)
+                {
+                    if (UStaticMesh* Candidate = Cast<UStaticMesh>(GeneratedAsset))
+                    {
+                        GeneratedMesh = Candidate;
+                        break;
+                    }
+                }
+
+                if (IsValid(GeneratedMesh))
+                {
+                    GeneratedMesh->MarkPackageDirty();
+                    PackagesToSave.AddUnique(
+                        GeneratedMesh->GetPackage()
+                    );
+                    ++BakedProxyCount;
+                }
+            }
+            else
+            {
+                ++ReusedProxyCount;
+            }
+
+            if (!IsValid(GeneratedMesh))
+            {
+                ++FailedProxyCount;
+
+                UE_LOG(
+                    LogTemp,
+                    Error,
+                    TEXT(
+                        "Cubus far proxy bake failed: species=%s stage=%d source=%s"
+                    ),
+                    *SpeciesToken,
+                    StageIndex,
+                    *SourceSkeletalMesh->GetName()
+                );
+
+                continue;
+            }
+
+            // Skeletal stages always resolve to our deterministic generated
+            // whole-mesh proxy. This intentionally replaces any legacy fallback
+            // that happened to reference a Megaplant constituent such as a flower,
+            // bark or branch mesh rather than the complete tree.
+            const TSoftObjectPtr<UObject> GeneratedReference(
+                GeneratedMesh
+            );
+
+            if (
+                Entry.StaticGrowthStageAssets[StageIndex]
+                    .ToSoftObjectPath() !=
+                GeneratedReference.ToSoftObjectPath()
+            )
+            {
+                Entry.StaticGrowthStageAssets[StageIndex] =
+                    GeneratedReference;
+                bCatalogChanged = true;
+            }
+        }
+    }
+
+    if (bCatalogChanged)
+    {
+        Modify();
+        MarkPackageDirty();
+    }
+
+    if (
+        bSaveGeneratedAssets &&
+        !PackagesToSave.IsEmpty()
+    )
+    {
+        UEditorLoadingAndSavingUtils::SavePackages(
+            PackagesToSave,
+            true
+        );
+    }
+
+    if (
+        BakedProxyCount > 0 ||
+        ReusedProxyCount > 0 ||
+        FailedProxyCount > 0
+    )
+    {
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT(
+                "Cubus far proxy assets: baked=%d reused=%d failed=%d root=%s"
+            ),
+            BakedProxyCount,
+            ReusedProxyCount,
+            FailedProxyCount,
+            *SafeRoot
+        );
+    }
+
+    return bCatalogChanged || BakedProxyCount > 0;
+#else
+    return false;
+#endif
+}
+
+void ACubusWorldVegetationActor::BakeFarVegetationProxies()
+{
+#if WITH_EDITOR
+    const bool bChanged =
+        EnsureFarVegetationProxyAssets(true);
+
+    if (bChanged)
+    {
+        RefreshVegetationBatches();
+        RefreshFarVegetationBatches();
+    }
+#endif
+}
+
+'''
+          text = text.replace(marker, baker + marker, 1)
+
+          # Auto-resolve/bake before batches are created. Existing generated assets are
+          # simply loaded, so after the first bake this is cheap.
+          rebuild_anchor = '''void ACubusWorldVegetationActor::RebuildWorldVegetation()\n{\n    ResolveBlockWorld();'''
+          rebuild_replacement = '''void ACubusWorldVegetationActor::RebuildWorldVegetation()\n{\n    ResolveBlockWorld();\n\n#if WITH_EDITOR\n    if (bAutoBakeMissingFarProxies)\n    {\n        EnsureFarVegetationProxyAssets(true);\n    }\n#endif'''
+          if text.count(rebuild_anchor) != 1:
+              raise RuntimeError('rebuild anchor mismatch')
+          text = text.replace(rebuild_anchor, rebuild_replacement, 1)
+
+          # Remove the temporary visibility probe entirely. Keep the real HISM bounds
+          # repair added after AddInstances.
+          start = text.find('    // TEMPORARY FAR-VISIBILITY PROBE.')
+          if start != -1:
+              end_marker = '    bFarVegetationRenderDirty =\n        false;'
+              end = text.find(end_marker, start)
+              if end == -1:
+                  raise RuntimeError('visibility probe end marker missing')
+              text = text[:start] + text[end:]
+
+          cpp.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Validate and commit
+        shell: bash
+        run: |
+          git diff --check
+          grep -n 'MeshMergeUtilities' Source/Orakai/Orakai.Build.cs
+          grep -n 'BakeFarVegetationProxies' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.h
+          grep -n 'MergeComponentsToStaticMesh' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          grep -n 'OrakaiGenerated/Vegetation/Far' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.h
+          ! grep -q 'FAR VISIBILITY PROBE' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Source/Orakai/Orakai.Build.cs Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.h Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          git commit -m 'Bake skeletal vegetation far proxies automatically'
+          git push origin HEAD:agent/density-meshing
