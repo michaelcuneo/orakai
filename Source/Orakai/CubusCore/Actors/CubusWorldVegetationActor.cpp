@@ -1309,6 +1309,20 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
     for (const auto& Pair : RegisteredChunks)
     {
+        const ACubusVoxelVolumeActor* DistancePolicyChunk =
+            Pair.Value.Get();
+
+        if (IsValid(DistancePolicyChunk))
+        {
+            ApplyVegetationDistancePolicy(
+                DistancePolicyChunk->GetVoxelSize()
+            );
+            break;
+        }
+    }
+
+    for (const auto& Pair : RegisteredChunks)
+    {
         const ACubusVoxelVolumeActor* Chunk =
             Pair.Value.Get();
 
@@ -2628,6 +2642,14 @@ uint32 ACubusWorldVegetationActor::CalculateVegetationSettingsHash() const
     Hash = HashCombineFast(Hash, GetTypeHash(PruneMinWorldZ));
     Hash = HashCombineFast(Hash, GetTypeHash(PruneMaxWorldZ));
     Hash = HashCombineFast(Hash, GetTypeHash(MaximumRenderedPlants));
+    Hash = HashCombineFast(Hash, GetTypeHash(PlantStartCullDistance));
+    Hash = HashCombineFast(Hash, GetTypeHash(PlantEndCullDistance));
+    Hash = HashCombineFast(Hash, GetTypeHash(bCullByCameraChunkRadius));
+    Hash = HashCombineFast(Hash, GetTypeHash(CameraChunkHorizontalRadius));
+    Hash = HashCombineFast(Hash, GetTypeHash(CameraChunkVerticalRadius));
+    Hash = HashCombineFast(Hash, GetTypeHash(VegetationRecenterDistance));
+    Hash = HashCombineFast(Hash, GetTypeHash(FarVegetationInnerRadius));
+    Hash = HashCombineFast(Hash, GetTypeHash(FarVegetationEndCullDistance));
     Hash = HashCombineFast(Hash, GetTypeHash(bClusterTreeFamilies));
     Hash = HashCombineFast(Hash, GetTypeHash(TreeFamilyCellSizeVoxels));
     Hash = HashCombineFast(Hash, GetTypeHash(TreeFamilyCenterJitterFraction));
@@ -2835,6 +2857,161 @@ uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(
     return CalculateVegetationSignatureMapHash(
         CurrentChunkVegetationSignatures
     );
+}
+
+ACubusWorldVegetationActor::FCubusVegetationDistancePolicy
+ACubusWorldVegetationActor::ResolveVegetationDistancePolicy(
+    const float VoxelSize
+) const
+{
+    FCubusVegetationDistancePolicy Policy;
+
+    Policy.NearStartCullDistance =
+        FMath::Max(0, PlantStartCullDistance);
+
+    Policy.NearEndCullDistance =
+        FMath::Max(
+  Policy.NearStartCullDistance,
+  PlantEndCullDistance
+        );
+
+    Policy.FarInnerRadius =
+        FMath::Max(0.0f, FarVegetationInnerRadius);
+
+    if (!bCullByCameraChunkRadius)
+    {
+        Policy.NearResidentRadius =
+  static_cast<float>(Policy.NearEndCullDistance);
+        return Policy;
+    }
+
+    const float SafeVoxelSize =
+        FMath::Max(1.0f, VoxelSize);
+
+    const float ChunkWorldSize =
+        static_cast<float>(Cubus::ChunkSize) *
+        SafeVoxelSize;
+
+    /*
+     * Chunk culling is inclusive. Radius 8 therefore owns chunk centres out to
+     * 8 chunks, plus half a chunk of physical coverage at the edge.
+     */
+    Policy.NearResidentRadius =
+        (
+  static_cast<float>(
+      FMath::Max(0, CameraChunkHorizontalRadius)
+  ) +
+  0.5f
+        ) *
+        ChunkWorldSize;
+
+    /*
+     * Keep at least two ordinary chunks of overlap between the detailed and
+     * far representations. This prevents a residency/cull gap even when old
+     * Blueprint values still contain kilometre-scale near cull distances.
+     */
+    const float OverlapDistance =
+        FMath::Min(
+  Policy.NearResidentRadius,
+  FMath::Max(
+      ChunkWorldSize * 2.0f,
+      Policy.NearResidentRadius * 0.20f
+  )
+        );
+
+    const float LatestSafeFarStart =
+        FMath::Max(
+  0.0f,
+  Policy.NearResidentRadius -
+  OverlapDistance
+        );
+
+    Policy.FarInnerRadius =
+        FMath::Min(
+  Policy.FarInnerRadius,
+  LatestSafeFarStart
+        );
+
+    Policy.NearEndCullDistance =
+        FMath::Max(
+  1,
+  FMath::RoundToInt(
+      FMath::Min(
+          static_cast<float>(
+              Policy.NearEndCullDistance
+          ),
+          Policy.NearResidentRadius
+      )
+  )
+        );
+
+    Policy.NearStartCullDistance =
+        FMath::Clamp(
+  FMath::Min(
+      Policy.NearStartCullDistance,
+      FMath::RoundToInt(
+          Policy.FarInnerRadius
+      )
+  ),
+  0,
+  Policy.NearEndCullDistance
+        );
+
+    return Policy;
+}
+
+void ACubusWorldVegetationActor::ApplyVegetationDistancePolicy(
+    const float VoxelSize
+)
+{
+    const FCubusVegetationDistancePolicy Policy =
+        ResolveVegetationDistancePolicy(VoxelSize);
+
+    for (const auto& Pair : CatalogGrassBatchComponents)
+    {
+        if (IsValid(Pair.Value))
+        {
+  Pair.Value->SetCullDistances(
+      Policy.NearStartCullDistance,
+      Policy.NearEndCullDistance
+  );
+        }
+    }
+
+    for (const auto& Pair : CatalogStaticBatchComponents)
+    {
+        if (IsValid(Pair.Value))
+        {
+  Pair.Value->SetCullDistances(
+      Policy.NearStartCullDistance,
+      Policy.NearEndCullDistance
+  );
+        }
+    }
+
+    static bool bLoggedVegetationDistancePolicy = false;
+    if (!bLoggedVegetationDistancePolicy)
+    {
+        UE_LOG(
+  LogTemp,
+  Display,
+  TEXT(
+      "Cubus vegetation distance policy: nearResident=%.0fcm "
+      "nearCull=%d..%dcm farInner=%.0fcm farEnd=%.0fcm "
+      "chunkRadius=(%d,%d) recenter=%.0fcm"
+  ),
+  Policy.NearResidentRadius,
+  Policy.NearStartCullDistance,
+  Policy.NearEndCullDistance,
+  Policy.FarInnerRadius,
+  FarVegetationEndCullDistance,
+  CameraChunkHorizontalRadius,
+  CameraChunkVerticalRadius,
+  VegetationRecenterDistance
+        );
+
+        bLoggedVegetationDistancePolicy = true;
+    }
 }
 
 void ACubusWorldVegetationActor::RefreshVegetationBatches()
@@ -3473,13 +3650,15 @@ ACubusWorldVegetationActor::PublishFarVegetation(
         ) *
         0.5;
 
+    const FCubusVegetationDistancePolicy DistancePolicy =
+        ResolveVegetationDistancePolicy(
+            SafeVoxelSize
+        );
+
     const double InnerRadiusSquared =
         FMath::Square(
             static_cast<double>(
-                FMath::Max(
-                    0.0f,
-                    FarVegetationInnerRadius
-                )
+                DistancePolicy.FarInnerRadius
             )
         );
 
@@ -3487,7 +3666,7 @@ ACubusWorldVegetationActor::PublishFarVegetation(
         FMath::Square(
             static_cast<double>(
                 FMath::Max(
-                    FarVegetationInnerRadius,
+                    DistancePolicy.FarInnerRadius,
                     FarVegetationEndCullDistance
                 )
             )

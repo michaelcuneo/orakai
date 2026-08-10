@@ -188,10 +188,10 @@ protected:
     float TreeFamilyGrowthNoise = 0.08f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering", meta = (ClampMin = "0", Units = "cm"))
-    int32 PlantStartCullDistance = 30000;
+    int32 PlantStartCullDistance = 16000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering", meta = (ClampMin = "0", Units = "cm"))
-    int32 PlantEndCullDistance = 120000;
+    int32 PlantEndCullDistance = 22000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Runtime Scale", meta = (ClampMin = "0.01", UIMin = "0.25", UIMax = "2.0"))
     float GlobalPlantScaleMultiplier = 1.0f;
@@ -324,7 +324,7 @@ protected:
             Units = "cm"
         )
     )
-    float FarVegetationInnerRadius = 60000.0f;
+    float FarVegetationInnerRadius = 16000.0f;
 
     UPROPERTY(
         EditAnywhere,
@@ -566,6 +566,22 @@ private:
     FCubusVegetationCatalog VegetationCatalog;
     FCubusVegetationRenderer VegetationRenderer;
     FCubusVegetationPlacement VegetationPlacement;
+
+    struct FCubusVegetationDistancePolicy
+    {
+        int32 NearStartCullDistance = 0;
+        int32 NearEndCullDistance = 0;
+        float FarInnerRadius = 0.0f;
+        float NearResidentRadius = 0.0f;
+    };
+
+    FCubusVegetationDistancePolicy ResolveVegetationDistancePolicy(
+        float VoxelSize
+    ) const;
+
+    void ApplyVegetationDistancePolicy(
+        float VoxelSize
+    );
 
     void ResolveBlockWorld();
     void RefreshVegetationBatches();
