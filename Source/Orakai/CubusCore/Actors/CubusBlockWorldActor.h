@@ -210,8 +210,35 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", UIMax = "16"))
     int32 MaxAtomicDensityChunksStagedPerTick = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Density Editing",
+        meta = (
+            ClampMin = "1",
+            ClampMax = "16",
+            UIMax = "8"
+        )
+    )
     int32 MaxConcurrentDensityBuilds = 4;
+
+    /*
+    * Maximum number of completed density meshes uploaded into hidden staging
+    * components during one game-thread tick.
+    *
+    * Uploads remain invisible until the complete transaction is committed.
+    */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Density Editing",
+        meta = (
+            ClampMin = "1",
+            ClampMax = "16",
+            UIMax = "8"
+        )
+    )
+    int32 MaxAtomicDensityUploadsPerTick = 4;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0.05", Units = "s"))
     float StreamingUpdateInterval = 0.25f;
@@ -386,6 +413,25 @@ private:
         ActiveAtomicDensityAsyncBuilds;
 
     /*
+    * Worker-complete mesh data waiting for its bounded game-thread upload.
+    *
+    * These results contain no visible terrain state. They are uploaded only to
+    * each chunk's hidden staging procedural mesh.
+    */
+    struct FAtomicDensityPendingUpload
+    {
+        FIntVector ChunkCoordinate =
+            FIntVector::ZeroValue;
+
+        uint64 Revision = 0;
+
+        FCubusDensityMeshBuildResult BuildResult;
+    };
+
+    TArray<TUniquePtr<FAtomicDensityPendingUpload>>
+        ActiveAtomicDensityPendingUploads;
+
+    /*
     * Incremented whenever the authoritative density edit field changes.
     */
     uint64 DensityEditRevision = 0;
@@ -442,8 +488,10 @@ private:
     void DiscardActiveAtomicDensityBuilds();
     double ActiveAtomicDensityWorkerMilliseconds = 0.0;
     double ActiveAtomicDensityUploadMilliseconds = 0.0;
+    double ActiveAtomicDensityMaxUploadTickMilliseconds = 0.0;
 
     int32 ActiveAtomicDensityCompletedBuildCount = 0;
+    int32 ActiveAtomicDensityUploadTickCount = 0;
     void ProcessDirtyChunkQueue();
     void BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius, TSet<FIntVector>& OutCoordinates) const;
     FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;

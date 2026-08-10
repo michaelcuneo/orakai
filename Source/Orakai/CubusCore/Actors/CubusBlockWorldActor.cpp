@@ -2168,13 +2168,17 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
 
         ActiveAtomicDensityBatchCoordinates.Reset();
         ActiveAtomicDensityStagedChunks.Reset();
+        ActiveAtomicDensityPendingUploads.Reset();
 
         ActiveAtomicDensityBuildIndex = 0;
         ActiveAtomicDensityRevision = 0;
 
         ActiveAtomicDensityWorkerMilliseconds = 0.0;
         ActiveAtomicDensityUploadMilliseconds = 0.0;
+        ActiveAtomicDensityMaxUploadTickMilliseconds = 0.0;
+
         ActiveAtomicDensityCompletedBuildCount = 0;
+        ActiveAtomicDensityUploadTickCount = 0;
 
         bAtomicDensityBatchActive = false;
     }
@@ -2218,6 +2222,7 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
         );
 
         ActiveAtomicDensityAsyncBuilds.Reset();
+        ActiveAtomicDensityPendingUploads.Reset();
 
         ActiveAtomicDensityBuildIndex = 0;
 
@@ -2226,7 +2231,10 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
 
         ActiveAtomicDensityWorkerMilliseconds = 0.0;
         ActiveAtomicDensityUploadMilliseconds = 0.0;
+        ActiveAtomicDensityMaxUploadTickMilliseconds = 0.0;
+
         ActiveAtomicDensityCompletedBuildCount = 0;
+        ActiveAtomicDensityUploadTickCount = 0;
 
         bAtomicDensityBatchActive = true;
     }
@@ -2295,6 +2303,8 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
 
             ActiveAtomicDensityBatchCoordinates.Reset();
             ActiveAtomicDensityStagedChunks.Reset();
+            ActiveAtomicDensityAsyncBuilds.Reset();
+            ActiveAtomicDensityPendingUploads.Reset();
 
             ActiveAtomicDensityBuildIndex = 0;
             ActiveAtomicDensityRevision = 0;
@@ -2306,95 +2316,40 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
         const FIntVector CompletedCoordinate =
             AsyncBuild.ChunkCoordinate;
 
-        ACubusVoxelVolumeActor* Chunk =
-            FindChunk(
-                CompletedCoordinate
-            );
-
-        if (IsValid(Chunk))
+        if (
+            IsValid(
+                FindChunk(
+                    CompletedCoordinate
+                )
+            )
+        )
         {
-            FCubusDensityMeshBuildResult BuildResult =
+            TUniquePtr<FAtomicDensityPendingUpload>
+                PendingUpload =
+                    MakeUnique<
+                        FAtomicDensityPendingUpload
+                    >();
+
+            PendingUpload->ChunkCoordinate =
+                CompletedCoordinate;
+
+            PendingUpload->Revision =
+                AsyncBuild.Revision;
+
+            PendingUpload->BuildResult =
                 MoveTemp(
                     AsyncBuild.Task.GetResult()
                 );
 
             ActiveAtomicDensityWorkerMilliseconds +=
-                BuildResult.BuildTimeMilliseconds;
+                PendingUpload
+                    ->BuildResult
+                    .BuildTimeMilliseconds;
 
             ++ActiveAtomicDensityCompletedBuildCount;
 
-            const double UploadStartTime =
-                FPlatformTime::Seconds();
-
-            const bool bUploadSucceeded =
-                Chunk->BuildStagedVolumeFromDensityMesh(
-                    BuildResult
-                );
-
-            ActiveAtomicDensityUploadMilliseconds +=
-                (
-                    FPlatformTime::Seconds() -
-                    UploadStartTime
-                ) * 1000.0;
-
-            if (!bUploadSucceeded)
-            {
-                /*
-                 * Never allow a partially staged transaction to publish.
-                 */
-                for (
-                    const TWeakObjectPtr<
-                        ACubusVoxelVolumeActor
-                    >& WeakChunk
-                    : ActiveAtomicDensityStagedChunks
-                )
-                {
-                    if (
-                        ACubusVoxelVolumeActor* StagedChunk =
-                            WeakChunk.Get()
-                    )
-                    {
-                        StagedChunk->DiscardStagedVolume();
-                    }
-                }
-
-                for (
-                    const FIntVector& RetryCoordinate
-                    : ActiveAtomicDensityBatchCoordinates
-                )
-                {
-                    if (IsValid(FindChunk(RetryCoordinate)))
-                    {
-                        AtomicDensityDirtyChunkCoordinates.Add(
-                            RetryCoordinate
-                        );
-                    }
-                }
-
-                DiscardActiveAtomicDensityBuilds();
-
-                ActiveAtomicDensityBatchCoordinates.Reset();
-                ActiveAtomicDensityStagedChunks.Reset();
-
-                ActiveAtomicDensityBuildIndex = 0;
-                ActiveAtomicDensityRevision = 0;
-                bAtomicDensityBatchActive = false;
-
-                UE_LOG(
-                    LogTemp,
-                    Warning,
-                    TEXT(
-                        "Cubus atomic density transaction failed "
-                        "during staged mesh upload; previous terrain "
-                        "revision remains visible."
-                    )
-                );
-
-                return;
-            }
-
-            ActiveAtomicDensityStagedChunks.Add(
-                Chunk
+            ActiveAtomicDensityPendingUploads.Add(
+                MoveTemp(PendingUpload)
             );
         }
 
@@ -2405,6 +2360,192 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
             AsyncIndex,
             1,
             EAllowShrinking::No
+        );
+    }
+
+    /*
+    * PHASE 2B: BOUNDED GAME-THREAD UPLOAD
+    *
+    * Worker-complete meshes are uploaded only into hidden staging components.
+    * Limit the number uploaded per Tick so a 27-36 chunk transaction does not
+    * dump all procedural-mesh creation work into one frame.
+    */
+    const int32 SafeUploadsPerTick =
+        FMath::Clamp(
+            MaxAtomicDensityUploadsPerTick,
+            1,
+            16
+        );
+
+    const double UploadTickStartTime =
+        FPlatformTime::Seconds();
+
+    int32 UploadedThisTick = 0;
+
+    while (
+        UploadedThisTick < SafeUploadsPerTick &&
+        !ActiveAtomicDensityPendingUploads.IsEmpty()
+    )
+    {
+        TUniquePtr<FAtomicDensityPendingUpload>
+            PendingUpload =
+                MoveTemp(
+                    ActiveAtomicDensityPendingUploads.Last()
+                );
+
+        ActiveAtomicDensityPendingUploads.Pop(
+            EAllowShrinking::No
+        );
+
+        if (!PendingUpload)
+        {
+            continue;
+        }
+
+        /*
+        * Never upload stale mesh data into a staging component.
+        */
+        if (
+            PendingUpload->Revision != DensityEditRevision ||
+            PendingUpload->Revision != ActiveAtomicDensityRevision
+        )
+        {
+            ActiveAtomicDensityPendingUploads.Reset();
+            return;
+        }
+
+        ACubusVoxelVolumeActor* Chunk =
+            FindChunk(
+                PendingUpload->ChunkCoordinate
+            );
+
+        if (!IsValid(Chunk))
+        {
+            /*
+            * Streaming removed this chunk while its worker was running.
+            * It no longer participates in the visible transaction.
+            */
+            ++UploadedThisTick;
+            continue;
+        }
+
+        const double UploadStartTime =
+            FPlatformTime::Seconds();
+
+        const bool bUploadSucceeded =
+            Chunk->BuildStagedVolumeFromDensityMesh(
+                PendingUpload->BuildResult
+            );
+
+        ActiveAtomicDensityUploadMilliseconds +=
+            (
+                FPlatformTime::Seconds() -
+                UploadStartTime
+            ) * 1000.0;
+
+        if (!bUploadSucceeded)
+        {
+            /*
+            * Never allow a partially staged transaction to publish.
+            */
+            for (
+                const TWeakObjectPtr<
+                    ACubusVoxelVolumeActor
+                >& WeakChunk
+                : ActiveAtomicDensityStagedChunks
+            )
+            {
+                if (
+                    ACubusVoxelVolumeActor* StagedChunk =
+                        WeakChunk.Get()
+                )
+                {
+                    StagedChunk->DiscardStagedVolume();
+                }
+            }
+
+            for (
+                const FIntVector& RetryCoordinate
+                : ActiveAtomicDensityBatchCoordinates
+            )
+            {
+                if (
+                    IsValid(
+                        FindChunk(
+                            RetryCoordinate
+                        )
+                    )
+                )
+                {
+                    AtomicDensityDirtyChunkCoordinates.Add(
+                        RetryCoordinate
+                    );
+                }
+            }
+
+            DiscardActiveAtomicDensityBuilds();
+
+            ActiveAtomicDensityPendingUploads.Reset();
+            ActiveAtomicDensityBatchCoordinates.Reset();
+            ActiveAtomicDensityStagedChunks.Reset();
+
+            ActiveAtomicDensityBuildIndex = 0;
+            ActiveAtomicDensityRevision = 0;
+
+            ActiveAtomicDensityWorkerMilliseconds = 0.0;
+            ActiveAtomicDensityUploadMilliseconds = 0.0;
+            ActiveAtomicDensityMaxUploadTickMilliseconds = 0.0;
+
+            ActiveAtomicDensityCompletedBuildCount = 0;
+            ActiveAtomicDensityUploadTickCount = 0;
+
+            bAtomicDensityBatchActive = false;
+
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT(
+                    "Cubus atomic density transaction failed "
+                    "during staged mesh upload; previous terrain "
+                    "revision remains visible."
+                )
+            );
+
+            return;
+        }
+
+        ActiveAtomicDensityStagedChunks.Add(
+            Chunk
+        );
+
+        ++UploadedThisTick;
+    }
+
+    if (UploadedThisTick > 0)
+    {
+        const double UploadTickMilliseconds =
+            (
+                FPlatformTime::Seconds() -
+                UploadTickStartTime
+            ) * 1000.0;
+
+        ActiveAtomicDensityMaxUploadTickMilliseconds =
+            FMath::Max(
+                ActiveAtomicDensityMaxUploadTickMilliseconds,
+                UploadTickMilliseconds
+            );
+
+        ++ActiveAtomicDensityUploadTickCount;
+
+        UE_LOG(
+            LogTemp,
+            VeryVerbose,
+            TEXT(
+                "Cubus density upload tick: "
+                "%d uploads, %.2f ms"
+            ),
+            UploadedThisTick,
+            UploadTickMilliseconds
         );
     }
 
@@ -2526,9 +2667,20 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
     }
 
     /*
-     * If there are still coordinates left, the worker pool should have been
-     * filled above. This is just a defensive guard.
-     */
+    * All worker tasks may be finished while completed meshes are still waiting
+    * for their bounded game-thread staging upload.
+    *
+    * The old complete terrain revision remains visible during this period.
+    */
+    if (!ActiveAtomicDensityPendingUploads.IsEmpty())
+    {
+        return;
+    }
+
+    /*
+    * If there are still coordinates left, the worker pool should have been
+    * filled above. This is just a defensive guard.
+    */
     if (
         ActiveAtomicDensityBuildIndex <
         ActiveAtomicDensityBatchCoordinates.Num()
@@ -2602,13 +2754,17 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
             "%d chunks, "
             "worker total %.2f ms, "
             "worker avg %.2f ms, "
-            "upload %.2f ms, "
+            "upload total %.2f ms, "
+            "upload max tick %.2f ms, "
+            "upload ticks %d, "
             "commit %.2f ms"
         ),
         ActiveAtomicDensityCompletedBuildCount,
         ActiveAtomicDensityWorkerMilliseconds,
         AverageWorkerMilliseconds,
         ActiveAtomicDensityUploadMilliseconds,
+        ActiveAtomicDensityMaxUploadTickMilliseconds,
+        ActiveAtomicDensityUploadTickCount,
         CommitMilliseconds
     );
 
@@ -2618,6 +2774,7 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
     ActiveAtomicDensityBatchCoordinates.Reset();
     ActiveAtomicDensityStagedChunks.Reset();
     ActiveAtomicDensityAsyncBuilds.Reset();
+    ActiveAtomicDensityPendingUploads.Reset();
 
     ActiveAtomicDensityBuildIndex = 0;
     ActiveAtomicDensityRevision = 0;
