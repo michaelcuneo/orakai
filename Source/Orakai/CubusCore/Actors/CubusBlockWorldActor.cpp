@@ -2056,28 +2056,26 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 {
     APawn* PlayerPawn = TrackedPawn.Get();
 
-    FVector ViewLocation = FVector::ZeroVector;
-    bool bHasViewLocation = false;
-
-    if (APlayerController* PlayerController =
-            UGameplayStatics::GetPlayerController(this, 0))
+    if (!IsValid(PlayerPawn))
     {
-        if (APlayerCameraManager* CameraManager =
-                PlayerController->PlayerCameraManager)
+        PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+        if (IsValid(PlayerPawn))
         {
-            ViewLocation = CameraManager->GetCameraLocation();
-            bHasViewLocation = true;
+            TrackedPawn = PlayerPawn;
         }
     }
 
+    /*
+     * Gameplay world ownership follows the pawn. A third-person
+     * camera may orbit or lag independently and must not stream
+     * terrain underneath the character.
+     */
     const FVector TrackingLocation =
         bPawnHeldForStreaming
             ? HeldPawnLocation
-            : (bHasViewLocation
-                ? ViewLocation
-                : (IsValid(PlayerPawn)
-                    ? PlayerPawn->GetActorLocation()
-                    : GetActorLocation()));
+            : (IsValid(PlayerPawn)
+                ? PlayerPawn->GetActorLocation()
+                : GetActorLocation());
 
     const FIntVector CentreCoordinate =
         WorldLocationToChunkCoordinate(TrackingLocation);

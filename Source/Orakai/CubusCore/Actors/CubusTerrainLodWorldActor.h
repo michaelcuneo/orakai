@@ -141,7 +141,7 @@ private:
     void UpdateStreaming();
     void UpdateTierStreaming(
         FCubusTerrainLodTierRuntime& Tier,
-        const FVector& CameraGridLocation,
+        const FVector& StreamingGridLocation,
         float CanonicalChunkWorldSize,
         double PreviousTierHalfExtentCanonicalChunks,
         int32 CanonicalVoxelStride,

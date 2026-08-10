@@ -22,6 +22,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Animation/TransformProviderData.h"
@@ -184,46 +185,25 @@ void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
     const uint32 CurrentSettingsHash =
         CalculateVegetationSettingsHash();
 
-    bool bCameraRecenterRequired = false;
+    bool bStreamingRecenterRequired = false;
 
     if (
         bPublishedVegetationBudgetSaturated &&
         bHasLastFullVegetationBuildCameraLocation
     )
     {
-        const APlayerController* PlayerController =
-            UGameplayStatics::GetPlayerController(
-                this,
-                0
-            );
-
-        if (
-            IsValid(PlayerController) &&
-            IsValid(
-                PlayerController->PlayerCameraManager
-            )
-        )
+        const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+        if (IsValid(PlayerPawn))
         {
-            const FVector CameraLocation =
-                PlayerController
-                    ->PlayerCameraManager
-                    ->GetCameraLocation();
-
-            const double RecenterDistance =
-                static_cast<double>(
-                    FMath::Max(
-                        100.0f,
-                        VegetationRecenterDistance
-                    )
-                );
-
-            bCameraRecenterRequired =
+            const FVector StreamingLocation = PlayerPawn->GetActorLocation();
+            const double RecenterDistance = static_cast<double>(
+                FMath::Max(100.0f, VegetationRecenterDistance)
+            );
+            bStreamingRecenterRequired =
                 FVector::DistSquared(
-                    CameraLocation,
+                    StreamingLocation,
                     LastFullVegetationBuildCameraLocation
-                ) >=
-                RecenterDistance *
-                RecenterDistance;
+                ) >= RecenterDistance * RecenterDistance;
         }
     }
 
@@ -236,7 +216,7 @@ void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
             LoadedChunkCount ||
         CurrentSettingsHash !=
             PublishedVegetationSettingsHash ||
-        bCameraRecenterRequired
+        bStreamingRecenterRequired
     )
     {
         RebuildWorldVegetation();
@@ -1308,13 +1288,19 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         IsValid(PlayerController) &&
         IsValid(PlayerController->PlayerCameraManager);
 
-    const bool bUseCameraChunkCulling =
-        bCullByCameraChunkRadius &&
-        bHasCamera;
-
     const FVector CameraLocation = bHasCamera
         ? PlayerController->PlayerCameraManager->GetCameraLocation()
         : FVector::ZeroVector;
+
+    const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+    const bool bHasStreamingOrigin = IsValid(PlayerPawn);
+    const FVector StreamingLocation = bHasStreamingOrigin
+        ? PlayerPawn->GetActorLocation()
+        : FVector::ZeroVector;
+
+    const bool bUseCameraChunkCulling =
+        bCullByCameraChunkRadius &&
+        bHasStreamingOrigin;
 
     TMap<FIntVector, uint32> CurrentChunkVegetationSignatures;
 
@@ -1330,7 +1316,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             !IsValid(Chunk) ||
             !FCubusVegetationChunkFilter::IsWithinCameraRadius(
                 Chunk,
-                CameraLocation,
+                StreamingLocation,
                 bUseCameraChunkCulling,
                 CameraChunkHorizontalRadius,
                 CameraChunkVerticalRadius
@@ -1393,7 +1379,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         false;
 
     if (
-        bHasCamera &&
+        bHasStreamingOrigin &&
         bHasLastFullVegetationBuildCameraLocation
     )
     {
@@ -1407,7 +1393,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
         bCameraMovedEnoughForRecenter =
             FVector::DistSquared(
-                CameraLocation,
+                StreamingLocation,
                 LastFullVegetationBuildCameraLocation
             ) >=
             RecenterDistance *
@@ -1559,7 +1545,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         if (
             !FCubusVegetationChunkFilter::IsWithinCameraRadius(
                 Chunk,
-                CameraLocation,
+                StreamingLocation,
                 bUseCameraChunkCulling,
                 CameraChunkHorizontalRadius,
                 CameraChunkVerticalRadius
@@ -1575,7 +1561,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     }
 
     VegetationChunkCoordinates.Sort(
-        [&RegisteredChunks, &CameraLocation](
+        [&RegisteredChunks, &StreamingLocation](
             const FIntVector& A,
             const FIntVector& B
         )
@@ -1598,11 +1584,11 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
             return FVector::DistSquared(
                 ChunkA->GetActorLocation(),
-                CameraLocation
+                StreamingLocation
             ) <
             FVector::DistSquared(
                 ChunkB->GetActorLocation(),
-                CameraLocation
+                StreamingLocation
             );
         }
     );
@@ -2468,11 +2454,11 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
     if (
         bFullVegetationRebuild &&
-        bHasCamera
+        bHasStreamingOrigin
     )
     {
         LastFullVegetationBuildCameraLocation =
-            CameraLocation;
+            StreamingLocation;
 
         bHasLastFullVegetationBuildCameraLocation =
             true;
@@ -2791,19 +2777,12 @@ uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(
         return 0;
     }
 
-    const APlayerController* PlayerController =
-        UGameplayStatics::GetPlayerController(this, 0);
-
-    const bool bHasCamera =
-        IsValid(PlayerController) &&
-        IsValid(PlayerController->PlayerCameraManager);
-
+    const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+    const bool bHasStreamingOrigin = IsValid(PlayerPawn);
     const bool bUseCameraChunkCulling =
-        bCullByCameraChunkRadius &&
-        bHasCamera;
-
-    const FVector CameraLocation = bHasCamera
-        ? PlayerController->PlayerCameraManager->GetCameraLocation()
+        bCullByCameraChunkRadius && bHasStreamingOrigin;
+    const FVector StreamingLocation = bHasStreamingOrigin
+        ? PlayerPawn->GetActorLocation()
         : FVector::ZeroVector;
 
     TMap<FIntVector, uint32>
@@ -2833,7 +2812,7 @@ uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(
         if (
             !FCubusVegetationChunkFilter::IsWithinCameraRadius(
                 Chunk,
-                CameraLocation,
+                StreamingLocation,
                 bUseCameraChunkCulling,
                 CameraChunkHorizontalRadius,
                 CameraChunkVerticalRadius
@@ -2927,26 +2906,14 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
         return;
     }
 
-    const APlayerController* PlayerController =
-        UGameplayStatics::GetPlayerController(
-            this,
-            0
-        );
+    const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
 
-    if (
-        !IsValid(PlayerController) ||
-        !IsValid(
-            PlayerController->PlayerCameraManager
-        )
-    )
+    if (!IsValid(PlayerPawn))
     {
         return;
     }
 
-    const FVector CameraLocation =
-        PlayerController
-            ->PlayerCameraManager
-            ->GetCameraLocation();
+    const FVector StreamingLocation = PlayerPawn->GetActorLocation();
 
     ACubusVoxelVolumeActor* SnapshotChunk =
         nullptr;
@@ -3006,11 +2973,11 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
      * Inverse of the same world-voxel transform used by the existing
      * vegetation renderer.
      */
-    const int32 CameraWorldVoxelX =
+    const int32 StreamingWorldVoxelX =
         FMath::FloorToInt(
             (
                 static_cast<double>(
-                    CameraLocation.X
+                    StreamingLocation.X
                 ) +
                 HalfChunkWorldExtent
             ) /
@@ -3019,11 +2986,11 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
             )
         );
 
-    const int32 CameraWorldVoxelY =
+    const int32 StreamingWorldVoxelY =
         FMath::FloorToInt(
             (
                 static_cast<double>(
-                    CameraLocation.Y
+                    StreamingLocation.Y
                 ) +
                 HalfChunkWorldExtent
             ) /
@@ -3035,7 +3002,7 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
     const FIntPoint CentreCell(
         FMath::FloorToInt(
             static_cast<double>(
-                CameraWorldVoxelX
+                StreamingWorldVoxelX
             ) /
             static_cast<double>(
                 CellSizeVoxels
@@ -3043,7 +3010,7 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
         ),
         FMath::FloorToInt(
             static_cast<double>(
-                CameraWorldVoxelY
+                StreamingWorldVoxelY
             ) /
             static_cast<double>(
                 CellSizeVoxels
@@ -3422,7 +3389,7 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
     )
     {
         PublishFarVegetation(
-            CameraLocation,
+            StreamingLocation,
             SafeVoxelSize
         );
 
