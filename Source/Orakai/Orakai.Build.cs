@@ -39,6 +39,7 @@ public class Orakai : ModuleRules
 				"UnrealEd",
 				"AssetTools",
 				"MaterialEditor",
+				"AnimToTexture",
 				"AnimToTextureEditor"
 			});
 		}
