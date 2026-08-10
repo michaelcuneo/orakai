@@ -4176,10 +4176,18 @@ ACubusWorldVegetationActor::PublishFarVegetation(
             false
         );
 
+        // HISM instance storage can be populated while the component's cached
+        // scene bounds remain stale. A zero-sized Bounds causes primitive
+        // frustum/distance culling to reject the entire far forest before
+        // per-instance HISM culling is even considered. Force the cluster tree
+        // and primitive bounds to match the newly published instances.
         Component->BuildTreeIfOutdated(
             false,
-            false
+            true
         );
+        Component->UpdateBounds();
+        Component->MarkRenderTransformDirty();
+        Component->MarkRenderStateDirty();
     }
 
     int32 PublishedFarInstanceCount = 0;
@@ -4276,6 +4284,9 @@ ACubusWorldVegetationActor::PublishFarVegetation(
                     false,
                     true
                 );
+                Component->UpdateBounds();
+                Component->MarkRenderTransformDirty();
+                Component->MarkRenderStateDirty();
 
                 const FBoxSphereBounds MeshBounds =
                     Component->GetStaticMesh()->GetBounds();
@@ -4323,8 +4334,8 @@ ACubusWorldVegetationActor::PublishFarVegetation(
                         "meshExtent=(%.1f,%.1f,%.1f) "
                         "componentOrigin=(%.0f,%.0f,%.0f) "
                         "componentExtent=(%.0f,%.0f,%.0f) "
-                        "firstWorld=(%.0f,%.0f,%.0f) firstDistance=%.0fcm "
-                        "probeWorld=(%.0f,%.0f,%.0f) materials=[%s]"
+                        "firstWorld=(%.0f,%.0f,%.0f) firstScale=(%.2f,%.2f,%.2f) "
+                        "firstDistance=%.0fcm probeWorld=(%.0f,%.0f,%.0f) materials=[%s]"
                     ),
                     *Component->GetStaticMesh()->GetName(),
                     Component->GetInstanceCount(),
@@ -4345,6 +4356,15 @@ ACubusWorldVegetationActor::PublishFarVegetation(
                         : 0.0,
                     bGotFirstInstance
                         ? FirstWorldTransform.GetLocation().Z
+                        : 0.0,
+                    bGotFirstInstance
+                        ? FirstWorldTransform.GetScale3D().X
+                        : 0.0,
+                    bGotFirstInstance
+                        ? FirstWorldTransform.GetScale3D().Y
+                        : 0.0,
+                    bGotFirstInstance
+                        ? FirstWorldTransform.GetScale3D().Z
                         : 0.0,
                     FirstDistance,
                     ProbeLocation.X,
