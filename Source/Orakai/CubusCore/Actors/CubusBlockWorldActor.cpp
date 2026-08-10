@@ -10,6 +10,7 @@
 #include "CubusCore/Persistence/OrakaiPersistenceTypes.h"
 #include "CubusCore/Storage/CubusChunkStore.h"
 #include "CubusCore/Weather/CubusWeatherMaterialUtilities.h"
+#include "HAL/PlatformTime.h"
 
 #include "Components/SceneComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -1694,18 +1695,146 @@ void ACubusBlockWorldActor::BuildRequiredCoordinates(
 {
     OutCoordinates.Reset();
 
-    for (int32 Z = -VerticalRadius; Z <= VerticalRadius; ++Z)
+    const int32 SafeHorizontalRadius =
+        FMath::Max(
+            0,
+            HorizontalRadius
+        );
+
+    const int32 SafeVerticalRadius =
+        FMath::Max(
+            0,
+            VerticalRadius
+        );
+
+    /*
+     * Radius + 0.5 treats the outer chunk cells as volumes rather than
+     * zero-size points.
+     *
+     * That keeps the requested edge chunks while removing the large number
+     * of useless cube-corner chunks produced by the old rectangular volume.
+     */
+    const double HorizontalExtent =
+        static_cast<double>(
+            SafeHorizontalRadius
+        ) +
+        0.5;
+
+    const double VerticalExtent =
+        static_cast<double>(
+            SafeVerticalRadius
+        ) +
+        0.5;
+
+    const double InverseHorizontalExtentSquared =
+        HorizontalExtent > 0.0
+            ? 1.0 /
+                (
+                    HorizontalExtent *
+                    HorizontalExtent
+                )
+            : 0.0;
+
+    const double InverseVerticalExtentSquared =
+        VerticalExtent > 0.0
+            ? 1.0 /
+                (
+                    VerticalExtent *
+                    VerticalExtent
+                )
+            : 0.0;
+
+    for (
+        int32 Z = -SafeVerticalRadius;
+        Z <= SafeVerticalRadius;
+        ++Z
+    )
     {
-        for (int32 Y = -HorizontalRadius; Y <= HorizontalRadius; ++Y)
+        const double NormalizedVerticalDistanceSquared =
+            SafeVerticalRadius > 0
+                ? static_cast<double>(
+                    Z * Z
+                ) *
+                    InverseVerticalExtentSquared
+                : 0.0;
+
+        for (
+            int32 Y = -SafeHorizontalRadius;
+            Y <= SafeHorizontalRadius;
+            ++Y
+        )
         {
-            for (int32 X = -HorizontalRadius; X <= HorizontalRadius; ++X)
+            for (
+                int32 X = -SafeHorizontalRadius;
+                X <= SafeHorizontalRadius;
+                ++X
+            )
             {
+                if (
+                    SafeHorizontalRadius == 0 &&
+                    (
+                        X != 0 ||
+                        Y != 0
+                    )
+                )
+                {
+                    continue;
+                }
+
+                if (
+                    SafeVerticalRadius == 0 &&
+                    Z != 0
+                )
+                {
+                    continue;
+                }
+
+                const double
+                    NormalizedHorizontalDistanceSquared =
+                        SafeHorizontalRadius > 0
+                            ? static_cast<double>(
+                                X * X +
+                                Y * Y
+                            ) *
+                                InverseHorizontalExtentSquared
+                            : 0.0;
+
+                /*
+                 * Ellipsoidal streaming volume:
+                 *
+                 *     horizontal^2 / H^2
+                 *   + vertical^2   / V^2
+                 *   <= 1
+                 *
+                 * The centre chunk is always retained.
+                 */
+                if (
+                    NormalizedHorizontalDistanceSquared +
+                        NormalizedVerticalDistanceSquared >
+                    1.0
+                )
+                {
+                    continue;
+                }
+
                 OutCoordinates.Add(
-                    CentreCoordinate + FIntVector(X, Y, Z)
+                    CentreCoordinate +
+                    FIntVector(
+                        X,
+                        Y,
+                        Z
+                    )
                 );
             }
         }
     }
+
+    /*
+     * Defensive guarantee for zero-radius or unusual configuration cases.
+     */
+    OutCoordinates.Add(
+        CentreCoordinate
+    );
 }
 
 FIntVector ACubusBlockWorldActor::WorldLocationToChunkCoordinate(
@@ -1978,19 +2107,34 @@ void ACubusBlockWorldActor::ProcessRuntimeQueues()
     }
 }
 
+void ACubusBlockWorldActor::DiscardActiveAtomicDensityBuilds()
+{
+    /*
+     * Worker tasks own copied density-build inputs only.
+     *
+     * Dropping these handles does not touch Actors or mesh components and
+     * does not require the game thread to wait for obsolete work to finish.
+     */
+    ActiveAtomicDensityAsyncBuilds.Reset();
+}
+
 void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
 {
     /*
-     * If an edit occurred after this transaction started, some already-staged
-     * chunks were generated from an older density field.
+     * PHASE 0: INVALIDATE AN OBSOLETE TRANSACTION
      *
-     * They must never be committed.
+     * If any density edit occurred after this transaction started, every
+     * staged mesh and every worker result belongs to an obsolete revision.
+     *
+     * The currently visible terrain remains untouched.
      */
     if (
         bAtomicDensityBatchActive &&
         ActiveAtomicDensityRevision != DensityEditRevision
     )
     {
+        DiscardActiveAtomicDensityBuilds();
+
         for (
             const TWeakObjectPtr<ACubusVoxelVolumeActor>& WeakChunk
             : ActiveAtomicDensityStagedChunks
@@ -2006,9 +2150,8 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
         }
 
         /*
-         * Every coordinate from the abandoned transaction still needs a mesh
-         * for the newest density revision, so merge it back into the pending
-         * dependency set.
+         * Requeue the entire abandoned batch so the newest authoritative
+         * density state is rebuilt consistently.
          */
         for (
             const FIntVector& Coordinate
@@ -2028,12 +2171,16 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
 
         ActiveAtomicDensityBuildIndex = 0;
         ActiveAtomicDensityRevision = 0;
+
+        ActiveAtomicDensityWorkerMilliseconds = 0.0;
+        ActiveAtomicDensityUploadMilliseconds = 0.0;
+        ActiveAtomicDensityCompletedBuildCount = 0;
+
         bAtomicDensityBatchActive = false;
     }
 
     /*
-     * Start a new transaction from everything accumulated since the previous
-     * committed density revision.
+     * PHASE 1: START A NEW TRANSACTION
      */
     if (!bAtomicDensityBatchActive)
     {
@@ -2070,31 +2217,233 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
             ActiveAtomicDensityBatchCoordinates.Num()
         );
 
+        ActiveAtomicDensityAsyncBuilds.Reset();
+
         ActiveAtomicDensityBuildIndex = 0;
 
         ActiveAtomicDensityRevision =
             DensityEditRevision;
 
+        ActiveAtomicDensityWorkerMilliseconds = 0.0;
+        ActiveAtomicDensityUploadMilliseconds = 0.0;
+        ActiveAtomicDensityCompletedBuildCount = 0;
+
         bAtomicDensityBatchActive = true;
     }
 
     /*
-     * Stage only a bounded amount of work this frame.
+     * PHASE 2: COLLECT COMPLETED WORKER RESULTS
      *
-     * Nothing becomes visible during this phase.
+     * Iterate backwards because completed jobs are removed from the array.
      */
-    int32 StagedThisTick = 0;
+    for (
+        int32 AsyncIndex =
+            ActiveAtomicDensityAsyncBuilds.Num() - 1;
+        AsyncIndex >= 0;
+        --AsyncIndex
+    )
+    {
+        FAtomicDensityAsyncBuild& AsyncBuild =
+            *ActiveAtomicDensityAsyncBuilds[
+                AsyncIndex
+            ];
 
-    const int32 SafeStageBudget =
-        FMath::Max(
+        if (!AsyncBuild.Task.IsCompleted())
+        {
+            continue;
+        }
+
+        /*
+         * Defensive stale-result protection.
+         *
+         * Normally the revision mismatch at the top of the function catches
+         * this before we arrive here.
+         */
+        if (
+            AsyncBuild.Revision != DensityEditRevision ||
+            AsyncBuild.Revision != ActiveAtomicDensityRevision
+        )
+        {
+            DiscardActiveAtomicDensityBuilds();
+
+            for (
+                const TWeakObjectPtr<ACubusVoxelVolumeActor>& WeakChunk
+                : ActiveAtomicDensityStagedChunks
+            )
+            {
+                if (
+                    ACubusVoxelVolumeActor* Chunk =
+                        WeakChunk.Get()
+                )
+                {
+                    Chunk->DiscardStagedVolume();
+                }
+            }
+
+            for (
+                const FIntVector& Coordinate
+                : ActiveAtomicDensityBatchCoordinates
+            )
+            {
+                if (IsValid(FindChunk(Coordinate)))
+                {
+                    AtomicDensityDirtyChunkCoordinates.Add(
+                        Coordinate
+                    );
+                }
+            }
+
+            ActiveAtomicDensityBatchCoordinates.Reset();
+            ActiveAtomicDensityStagedChunks.Reset();
+
+            ActiveAtomicDensityBuildIndex = 0;
+            ActiveAtomicDensityRevision = 0;
+            bAtomicDensityBatchActive = false;
+
+            return;
+        }
+
+        const FIntVector CompletedCoordinate =
+            AsyncBuild.ChunkCoordinate;
+
+        ACubusVoxelVolumeActor* Chunk =
+            FindChunk(
+                CompletedCoordinate
+            );
+
+        if (IsValid(Chunk))
+        {
+            FCubusDensityMeshBuildResult BuildResult =
+                MoveTemp(
+                    AsyncBuild.Task.GetResult()
+                );
+
+            ActiveAtomicDensityWorkerMilliseconds +=
+                BuildResult.BuildTimeMilliseconds;
+
+            ++ActiveAtomicDensityCompletedBuildCount;
+
+            const double UploadStartTime =
+                FPlatformTime::Seconds();
+
+            const bool bUploadSucceeded =
+                Chunk->BuildStagedVolumeFromDensityMesh(
+                    BuildResult
+                );
+
+            ActiveAtomicDensityUploadMilliseconds +=
+                (
+                    FPlatformTime::Seconds() -
+                    UploadStartTime
+                ) * 1000.0;
+
+            if (!bUploadSucceeded)
+            {
+                /*
+                 * Never allow a partially staged transaction to publish.
+                 */
+                for (
+                    const TWeakObjectPtr<
+                        ACubusVoxelVolumeActor
+                    >& WeakChunk
+                    : ActiveAtomicDensityStagedChunks
+                )
+                {
+                    if (
+                        ACubusVoxelVolumeActor* StagedChunk =
+                            WeakChunk.Get()
+                    )
+                    {
+                        StagedChunk->DiscardStagedVolume();
+                    }
+                }
+
+                for (
+                    const FIntVector& RetryCoordinate
+                    : ActiveAtomicDensityBatchCoordinates
+                )
+                {
+                    if (IsValid(FindChunk(RetryCoordinate)))
+                    {
+                        AtomicDensityDirtyChunkCoordinates.Add(
+                            RetryCoordinate
+                        );
+                    }
+                }
+
+                DiscardActiveAtomicDensityBuilds();
+
+                ActiveAtomicDensityBatchCoordinates.Reset();
+                ActiveAtomicDensityStagedChunks.Reset();
+
+                ActiveAtomicDensityBuildIndex = 0;
+                ActiveAtomicDensityRevision = 0;
+                bAtomicDensityBatchActive = false;
+
+                UE_LOG(
+                    LogTemp,
+                    Warning,
+                    TEXT(
+                        "Cubus atomic density transaction failed "
+                        "during staged mesh upload; previous terrain "
+                        "revision remains visible."
+                    )
+                );
+
+                return;
+            }
+
+            ActiveAtomicDensityStagedChunks.Add(
+                Chunk
+            );
+        }
+
+        /*
+         * Whether the chunk still exists or not, this worker job is finished.
+         */
+        ActiveAtomicDensityAsyncBuilds.RemoveAtSwap(
+            AsyncIndex,
             1,
-            MaxAtomicDensityChunksStagedPerTick
+            EAllowShrinking::No
+        );
+    }
+
+    /*
+     * A density edit may theoretically have occurred during other game-thread
+     * work before reaching this point. Never launch additional jobs for an
+     * obsolete transaction.
+     */
+    if (
+        ActiveAtomicDensityRevision !=
+        DensityEditRevision
+    )
+    {
+        return;
+    }
+
+    /*
+     * PHASE 3: FILL THE WORKER POOL
+     *
+     * This is the major D3 change.
+     *
+     * Instead of:
+     *
+     *     chunk A -> wait -> chunk B -> wait -> chunk C
+     *
+     * we now maintain up to MaxConcurrentDensityBuilds jobs simultaneously.
+     */
+    const int32 SafeConcurrency =
+        FMath::Clamp(
+            MaxConcurrentDensityBuilds,
+            1,
+            16
         );
 
     while (
+        ActiveAtomicDensityAsyncBuilds.Num() <
+            SafeConcurrency &&
         ActiveAtomicDensityBuildIndex <
-            ActiveAtomicDensityBatchCoordinates.Num() &&
-        StagedThisTick < SafeStageBudget
+            ActiveAtomicDensityBatchCoordinates.Num()
     )
     {
         const FIntVector Coordinate =
@@ -2105,8 +2454,8 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
         ++ActiveAtomicDensityBuildIndex;
 
         /*
-         * The atomic transaction supersedes any ordinary dirty rebuild of the
-         * same chunk.
+         * The density transaction supersedes ordinary dirty rebuilding for
+         * this coordinate.
          */
         DirtyChunkCoordinates.Remove(
             Coordinate
@@ -2119,70 +2468,66 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
 
         if (!IsValid(Chunk))
         {
+            /*
+             * Streaming removed the chunk.
+             *
+             * If it returns later, its normal construction path will consume
+             * the latest authoritative density edits.
+             */
             continue;
         }
 
-        if (!Chunk->BuildStagedVolume())
-        {
-            /*
-             * Failed staging must never result in a partial commit.
-             */
-            for (
-                const TWeakObjectPtr<ACubusVoxelVolumeActor>& WeakChunk
-                : ActiveAtomicDensityStagedChunks
-            )
-            {
-                if (
-                    ACubusVoxelVolumeActor* StagedChunk =
-                        WeakChunk.Get()
-                )
+        /*
+         * Everything UObject/Actor-derived is captured here on the game
+         * thread.
+         */
+        const FCubusDensityMeshBuildInput BuildInput =
+            Chunk->CaptureDensityMeshBuildInput();
+
+        TUniquePtr<FAtomicDensityAsyncBuild> AsyncBuild =
+            MakeUnique<FAtomicDensityAsyncBuild>();
+
+        AsyncBuild->ChunkCoordinate =
+            Coordinate;
+
+        AsyncBuild->Revision =
+            ActiveAtomicDensityRevision;
+
+        /*
+         * The worker lambda receives copied plain data only.
+         *
+         * No Actor, World or procedural mesh is touched here.
+         */
+        AsyncBuild->Task =
+            UE::Tasks::Launch(
+                TEXT("CubusDensityMesh"),
+                [BuildInput]()
                 {
-                    StagedChunk->DiscardStagedVolume();
+                    return
+                        ACubusVoxelVolumeActor::
+                            BuildDensityMeshData(
+                                BuildInput
+                            );
                 }
-            }
-
-            for (
-                const FIntVector& RetryCoordinate
-                : ActiveAtomicDensityBatchCoordinates
-            )
-            {
-                if (IsValid(FindChunk(RetryCoordinate)))
-                {
-                    AtomicDensityDirtyChunkCoordinates.Add(
-                        RetryCoordinate
-                    );
-                }
-            }
-
-            ActiveAtomicDensityBatchCoordinates.Reset();
-            ActiveAtomicDensityStagedChunks.Reset();
-
-            ActiveAtomicDensityBuildIndex = 0;
-            ActiveAtomicDensityRevision = 0;
-            bAtomicDensityBatchActive = false;
-
-            UE_LOG(
-                LogTemp,
-                Warning,
-                TEXT(
-                    "Cubus atomic density transaction failed staging; "
-                    "previous terrain revision remains visible."
-                )
             );
 
-            return;
-        }
-
-        ActiveAtomicDensityStagedChunks.Add(
-            Chunk
+        ActiveAtomicDensityAsyncBuilds.Add(
+            MoveTemp(AsyncBuild)
         );
-
-        ++StagedThisTick;
     }
 
     /*
-     * More chunks remain. Keep the old revision visible and continue next
-     * frame.
+     * If work is still running, keep the previous complete terrain revision
+     * visible and return immediately.
+     */
+    if (!ActiveAtomicDensityAsyncBuilds.IsEmpty())
+    {
+        return;
+    }
+
+    /*
+     * If there are still coordinates left, the worker pool should have been
+     * filled above. This is just a defensive guard.
      */
     if (
         ActiveAtomicDensityBuildIndex <
@@ -2193,27 +2538,34 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
     }
 
     /*
-     * Defensive revision check immediately before publication.
+     * PHASE 4: FINAL REVISION VALIDATION
      *
-     * Game-thread execution means an edit cannot normally interleave inside
-     * this function, but preserving the invariant explicitly is worthwhile.
+     * All jobs have completed and all still-loaded participating chunks now
+     * contain hidden staged replacement meshes.
      */
     if (
         ActiveAtomicDensityRevision !=
         DensityEditRevision
     )
     {
+        /*
+         * The next Tick will enter the invalidation path at the top.
+         */
         return;
     }
 
     /*
-     * COMMIT PHASE
+     * PHASE 5: ATOMIC COMMIT
      *
-     * Every participating replacement is complete and hidden.
+     * Nothing becomes visible until this point.
      *
-     * No frame can render between these calls because this entire loop runs in
-     * one game-thread invocation.
+     * Every component swap occurs during this same game-thread invocation, so
+     * there is no rendered frame in which neighbouring chunks belong to
+     * different density revisions.
      */
+    const double CommitStartTime =
+        FPlatformTime::Seconds();
+
     for (
         const TWeakObjectPtr<ACubusVoxelVolumeActor>& WeakChunk
         : ActiveAtomicDensityStagedChunks
@@ -2228,8 +2580,44 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
         }
     }
 
+    const double CommitMilliseconds =
+        (
+            FPlatformTime::Seconds() -
+            CommitStartTime
+        ) * 1000.0;
+
+    const double AverageWorkerMilliseconds =
+        ActiveAtomicDensityCompletedBuildCount > 0
+            ? ActiveAtomicDensityWorkerMilliseconds /
+                static_cast<double>(
+                    ActiveAtomicDensityCompletedBuildCount
+                )
+            : 0.0;
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT(
+            "Cubus density transaction: "
+            "%d chunks, "
+            "worker total %.2f ms, "
+            "worker avg %.2f ms, "
+            "upload %.2f ms, "
+            "commit %.2f ms"
+        ),
+        ActiveAtomicDensityCompletedBuildCount,
+        ActiveAtomicDensityWorkerMilliseconds,
+        AverageWorkerMilliseconds,
+        ActiveAtomicDensityUploadMilliseconds,
+        CommitMilliseconds
+    );
+
+    /*
+     * Transaction finished successfully.
+     */
     ActiveAtomicDensityBatchCoordinates.Reset();
     ActiveAtomicDensityStagedChunks.Reset();
+    ActiveAtomicDensityAsyncBuilds.Reset();
 
     ActiveAtomicDensityBuildIndex = 0;
     ActiveAtomicDensityRevision = 0;

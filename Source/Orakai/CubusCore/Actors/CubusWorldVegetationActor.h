@@ -241,6 +241,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0", UIMax = "12", EditCondition = "bCullByCameraChunkRadius"))
     int32 CameraChunkVerticalRadius = 4;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming",meta = (ClampMin = "100.0", Units = "cm"))
+    float VegetationRecenterDistance = 3200.0f;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int32 LoadedChunkCount = 0;
 
@@ -331,8 +334,17 @@ private:
     TMap<FIntVector, uint32> PublishedChunkVegetationSignatures;
     uint32 PublishedVegetationSettingsHash = 0;
 
+    FVector LastFullVegetationBuildCameraLocation =
+        FVector::ZeroVector;
+
+    bool bHasLastFullVegetationBuildCameraLocation =
+        false;
+
+    bool bPublishedVegetationBudgetSaturated =
+        false;
+
     float TimeUntilRefresh = 0.0f;
-    
+
     FCubusVegetationCatalog VegetationCatalog;
     FCubusVegetationRenderer VegetationRenderer;
     FCubusVegetationPlacement VegetationPlacement;

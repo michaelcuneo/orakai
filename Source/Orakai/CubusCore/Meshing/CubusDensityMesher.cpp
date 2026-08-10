@@ -898,24 +898,88 @@ namespace CubusDensityMesher
         return Result;
     }
 
-    bool AddTriangle(
-        FCubusMeshData& MeshData,
-        FInterpolatedVertex VertexA,
-        FInterpolatedVertex VertexB,
-        FInterpolatedVertex VertexC
+bool AddTriangle(
+    FCubusMeshData& MeshData,
+    FInterpolatedVertex VertexA,
+    FInterpolatedVertex VertexB,
+    FInterpolatedVertex VertexC
+)
+{
+    const FVector EdgeAB =
+        VertexB.LocalPosition -
+        VertexA.LocalPosition;
+
+    const FVector EdgeAC =
+        VertexC.LocalPosition -
+        VertexA.LocalPosition;
+
+    const FVector EdgeBC =
+        VertexC.LocalPosition -
+        VertexB.LocalPosition;
+
+    /*
+     * Reject non-finite geometry before it can reach rendering or Chaos.
+     */
+    if (
+        !FMath::IsFinite(VertexA.LocalPosition.X) ||
+        !FMath::IsFinite(VertexA.LocalPosition.Y) ||
+        !FMath::IsFinite(VertexA.LocalPosition.Z) ||
+        !FMath::IsFinite(VertexB.LocalPosition.X) ||
+        !FMath::IsFinite(VertexB.LocalPosition.Y) ||
+        !FMath::IsFinite(VertexB.LocalPosition.Z) ||
+        !FMath::IsFinite(VertexC.LocalPosition.X) ||
+        !FMath::IsFinite(VertexC.LocalPosition.Y) ||
+        !FMath::IsFinite(VertexC.LocalPosition.Z)
     )
     {
-        FVector WindingCrossNormal = FVector::CrossProduct(
-            VertexB.LocalPosition - VertexA.LocalPosition,
-            VertexC.LocalPosition - VertexA.LocalPosition
+        return false;
+    }
+
+    /*
+     * Reject collapsed edges.
+     *
+     * Density vertices are expressed in centimetres, so anything below one
+     * hundredth of a centimetre is not useful terrain geometry or collision.
+     */
+    constexpr double MinimumEdgeLengthSquared =
+        0.01 * 0.01;
+
+    if (
+        EdgeAB.SizeSquared() <= MinimumEdgeLengthSquared ||
+        EdgeAC.SizeSquared() <= MinimumEdgeLengthSquared ||
+        EdgeBC.SizeSquared() <= MinimumEdgeLengthSquared
+    )
+    {
+        return false;
+    }
+
+    FVector WindingCrossNormal =
+        FVector::CrossProduct(
+            EdgeAB,
+            EdgeAC
         );
 
-        if (WindingCrossNormal.SizeSquared() <= SMALL_NUMBER)
-        {
-            return false;
-        }
+    /*
+     * Cross-product magnitude is twice the triangle area.
+     *
+     * SMALL_NUMBER is much too small for centimetre-scale collision geometry
+     * and allows extremely thin sliver triangles through to Chaos.
+     */
+    constexpr double MinimumDoubleAreaSquared =
+        0.01 * 0.01;
 
-        WindingCrossNormal.Normalize();
+    if (
+        !FMath::IsFinite(WindingCrossNormal.X) ||
+        !FMath::IsFinite(WindingCrossNormal.Y) ||
+        !FMath::IsFinite(WindingCrossNormal.Z) ||
+        WindingCrossNormal.SizeSquared() <=
+            MinimumDoubleAreaSquared
+    )
+    {
+        return false;
+    }
+
+    WindingCrossNormal.Normalize();
 
         const FVector AverageNormal =
             (VertexA.Normal + VertexB.Normal + VertexC.Normal)

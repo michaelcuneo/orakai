@@ -2,10 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
+#include "CubusCore/Generation/CubusDensityEditField.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
+#include "CubusCore/Generation/CubusTerrainDensityField.h"
 #include "CubusCore/Meshing/CubusDensityLod.h"
+#include "CubusCore/Meshing/CubusMeshData.h"
 #include "CubusCore/Rendering/CubusVoxelRenderMode.h"
+
 #include "CubusVoxelVolumeActor.generated.h"
 
 class ACubusBlockWorldActor;
@@ -13,7 +18,6 @@ class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
 class UProceduralMeshComponent;
 struct FCubusBlockChunkNeighborhood;
-struct FCubusTerrainDensitySettings;
 
 struct FCubusDensityMeshBuildInput
 {
@@ -30,19 +34,16 @@ struct FCubusDensityMeshBuildInput
 struct FCubusDensityMeshBuildResult
 {
     TMap<int32, FCubusMeshData> MaterialMeshes;
-    FCubusMaterialMeshMap MaterialMeshes;
 
     int32 GeneratedTriangleCount = 0;
 
-    bool IsValid() const
-    {
-        return true;
-    }
+    double BuildTimeMilliseconds = 0.0;
 
     void Reset()
     {
         MaterialMeshes.Reset();
         GeneratedTriangleCount = 0;
+        BuildTimeMilliseconds = 0.0;
     }
 };
 
@@ -64,6 +65,16 @@ public:
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Rendering")
     void RebuildVolume();
+
+    FCubusDensityMeshBuildInput CaptureDensityMeshBuildInput() const;
+
+    static FCubusDensityMeshBuildResult BuildDensityMeshData(
+        const FCubusDensityMeshBuildInput& Input
+    );
+
+    bool BuildStagedVolumeFromDensityMesh(
+        FCubusDensityMeshBuildResult& BuildResult
+    );
 
     /*
     * Builds a complete replacement mesh into the hidden staging component.
@@ -450,12 +461,6 @@ private:
     );
 
     FCubusTerrainDensitySettings BuildDensitySettings() const;
-
-    FCubusDensityMeshBuildInput CaptureDensityMeshBuildInput() const;
-
-    static FCubusDensityMeshBuildResult BuildDensityMeshData(
-        const FCubusDensityMeshBuildInput& Input
-    );
 
     void UploadDensityMesh(
         UProceduralMeshComponent& TargetMesh,

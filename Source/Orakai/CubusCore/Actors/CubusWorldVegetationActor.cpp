@@ -176,10 +176,59 @@ void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
     const uint32 CurrentSettingsHash =
         CalculateVegetationSettingsHash();
 
+    bool bCameraRecenterRequired = false;
+
     if (
-        CurrentHash != static_cast<uint32>(PublishedPlacementHash) ||
-        CurrentLoadedChunkCount != LoadedChunkCount ||
-        CurrentSettingsHash != PublishedVegetationSettingsHash
+        bPublishedVegetationBudgetSaturated &&
+        bHasLastFullVegetationBuildCameraLocation
+    )
+    {
+        const APlayerController* PlayerController =
+            UGameplayStatics::GetPlayerController(
+                this,
+                0
+            );
+
+        if (
+            IsValid(PlayerController) &&
+            IsValid(
+                PlayerController->PlayerCameraManager
+            )
+        )
+        {
+            const FVector CameraLocation =
+                PlayerController
+                    ->PlayerCameraManager
+                    ->GetCameraLocation();
+
+            const double RecenterDistance =
+                static_cast<double>(
+                    FMath::Max(
+                        100.0f,
+                        VegetationRecenterDistance
+                    )
+                );
+
+            bCameraRecenterRequired =
+                FVector::DistSquared(
+                    CameraLocation,
+                    LastFullVegetationBuildCameraLocation
+                ) >=
+                RecenterDistance *
+                RecenterDistance;
+        }
+    }
+
+    if (
+        CurrentHash !=
+            static_cast<uint32>(
+                PublishedPlacementHash
+            ) ||
+        CurrentLoadedChunkCount !=
+            LoadedChunkCount ||
+        CurrentSettingsHash !=
+            PublishedVegetationSettingsHash ||
+        bCameraRecenterRequired
     )
     {
         RebuildWorldVegetation();
@@ -1180,20 +1229,108 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         }
     }
 
+    /*
+    * REPLACEMENT STARTS HERE.
+    */
     if (bEnableHeroSkeletalWindMode)
     {
         bAppendOnly = false;
     }
 
+    bool bCameraMovedEnoughForRecenter =
+        false;
+
+    if (
+        bHasCamera &&
+        bHasLastFullVegetationBuildCameraLocation
+    )
+    {
+        const double RecenterDistance =
+            static_cast<double>(
+                FMath::Max(
+                    100.0f,
+                    VegetationRecenterDistance
+                )
+            );
+
+        bCameraMovedEnoughForRecenter =
+            FVector::DistSquared(
+                CameraLocation,
+                LastFullVegetationBuildCameraLocation
+            ) >=
+            RecenterDistance *
+            RecenterDistance;
+    }
+
+    /*
+    * A saturated population remains untouched while the camera stays in the
+    * same local vegetation area.
+    *
+    * New chunk signatures are still published here so their arrival does not
+    * repeatedly trigger a full vegetation rebuild.
+    */
+    if (
+        bAppendOnly &&
+        bPublishedVegetationBudgetSaturated &&
+        !bCameraMovedEnoughForRecenter
+    )
+    {
+        LoadedChunkCount =
+            CurrentChunkVegetationSignatures.Num();
+
+        PublishedPlacementHash =
+            static_cast<int64>(
+                CalculateVegetationSignatureMapHash(
+                    CurrentChunkVegetationSignatures
+                )
+            );
+
+        PublishedVegetationSettingsHash =
+            CurrentVegetationSettingsHash;
+
+        PublishedChunkVegetationSignatures =
+            MoveTemp(
+                CurrentChunkVegetationSignatures
+            );
+
+        return;
+    }
+
+    /*
+    * The camera has moved far enough that the fixed vegetation population
+    * needs to follow it.
+    *
+    * Force the normal full nearest-first rebuild.
+    */
+    if (
+        bAppendOnly &&
+        bPublishedVegetationBudgetSaturated &&
+        bCameraMovedEnoughForRecenter
+    )
+    {
+        bAppendOnly = false;
+    }
+
+    const bool bFullVegetationRebuild =
+        !bAppendOnly;
+
     if (!bAppendOnly)
     {
         ClearWorldVegetation();
     }
+    /*
+    * REPLACEMENT ENDS HERE.
+    */
 
     TArray<FCubusVegetationRepresentationCandidate>
         HeroTreeCandidates;
-    TMap<int64, TArray<FTransform>> CatalogTransformsByBatchKey;
-    TMap<int64, TArray<FTransform>> HeroTransformsByBatchKey;
+
+    TMap<int64, TArray<FTransform>>
+        CatalogTransformsByBatchKey;
+
+    TMap<int64, TArray<FTransform>>
+        HeroTransformsByBatchKey;
+
     int32 StaticBatchTransformCount = 0;
     int32 SkeletalBatchTransformCount = 0;
 
@@ -1227,6 +1364,17 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
         }
     }
 
+    /*
+    * MaximumRenderedPlants is enforced against actual rendered instances,
+    * not source vegetation placements.
+    *
+    * This matters especially for grass because one logical placement can expand
+    * into GrassInstancesPerPlacement rendered ISM instances.
+    */
+    int32 RenderedInstanceBudgetCount =
+        StaticBatchTransformCount +
+        SkeletalBatchTransformCount;
+
     int32 InstancedSkeletalFallbackCount = 0;
     int32 FoliageMaterialOverrideComponentCount = 0;
     int32 BoundSpeciesTransformProviderCount = 0;
@@ -1237,26 +1385,24 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     float ObservedRandomScaleMin = MAX_flt;
     float ObservedRandomScaleMax = 0.0f;
 
+    TArray<FIntVector> VegetationChunkCoordinates;
+
+    VegetationChunkCoordinates.Reserve(
+        RegisteredChunks.Num()
+    );
+
     for (const auto& Pair : RegisteredChunks)
     {
         ACubusVoxelVolumeActor* Chunk =
             Pair.Value.Get();
 
-        if (!IsValid(Chunk))
+        if (
+            !IsValid(Chunk) ||
+            Chunk->GetChunkData() == nullptr
+        )
         {
             continue;
         }
-        
-        const FCubusBlockChunkData* ChunkData =
-            Chunk->GetChunkData();
-
-        if (ChunkData == nullptr)
-        {
-            continue;
-        }
-
-        const FIntVector& ChunkCoordinate =
-            Pair.Key;
 
         if (
             !FCubusVegetationChunkFilter::IsWithinCameraRadius(
@@ -1265,14 +1411,89 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 bUseCameraChunkCulling,
                 CameraChunkHorizontalRadius,
                 CameraChunkVerticalRadius
-            ) ||
-            (
-                bAppendOnly &&
-                PublishedChunkVegetationSignatures.Contains(ChunkCoordinate)
             )
         )
         {
             continue;
+        }
+
+        VegetationChunkCoordinates.Add(
+            Pair.Key
+        );
+    }
+
+    VegetationChunkCoordinates.Sort(
+        [&RegisteredChunks, &CameraLocation](
+            const FIntVector& A,
+            const FIntVector& B
+        )
+        {
+            const ACubusVoxelVolumeActor* ChunkA =
+                RegisteredChunks.FindRef(A).Get();
+
+            const ACubusVoxelVolumeActor* ChunkB =
+                RegisteredChunks.FindRef(B).Get();
+
+            if (!IsValid(ChunkA))
+            {
+                return false;
+            }
+
+            if (!IsValid(ChunkB))
+            {
+                return true;
+            }
+
+            return FVector::DistSquared(
+                ChunkA->GetActorLocation(),
+                CameraLocation
+            ) <
+            FVector::DistSquared(
+                ChunkB->GetActorLocation(),
+                CameraLocation
+            );
+        }
+    );
+
+    for (
+        const FIntVector& ChunkCoordinate :
+        VegetationChunkCoordinates
+    )
+    {
+        ACubusVoxelVolumeActor* Chunk =
+            RegisteredChunks.FindRef(
+                ChunkCoordinate
+            ).Get();
+
+        if (!IsValid(Chunk))
+        {
+            continue;
+        }
+
+        const FCubusBlockChunkData* ChunkData =
+            Chunk->GetChunkData();
+
+        if (ChunkData == nullptr)
+        {
+            continue;
+        }
+
+        if (
+            bAppendOnly &&
+            PublishedChunkVegetationSignatures.Contains(
+                ChunkCoordinate
+            )
+        )
+        {
+            continue;
+        }
+
+        if (
+            RenderedInstanceBudgetCount >=
+            PlantLimit
+        )
+        {
+            break;
         }
 
         const float SafeVoxelSize =
@@ -1288,16 +1509,24 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             ChunkData->GetVegetationInstances()
         )
         {
-        const FVector WorldLocation(
-            (static_cast<double>(Instance.WorldVoxel.X) + 0.5) *
-                SafeVoxelSize -
-                ChunkHalfWorldExtent,
-            (static_cast<double>(Instance.WorldVoxel.Y) + 0.5) *
-                SafeVoxelSize -
-                ChunkHalfWorldExtent,
-            static_cast<double>(Instance.WorldVoxel.Z) *
-                SafeVoxelSize -
-                ChunkHalfWorldExtent
+            if (
+                RenderedInstanceBudgetCount >=
+                PlantLimit
+            )
+            {
+                break;
+            }
+
+            const FVector WorldLocation(
+                (static_cast<double>(Instance.WorldVoxel.X) + 0.5) *
+                    SafeVoxelSize -
+                    ChunkHalfWorldExtent,
+                (static_cast<double>(Instance.WorldVoxel.Y) + 0.5) *
+                    SafeVoxelSize -
+                    ChunkHalfWorldExtent,
+                static_cast<double>(Instance.WorldVoxel.Z) *
+                    SafeVoxelSize -
+                    ChunkHalfWorldExtent
         );
 
         if (
@@ -1478,7 +1707,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
             if (
                 !bRenderWorldPlantBatches ||
-                RenderedPlantCount >= PlantLimit
+                RenderedInstanceBudgetCount >= PlantLimit
             )
             {
                 continue;
@@ -1549,6 +1778,11 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 bHasCamera
             )
             {
+                if (RenderedInstanceBudgetCount >= PlantLimit)
+                {
+                    continue;
+                }
+
                 const int64 StaticFallbackBatchKey =
                     FCubusVegetationRenderer::MakeStaticFallbackBatchKey(
                         SpeciesIndex,
@@ -1574,10 +1808,12 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                     MoveTemp(Candidate)
                 );
 
+                ++RenderedInstanceBudgetCount;
                 ++RenderedPlantCount;
+
                 continue;
             }
-
+            
             if (
                 !CatalogGrassBatchComponents.Contains(
                     TargetBatchKey
@@ -1603,12 +1839,43 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 GrassInstancesPerPlacement <= 1
             )
             {
-                BatchTransforms.Add(LocalTransform);
+                
+                if (RenderedInstanceBudgetCount >= PlantLimit)
+                {
+                    continue;
+                }
+
+                BatchTransforms.Add(
+                    LocalTransform
+                );
+
+                ++RenderedInstanceBudgetCount;
+                ++RenderedPlantCount;
             }
             else
             {
+                const int32 RemainingInstanceBudget =
+                    PlantLimit == MAX_int32
+                        ? MAX_int32
+                        : FMath::Max(
+                            0,
+                            PlantLimit -
+                                RenderedInstanceBudgetCount
+                        );
+
+                if (RemainingInstanceBudget <= 0)
+                {
+                    continue;
+                }
+
                 const int32 GrassCount =
-                    FMath::Max(1, GrassInstancesPerPlacement);
+                    FMath::Min(
+                        FMath::Max(
+                            1,
+                            GrassInstancesPerPlacement
+                        ),
+                        RemainingInstanceBudget
+                    );
 
                 for (
                     int32 GrassIndex = 0;
@@ -1618,15 +1885,23 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 {
                     const uint32 ScatterHash =
                         HashCombineFast(
-                            GetTypeHash(Instance.WorldVoxel),
+                            GetTypeHash(
+                                Instance.WorldVoxel
+                            ),
                             HashCombineFast(
-                                GetTypeHash(TargetBatchKey),
-                                GetTypeHash(GrassIndex)
+                                GetTypeHash(
+                                    TargetBatchKey
+                                ),
+                                GetTypeHash(
+                                    GrassIndex
+                                )
                             )
                         );
 
                     FRandomStream ScatterRandom(
-                        static_cast<int32>(ScatterHash)
+                        static_cast<int32>(
+                            ScatterHash
+                        )
                     );
 
                     const float Angle =
@@ -1642,7 +1917,9 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                         );
 
                     const float Radius =
-                        FMath::Sqrt(ScatterRandom.FRand()) *
+                        FMath::Sqrt(
+                            ScatterRandom.FRand()
+                        ) *
                         SafeGrassScatterRadius;
 
                     const FVector ScatterOffset(
@@ -1656,18 +1933,22 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                         ScatterOffset;
 
                     if (
-                        FMath::Abs(SurfaceNormal.Z) >
-                        0.01f
+                        FMath::Abs(
+                            SurfaceNormal.Z
+                        ) > 0.01f
                     )
                     {
                         GrassWorldLocation.Z =
                             FinalLocation.Z -
                             (
-                                SurfaceNormal.X * ScatterOffset.X +
-                                SurfaceNormal.Y * ScatterOffset.Y
+                                SurfaceNormal.X *
+                                    ScatterOffset.X +
+                                SurfaceNormal.Y *
+                                    ScatterOffset.Y
                             ) /
                             SurfaceNormal.Z;
                     }
+
                     const float GrassYaw =
                         FinalYaw +
                         ScatterRandom.FRandRange(
@@ -1699,9 +1980,12 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                             )
                     );
                 }
-            }
 
-            ++RenderedPlantCount;
+                RenderedInstanceBudgetCount +=
+                    GrassCount;
+
+                ++RenderedPlantCount;
+            }
         }
     }
 
@@ -2017,14 +2301,41 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     PublishedChunkVegetationSignatures =
         MoveTemp(CurrentChunkVegetationSignatures);
 
+    const int32 TotalRenderedInstanceCount =
+        StaticBatchTransformCount +
+        SkeletalBatchTransformCount +
+        ActiveHeroComponentCount +
+        ActiveHeroPveActorCount;
+
+    bPublishedVegetationBudgetSaturated =
+    PlantLimit != MAX_int32 &&
+    TotalRenderedInstanceCount >=
+        PlantLimit;
+
+    if (
+        bFullVegetationRebuild &&
+        bHasCamera
+    )
+    {
+        LastFullVegetationBuildCameraLocation =
+            CameraLocation;
+
+        bHasLastFullVegetationBuildCameraLocation =
+            true;
+    }
+
     UE_LOG(
         LogTemp,
         Display,
         TEXT(
-            "Cubus world vegetation: %d chunks, %d world-batched plants (static=%d, skeletal-instanced=%d, hero=%d, heroPveActors=%d, fallback=%d, foliage-overrides=%d, heroPve=%s, fallbackInstanced=%s)"
+            "Cubus world vegetation: %d chunks, "
+            "%d placements, %d rendered instances "
+            "(static=%d, skeletal-instanced=%d, hero=%d, heroPveActors=%d, "
+            "fallback=%d, foliage-overrides=%d, heroPve=%s, fallbackInstanced=%s)"
         ),
         LoadedChunkCount,
         RenderedPlantCount,
+        TotalRenderedInstanceCount,
         StaticBatchTransformCount,
         SkeletalBatchTransformCount,
         ActiveHeroComponentCount,
@@ -2087,6 +2398,9 @@ void ACubusWorldVegetationActor::ClearWorldVegetation()
 
     PublishedChunkVegetationSignatures.Reset();
     PublishedVegetationSettingsHash = 0;
+
+    bPublishedVegetationBudgetSaturated =
+        false;
 
     VegetationRenderer.ClearBatches(
         CatalogGrassBatchComponents,

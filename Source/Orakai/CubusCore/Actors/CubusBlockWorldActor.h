@@ -3,12 +3,13 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "CubusCore/Generation/CubusDensityEditField.h"
+#include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Rendering/CubusVoxelRenderMode.h"
+#include "Tasks/Task.h"
 
 #include "CubusBlockWorldActor.generated.h"
 
-class ACubusVoxelVolumeActor;
 class ACubusWorldVegetationActor;
 class AActor;
 class APawn;
@@ -209,6 +210,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", UIMax = "16"))
     int32 MaxAtomicDensityChunksStagedPerTick = 1;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
+    int32 MaxConcurrentDensityBuilds = 4;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0.05", Units = "s"))
     float StreamingUpdateInterval = 0.25f;
 
@@ -366,6 +370,21 @@ private:
 
     int32 ActiveAtomicDensityBuildIndex = 0;
 
+    struct FAtomicDensityAsyncBuild
+    {
+        FIntVector ChunkCoordinate =
+            FIntVector::ZeroValue;
+
+        uint64 Revision = 0;
+
+        UE::Tasks::TTask<
+            FCubusDensityMeshBuildResult
+        > Task;
+    };
+
+    TArray<TUniquePtr<FAtomicDensityAsyncBuild>>
+        ActiveAtomicDensityAsyncBuilds;
+
     /*
     * Incremented whenever the authoritative density edit field changes.
     */
@@ -420,6 +439,11 @@ private:
     void UpdateRuntimeStreaming(bool bForce);
     void ProcessRuntimeQueues();
     void ProcessAtomicDensityEditBatch();
+    void DiscardActiveAtomicDensityBuilds();
+    double ActiveAtomicDensityWorkerMilliseconds = 0.0;
+    double ActiveAtomicDensityUploadMilliseconds = 0.0;
+
+    int32 ActiveAtomicDensityCompletedBuildCount = 0;
     void ProcessDirtyChunkQueue();
     void BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius, TSet<FIntVector>& OutCoordinates) const;
     FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;

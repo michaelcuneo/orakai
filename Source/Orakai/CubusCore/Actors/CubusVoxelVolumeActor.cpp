@@ -116,10 +116,14 @@ ACubusVoxelVolumeActor::ACubusVoxelVolumeActor()
         );
 
     SetRootComponent(ProceduralMesh);
-
+    
     ProceduralMesh->bUseAsyncCooking = true;
+    ProceduralMesh->bVisibleInRayTracing = false;
+    ProceduralMesh->SetComponentTickEnabled(false);
+
     ProceduralMesh->SetCastShadow(true);
     ProceduralMesh->SetMobility(EComponentMobility::Static);
+
     ProceduralMesh->SetCollisionEnabled(
         ECollisionEnabled::NoCollision
     );
@@ -138,6 +142,9 @@ ACubusVoxelVolumeActor::ACubusVoxelVolumeActor()
     );
 
     StagingProceduralMesh->bUseAsyncCooking = true;
+    StagingProceduralMesh->bVisibleInRayTracing = false;
+    StagingProceduralMesh->SetComponentTickEnabled(false);
+
     StagingProceduralMesh->SetCastShadow(true);
     StagingProceduralMesh->SetMobility(
         EComponentMobility::Static
@@ -229,8 +236,12 @@ bool ACubusVoxelVolumeActor::BuildStagedVolume()
 
     InactiveProceduralMesh->SetVisibility(false);
     InactiveProceduralMesh->SetHiddenInGame(true);
+
     InactiveProceduralMesh->SetRenderInMainPass(false);
     InactiveProceduralMesh->SetRenderInDepthPass(false);
+
+    InactiveProceduralMesh->SetComponentTickEnabled(false);
+
     InactiveProceduralMesh->SetCollisionEnabled(
         ECollisionEnabled::NoCollision
     );
@@ -240,6 +251,117 @@ bool ACubusVoxelVolumeActor::BuildStagedVolume()
             *InactiveProceduralMesh,
             false
         );
+
+    bHasStagedVolume = true;
+    return true;
+}
+
+bool ACubusVoxelVolumeActor::BuildStagedVolumeFromDensityMesh(
+    FCubusDensityMeshBuildResult& BuildResult
+)
+{
+    EnsureChunkData();
+
+    if (!IsValid(InactiveProceduralMesh))
+    {
+        return false;
+    }
+
+    bHasStagedVolume = false;
+    bStagedBuildHadCollision = false;
+
+    InactiveProceduralMesh->SetVisibility(false);
+    InactiveProceduralMesh->SetHiddenInGame(true);
+
+    InactiveProceduralMesh->SetRenderInMainPass(false);
+    InactiveProceduralMesh->SetRenderInDepthPass(false);
+
+    InactiveProceduralMesh->SetComponentTickEnabled(false);
+
+    InactiveProceduralMesh->SetCollisionEnabled(
+        ECollisionEnabled::NoCollision
+    );
+
+    /*
+     * The async path currently applies only to native Density mode.
+     *
+     * Blocks and Hybrid continue through the normal synchronous build path.
+     */
+    if (
+        GetEffectiveRenderMode() !=
+        ECubusVoxelRenderMode::Density
+    )
+    {
+        return BuildStagedVolume();
+    }
+
+    bHasStagedVolume = false;
+    bStagedBuildHadCollision = false;
+
+    UProceduralMeshComponent& TargetMesh =
+        *InactiveProceduralMesh;
+
+    TargetMesh.ClearAllMeshSections();
+
+    TargetMesh.SetVisibility(false);
+    TargetMesh.SetHiddenInGame(true);
+    TargetMesh.SetRenderInMainPass(false);
+    TargetMesh.SetRenderInDepthPass(false);
+
+    TargetMesh.SetCollisionEnabled(
+        ECollisionEnabled::NoCollision
+    );
+
+    ResetDiagnostics();
+
+    TotalVoxelCount =
+        ChunkData->GetVoxelCount();
+
+    SolidVoxelCount =
+        ChunkData->GetOccupiedVoxelCount();
+
+    LastBuiltRenderMode =
+        ECubusVoxelRenderMode::Density;
+
+    int32 MeshSectionIndex = 0;
+
+    /*
+     * The expensive density geometry has already been produced on a worker.
+     *
+     * This function performs only the UObject/procedural-mesh upload and the
+     * block-edit overlay on the game thread.
+     */
+    UploadDensityMesh(
+        TargetMesh,
+        BuildResult,
+        bGenerateCollision,
+        MeshSectionIndex
+    );
+
+    RebuildBlockEditOverlay(
+        TargetMesh,
+        bGenerateCollision,
+        MeshSectionIndex
+    );
+
+    GeneratedMaterialSectionCount =
+        MeshSectionIndex;
+
+    bStagedBuildHadCollision =
+        bGenerateCollision &&
+        (
+            GeneratedDensitySectionCount > 0 ||
+            GeneratedBlockSectionCount > 0
+        );
+
+    /*
+     * Collision stays disabled until the atomic commit.
+     */
+    TargetMesh.SetCollisionEnabled(
+        ECollisionEnabled::NoCollision
+    );
+
+    TargetMesh.MarkRenderStateDirty();
 
     bHasStagedVolume = true;
     return true;
@@ -263,9 +385,7 @@ void ACubusVoxelVolumeActor::CommitStagedVolume()
         InactiveProceduralMesh;
 
     /*
-     * Keep the old revision visible until the replacement is complete.
-     * The world-level transaction will call this method for every affected
-     * chunk in one game-thread commit pass.
+     * Publish the complete replacement first.
      */
     NewActive->SetCollisionEnabled(
         bStagedBuildHadCollision
@@ -278,16 +398,26 @@ void ACubusVoxelVolumeActor::CommitStagedVolume()
     NewActive->SetHiddenInGame(false);
     NewActive->SetVisibility(true);
 
+    /*
+     * Retire the previous revision.
+     */
     PreviousActive->SetCollisionEnabled(
         ECollisionEnabled::NoCollision
     );
+
     PreviousActive->SetVisibility(false);
     PreviousActive->SetHiddenInGame(true);
     PreviousActive->SetRenderInMainPass(false);
     PreviousActive->SetRenderInDepthPass(false);
 
-    ActiveProceduralMesh = NewActive;
-    InactiveProceduralMesh = PreviousActive;
+    /*
+     * Swap front/back buffers.
+     */
+    ActiveProceduralMesh =
+        NewActive;
+
+    InactiveProceduralMesh =
+        PreviousActive;
 
     bLastBuildHadCollision =
         bStagedBuildHadCollision;
@@ -804,42 +934,71 @@ ACubusVoxelVolumeActor::BuildDensitySettings() const
     return DensitySettings;
 }
 
-FCubusDensityMeshBuildResult
-ACubusVoxelVolumeActor::BuildDensityMeshData() const
+FCubusDensityMeshBuildInput
+ACubusVoxelVolumeActor::CaptureDensityMeshBuildInput() const
 {
-    FCubusDensityMeshBuildResult Result;
+    FCubusDensityMeshBuildInput Input;
 
-    const FCubusTerrainDensitySettings DensitySettings =
+    Input.DensitySettings =
         BuildDensitySettings();
-
-    const FCubusTerrainDensityField DensityField(
-        DensitySettings
-    );
-
-    FCubusDensityEditMap DensityEditSnapshot;
 
     if (IsValid(OwningBlockWorld.Get()))
     {
-        DensityEditSnapshot =
+        Input.DensityEdits =
             OwningBlockWorld->BuildDensityEditSnapshot(
                 ChunkCoordinate
             );
     }
 
+    Input.ChunkCoordinate =
+        ChunkCoordinate;
+
+    Input.VoxelSize =
+        VoxelSize;
+
+    Input.SubdivisionsPerVoxel =
+        DensitySubdivisionsPerVoxel;
+
+    Input.IsoLevel =
+        0.0f;
+
+    return Input;
+}
+
+FCubusDensityMeshBuildResult
+ACubusVoxelVolumeActor::BuildDensityMeshData(
+    const FCubusDensityMeshBuildInput& Input
+)
+{
+    const double BuildStartTime =
+        FPlatformTime::Seconds();
+
+    FCubusDensityMeshBuildResult Result;
+
+    const FCubusTerrainDensityField DensityField(
+        Input.DensitySettings
+    );
+
     const FCubusDensityEditField EditedDensityField(
         DensityField,
-        DensityEditSnapshot
+        Input.DensityEdits
     );
 
     FCubusDensityMesher::BuildAdaptiveChunk(
         EditedDensityField,
-        ChunkCoordinate,
-        VoxelSize,
-        DensitySubdivisionsPerVoxel,
-        0.0f,
+        Input.ChunkCoordinate,
+        Input.VoxelSize,
+        Input.SubdivisionsPerVoxel,
+        Input.IsoLevel,
         Result.MaterialMeshes,
         Result.GeneratedTriangleCount
     );
+
+    Result.BuildTimeMilliseconds =
+        (
+            FPlatformTime::Seconds() -
+            BuildStartTime
+        ) * 1000.0;
 
     return Result;
 }
@@ -887,8 +1046,13 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
     int32& InOutMeshSectionIndex
 )
 {
+    const FCubusDensityMeshBuildInput BuildInput =
+        CaptureDensityMeshBuildInput();
+
     FCubusDensityMeshBuildResult BuildResult =
-        BuildDensityMeshData();
+        BuildDensityMeshData(
+            BuildInput
+        );
 
     UploadDensityMesh(
         TargetMesh,
