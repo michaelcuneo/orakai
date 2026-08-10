@@ -17,6 +17,8 @@ struct FCubusFarVegetationCellBuildResult
     FIntPoint CellCoordinate =
         FIntPoint::ZeroValue;
 
+    int32 RefinementPass = 0;
+
     TArray<FCubusVegetationInstance> Trees;
 };
 
@@ -24,6 +26,8 @@ struct FCubusFarVegetationCellBuild
 {
     FIntPoint CellCoordinate =
         FIntPoint::ZeroValue;
+
+    int32 RefinementPass = 0;
 
     UE::Tasks::TTask<
         FCubusFarVegetationCellBuildResult
@@ -556,6 +560,14 @@ private:
         FIntPoint,
         TArray<FCubusVegetationInstance>
     > FarVegetationCellCache;
+
+    // Highest completed refinement pass for each cached cell. Pass 0 is a
+    // sparse horizon representation, pass 1 is medium density and pass 2 is
+    // the configured full far-tree density.
+    TMap<FIntPoint, int32>
+        FarVegetationCellRefinementPasses;
+
+    int32 FarVegetationRefinementPass = 0;
 
     float TimeUntilFarVegetationPublish =
         0.0f;

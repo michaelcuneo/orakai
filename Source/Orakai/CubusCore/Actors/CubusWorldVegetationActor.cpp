@@ -3208,6 +3208,11 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
         LastFarVegetationCentreCell =
             CentreCell;
 
+        // Every recenter begins by filling any newly visible cells with the
+        // sparse horizon pass. Existing cached cells already at a higher pass
+        // are retained and simply satisfy this pass immediately.
+        FarVegetationRefinementPass = 0;
+
         RequiredFarVegetationCells.Reset();
         PendingFarVegetationCells.Reset();
 
@@ -3286,6 +3291,9 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
                 FarVegetationCellCache.Remove(
                     Cell
                 );
+                FarVegetationCellRefinementPasses.Remove(
+                    Cell
+                );
 
                 bFarVegetationRenderDirty =
                     true;
@@ -3297,21 +3305,26 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
             : RequiredFarVegetationCells
         )
         {
+            const int32 CompletedPass =
+                FarVegetationCellRefinementPasses.FindRef(
+                    Cell
+                );
+
+            const bool bHasCachedCell =
+                FarVegetationCellCache.Contains(Cell);
+
             if (
-                FarVegetationCellCache.Contains(
-                    Cell
-                ) ||
-                FarVegetationCellsBuilding.Contains(
-                    Cell
+                FarVegetationCellsBuilding.Contains(Cell) ||
+                (
+                    bHasCachedCell &&
+                    CompletedPass >= FarVegetationRefinementPass
                 )
             )
             {
                 continue;
             }
 
-            PendingFarVegetationCells.Add(
-                Cell
-            );
+            PendingFarVegetationCells.Add(Cell);
         }
 
         PendingFarVegetationCells.Sort(
@@ -3397,6 +3410,11 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
                 )
             );
 
+            FarVegetationCellRefinementPasses.Add(
+                Result.CellCoordinate,
+                Result.RefinementPass
+            );
+
             bFarVegetationRenderDirty =
                 true;
         }
@@ -3405,6 +3423,65 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
             BuildIndex,
             1,
             EAllowShrinking::No
+        );
+    }
+
+    // Do not spend full-density work on the nearby part of the
+    // window while most of the horizon is still empty. Once every required
+    // cell has the current pass, advance the entire window together. Because
+    // pass strides are exact multiples (12 -> 6 -> configured 3 by default),
+    // existing tree sample positions are a deterministic subset of later
+    // passes, so refinement adds detail rather than relocating the forest.
+    if (
+        PendingFarVegetationCells.IsEmpty() &&
+        FarVegetationBuilds.IsEmpty() &&
+        FarVegetationRefinementPass < 2
+    )
+    {
+        ++FarVegetationRefinementPass;
+
+        for (
+            const FIntPoint& Cell
+            : RequiredFarVegetationCells
+        )
+        {
+            const int32* CompletedPass =
+                FarVegetationCellRefinementPasses.Find(Cell);
+
+            if (
+                CompletedPass == nullptr ||
+                *CompletedPass < FarVegetationRefinementPass
+            )
+            {
+                PendingFarVegetationCells.Add(Cell);
+            }
+        }
+
+        PendingFarVegetationCells.Sort(
+            [CentreCell](
+                const FIntPoint& A,
+                const FIntPoint& B
+            )
+            {
+                const int32 DistanceA =
+                    FMath::Abs(A.X - CentreCell.X) +
+                    FMath::Abs(A.Y - CentreCell.Y);
+                const int32 DistanceB =
+                    FMath::Abs(B.X - CentreCell.X) +
+                    FMath::Abs(B.Y - CentreCell.Y);
+
+                return DistanceA > DistanceB;
+            }
+        );
+
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT(
+                "Cubus far vegetation refinement: pass=%d pending=%d"
+            ),
+            FarVegetationRefinementPass,
+            PendingFarVegetationCells.Num()
         );
     }
 
@@ -3444,8 +3521,10 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
             !RequiredFarVegetationCells.Contains(
                 Cell
             ) ||
-            FarVegetationCellCache.Contains(
-                Cell
+            (
+                FarVegetationCellCache.Contains(Cell) &&
+                FarVegetationCellRefinementPasses.FindRef(Cell) >=
+                    FarVegetationRefinementPass
             ) ||
             FarVegetationCellsBuilding.Contains(
                 Cell
@@ -3490,12 +3569,40 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
                 CellSizeVoxels
             );
 
-        const int32 SampleStride =
+        const int32 FullSampleStride =
             FMath::Clamp(
                 FarTreeSampleStrideVoxels,
                 2,
                 64
             );
+
+        const int32 RefinementPass =
+            FMath::Clamp(
+                FarVegetationRefinementPass,
+                0,
+                2
+            );
+
+        int32 SampleStride = FullSampleStride;
+
+        if (RefinementPass == 0)
+        {
+            SampleStride =
+                FMath::Clamp(
+                    FullSampleStride * 4,
+                    FullSampleStride,
+                    64
+                );
+        }
+        else if (RefinementPass == 1)
+        {
+            SampleStride =
+                FMath::Clamp(
+                    FullSampleStride * 2,
+                    FullSampleStride,
+                    64
+                );
+        }
 
         const float DensityScale =
             FMath::Clamp(
@@ -3508,6 +3615,8 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
 
         Build.CellCoordinate =
             Cell;
+        Build.RefinementPass =
+            RefinementPass;
 
         Build.Task =
             UE::Tasks::Launch(
@@ -3521,7 +3630,8 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
                     GenerationSettings,
                     DensitySettings,
                     SampleStride,
-                    DensityScale
+                    DensityScale,
+                    RefinementPass
                 ]()
                 {
                     FCubusFarVegetationCellBuildResult
@@ -3529,6 +3639,8 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
 
                     Result.CellCoordinate =
                         Cell;
+                    Result.RefinementPass =
+                        RefinementPass;
 
                     const FCubusTerrainDensityField
                         DensityField(
@@ -4100,13 +4212,14 @@ ACubusWorldVegetationActor::PublishFarVegetation(
         Display,
         TEXT(
             "Cubus far vegetation: cells=%d "
-            "trees=%d pending=%d building=%d voxel=%.2fcm"
+            "trees=%d pending=%d building=%d voxel=%.2fcm pass=%d"
         ),
         FarVegetationCellCache.Num(),
         RenderedFarTreeCount,
         PendingFarVegetationCells.Num(),
         FarVegetationBuilds.Num(),
-        SafeVoxelSize
+        SafeVoxelSize,
+        FarVegetationRefinementPass
     );
 }
 
@@ -4139,6 +4252,8 @@ ACubusWorldVegetationActor::ClearFarVegetation()
     PendingFarVegetationCells.Reset();
     FarVegetationBuilds.Reset();
     FarVegetationCellCache.Reset();
+    FarVegetationCellRefinementPasses.Reset();
+    FarVegetationRefinementPass = 0;
 
     LastFarVegetationCentreCell =
         FIntPoint(
