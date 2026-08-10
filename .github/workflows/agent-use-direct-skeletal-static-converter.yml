@@ -1,0 +1,69 @@
+name: Use direct skeletal mesh static converter
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Patch direct converter
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          # Enable Epic's editor conversion plugin.
+          up = Path('Orakai.uproject')
+          data = json.loads(up.read_text(encoding='utf-8'))
+          plugins = data.setdefault('Plugins', [])
+          if not any(p.get('Name') == 'AnimToTexture' for p in plugins):
+              plugins.append({'Name': 'AnimToTexture', 'Enabled': True})
+          up.write_text(json.dumps(data, indent='\t') + '\n', encoding='utf-8')
+
+          # Editor-only module dependency; remove the generic merge utility dependency.
+          build = Path('Source/Orakai/Orakai.Build.cs')
+          s = build.read_text(encoding='utf-8')
+          s = s.replace('\n\t\t\t\t"MaterialEditor",\n\t\t\t\t"MeshMergeUtilities"',
+                        '\n\t\t\t\t"MaterialEditor",\n\t\t\t\t"AnimToTextureEditor"')
+          build.write_text(s, encoding='utf-8')
+
+          cpp = Path('Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp')
+          s = cpp.read_text(encoding='utf-8')
+
+          old_includes = '''#if WITH_EDITOR\n#include "FileHelpers.h"\n#include "IMeshMergeUtilities.h"\n#include "MeshMergeModule.h"\n#include "Modules/ModuleManager.h"\n#include "MeshMerge/MeshMergingSettings.h"\n#include "UObject/Package.h"\n#endif'''
+          new_includes = '''#if WITH_EDITOR\n#include "FileHelpers.h"\n#include "AnimToTextureBPLibrary.h"\n#include "UObject/Package.h"\n#endif'''
+          if old_includes not in s:
+              raise RuntimeError('old editor include block not found')
+          s = s.replace(old_includes, new_includes, 1)
+
+          old_setup = '''    IMeshMergeModule& MeshMergeModule =\n        FModuleManager::LoadModuleChecked<IMeshMergeModule>(\n            TEXT("MeshMergeUtilities")\n        );\n\n    IMeshMergeUtilities& MeshMergeUtilities =\n        MeshMergeModule.GetUtilities();\n\n'''
+          if old_setup not in s:
+              raise RuntimeError('mesh merge setup block not found')
+          s = s.replace(old_setup, '', 1)
+
+          old_convert = '''            if (!IsValid(GeneratedMesh))\n            {\n                USkeletalMeshComponent* PreviewComponent =\n                    NewObject<USkeletalMeshComponent>(this, NAME_None, RF_Transient);\n\n                if (!IsValid(PreviewComponent))\n                {\n                    ++FailedProxyCount;\n                    continue;\n                }\n\n                PreviewComponent->SetSkinnedAssetAndUpdate(SourceSkeletalMesh);\n                PreviewComponent->SetWorldTransform(FTransform::Identity);\n                PreviewComponent->RegisterComponent();\n                PreviewComponent->RefreshBoneTransforms();\n                PreviewComponent->UpdateComponentToWorld();\n\n                TArray<UPrimitiveComponent*> ComponentsToMerge;\n                ComponentsToMerge.Add(PreviewComponent);\n\n                FMeshMergingSettings MergeSettings;\n                TArray<UObject*> GeneratedAssets;\n                FVector MergedActorLocation = FVector::ZeroVector;\n\n                MeshMergeUtilities.MergeComponentsToStaticMesh(\n                    ComponentsToMerge,\n                    World,\n                    MergeSettings,\n                    nullptr,\n                    nullptr,\n                    PackageName,\n                    GeneratedAssets,\n                    MergedActorLocation,\n                    1.0f,\n                    true\n                );\n\n                PreviewComponent->DestroyComponent();\n\n                for (UObject* GeneratedAsset : GeneratedAssets)\n                {\n                    if (UStaticMesh* Candidate = Cast<UStaticMesh>(GeneratedAsset))\n                    {\n                        GeneratedMesh = Candidate;\n                        break;\n                    }\n                }\n\n                if (IsValid(GeneratedMesh))\n                {\n                    GeneratedMesh->MarkPackageDirty();\n                    PackagesToSave.AddUnique(GeneratedMesh->GetPackage());\n                    ++BakedProxyCount;\n                }\n            }'''
+          new_convert = '''            if (!IsValid(GeneratedMesh))\n            {\n                // Epic's dedicated editor utility converts the skeletal mesh\n                // asset directly into a static mesh. Unlike the generic component\n                // merge path, this is explicitly designed for USkeletalMesh input.\n                GeneratedMesh =\n                    UAnimToTextureBPLibrary::ConvertSkeletalMeshToStaticMesh(\n                        SourceSkeletalMesh,\n                        PackageName,\n                        0\n                    );\n\n                if (IsValid(GeneratedMesh))\n                {\n                    GeneratedMesh->MarkPackageDirty();\n                    PackagesToSave.AddUnique(GeneratedMesh->GetPackage());\n                    ++BakedProxyCount;\n\n                    UE_LOG(\n                        LogTemp,\n                        Display,\n                        TEXT(\n                            "Cubus far proxy baked: species=%s stage=%d source=%s proxy=%s"\n                        ),\n                        *SpeciesToken,\n                        StageIndex,\n                        *SourceSkeletalMesh->GetName(),\n                        *GeneratedMesh->GetName()\n                    );\n                }\n            }'''
+          if old_convert not in s:
+              raise RuntimeError('old skeletal conversion block not found')
+          s = s.replace(old_convert, new_convert, 1)
+          cpp.write_text(s, encoding='utf-8')
+          PY
+          git diff --check
+          grep -n 'AnimToTexture' Orakai.uproject
+          grep -n 'AnimToTextureEditor' Source/Orakai/Orakai.Build.cs
+          grep -n 'ConvertSkeletalMeshToStaticMesh' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          ! grep -q 'MergeComponentsToStaticMesh' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Orakai.uproject Source/Orakai/Orakai.Build.cs Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          git commit -m 'Use dedicated skeletal mesh far proxy conversion'
+          git push origin HEAD:agent/density-meshing
