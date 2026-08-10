@@ -7,11 +7,10 @@
 #include "CubusCore/Generation/CubusScaledDensityField.h"
 #include "CubusCore/Meshing/CubusDensityMesher.h"
 
-#include "Camera/PlayerCameraManager.h"
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
@@ -129,13 +128,10 @@ void ACubusTerrainLodWorldActor::UpdateStreaming()
         return;
     }
 
-    const APlayerController* PlayerController =
-        UGameplayStatics::GetPlayerController(this, 0);
+    const APawn* PlayerPawn =
+        UGameplayStatics::GetPlayerPawn(this, 0);
 
-    if (
-        !IsValid(PlayerController) ||
-        !IsValid(PlayerController->PlayerCameraManager)
-    )
+    if (!IsValid(PlayerPawn))
     {
         return;
     }
@@ -171,8 +167,15 @@ void ACubusTerrainLodWorldActor::UpdateStreaming()
     const FVector WorldGridOrigin =
         ResolveWorldGridOrigin(CanonicalChunkWorldSize);
 
-    const FVector CameraGridLocation =
-        PlayerController->PlayerCameraManager->GetCameraLocation() -
+    /*
+     * World ownership follows the controlled pawn, not the camera.
+     *
+     * A third-person boom camera can orbit, lag and cross a coarse tile
+     * boundary without the player moving through that boundary. Using it as
+     * the streaming origin makes terrain change underneath the character.
+     */
+    const FVector StreamingGridLocation =
+        PlayerPawn->GetActorLocation() -
         WorldGridOrigin;
 
     const int32 Lod0HorizontalRadiusChunks =
@@ -190,7 +193,7 @@ void ACubusTerrainLodWorldActor::UpdateStreaming()
 
     UpdateTierStreaming(
         Lod1Runtime,
-        CameraGridLocation,
+        StreamingGridLocation,
         CanonicalChunkWorldSize,
         Lod0HalfExtentCanonicalChunks,
         SafeLod1Stride,
@@ -221,7 +224,7 @@ void ACubusTerrainLodWorldActor::UpdateStreaming()
 
     UpdateTierStreaming(
         Lod2Runtime,
-        CameraGridLocation,
+        StreamingGridLocation,
         CanonicalChunkWorldSize,
         Lod1HalfExtentCanonicalChunks,
         SafeLod2Stride,
@@ -233,7 +236,7 @@ void ACubusTerrainLodWorldActor::UpdateStreaming()
 
 void ACubusTerrainLodWorldActor::UpdateTierStreaming(
     FCubusTerrainLodTierRuntime& Tier,
-    const FVector& CameraGridLocation,
+    const FVector& StreamingGridLocation,
     const float CanonicalChunkWorldSize,
     const double PreviousTierHalfExtentCanonicalChunks,
     const int32 CanonicalVoxelStride,
@@ -294,15 +297,15 @@ void ACubusTerrainLodWorldActor::UpdateTierStreaming(
 
     const FIntVector CentreTile(
         FMath::FloorToInt(
-            (CameraGridLocation.X + TileWorldSize * 0.5f) /
+            (StreamingGridLocation.X + TileWorldSize * 0.5f) /
             TileWorldSize
         ),
         FMath::FloorToInt(
-            (CameraGridLocation.Y + TileWorldSize * 0.5f) /
+            (StreamingGridLocation.Y + TileWorldSize * 0.5f) /
             TileWorldSize
         ),
         FMath::FloorToInt(
-            (CameraGridLocation.Z + TileWorldSize * 0.5f) /
+            (StreamingGridLocation.Z + TileWorldSize * 0.5f) /
             TileWorldSize
         )
     );
@@ -344,8 +347,13 @@ void ACubusTerrainLodWorldActor::UpdateTierStreaming(
         }
     }
 
-    RemoveUnneededTiles(Tier);
-
+    /*
+     * Make-before-break streaming.
+     *
+     * Do not destroy the previous edge immediately when the window moves.
+     * Keep those tiles visible until every tile in the new window is resident,
+     * then retire the stale edge as one completed handoff.
+     */
     for (const FIntVector& TileCoordinate : Tier.RequiredTiles)
     {
         const bool bCompletedPendingUpload =
@@ -384,6 +392,22 @@ void ACubusTerrainLodWorldActor::UpdateTierStreaming(
             return DistanceA > DistanceB;
         }
     );
+
+    bool bWindowResident = !Tier.RequiredTiles.IsEmpty();
+
+    for (const FIntVector& TileCoordinate : Tier.RequiredTiles)
+    {
+        if (!Tier.TileComponents.Contains(TileCoordinate))
+        {
+            bWindowResident = false;
+            break;
+        }
+    }
+
+    if (bWindowResident)
+    {
+        RemoveUnneededTiles(Tier);
+    }
 
     UE_LOG(
         LogTemp,
@@ -640,6 +664,28 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
             ++UploadedThisTick;
         }
     }
+
+    const auto RetireStaleTilesIfResident =
+        [this](FCubusTerrainLodTierRuntime& Tier)
+        {
+            if (Tier.RequiredTiles.IsEmpty())
+            {
+                return;
+            }
+
+            for (const FIntVector& TileCoordinate : Tier.RequiredTiles)
+            {
+                if (!Tier.TileComponents.Contains(TileCoordinate))
+                {
+                    return;
+                }
+            }
+
+            RemoveUnneededTiles(Tier);
+        };
+
+    RetireStaleTilesIfResident(Lod1Runtime);
+    RetireStaleTilesIfResident(Lod2Runtime);
 
     if (UploadedThisTick > 0)
     {
