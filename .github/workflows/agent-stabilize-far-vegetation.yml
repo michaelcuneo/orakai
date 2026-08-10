@@ -1,0 +1,62 @@
+name: Stabilize far vegetation renderer
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Patch renderer
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp')
+          s = p.read_text(encoding='utf-8')
+
+          auto = '''#if WITH_EDITOR\n    if (bAutoBakeMissingFarProxies)\n    {\n        EnsureFarVegetationProxyAssets(true);\n    }\n#endif\n\n'''
+          if s.count(auto) != 1:
+              raise RuntimeError(f'expected one PIE auto-bake block, found {s.count(auto)}')
+          s = s.replace(auto, '', 1)
+
+          old_create = '''                    bCastFarVegetationShadows,\n                    0,\n                    FMath::RoundToInt(\n                        FarVegetationEndCullDistance\n                    )\n                );'''
+          new_create = '''                    bCastFarVegetationShadows,\n                    0,\n                    0\n                );'''
+          if s.count(old_create) != 1:
+              raise RuntimeError(f'expected one far CreateStaticBatch cull block, found {s.count(old_create)}')
+          s = s.replace(old_create, new_create, 1)
+
+          old_cull = '''        FarComponent->SetCullDistances(\n            0,\n            FMath::Max(\n                1,\n                FMath::RoundToInt(\n                    FarVegetationEndCullDistance\n                )\n            )\n        );'''
+          new_cull = '''        // Far vegetation is the horizon representation. Do not apply a\n        // per-instance distance cull here; streaming decides which cells exist.\n        // Zero/zero disables ISM/HISM distance culling and avoids materials that\n        // consume PerInstanceFadeAmount fading the trees out before the streamer\n        // evicts their cells.\n        FarComponent->SetCullDistances(0, 0);'''
+          if s.count(old_cull) != 1:
+              raise RuntimeError(f'expected one far SetCullDistances block, found {s.count(old_cull)}')
+          s = s.replace(old_cull, new_cull, 1)
+
+          # Remove stale visibility probe if it survived previous workflow races.
+          start = s.find('    // TEMPORARY FAR-VISIBILITY PROBE.')
+          if start != -1:
+              end_marker = '    bFarVegetationRenderDirty =\n        false;'
+              end = s.find(end_marker, start)
+              if end == -1:
+                  raise RuntimeError('probe end marker missing')
+              s = s[:start] + s[end:]
+
+          p.write_text(s, encoding='utf-8')
+          PY
+          git diff --check
+          grep -n 'SetCullDistances(0, 0)' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          ! grep -q 'FAR VISIBILITY PROBE' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          ! grep -A4 -B1 -q 'bAutoBakeMissingFarProxies' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          git commit -m 'Disable far HISM distance culling and PIE proxy baking'
+          git push origin HEAD:agent/density-meshing
