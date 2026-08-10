@@ -37,11 +37,11 @@ void ACubusTerrainLodWorldActor::BeginPlay()
         LogTemp,
         Display,
         TEXT(
-            "Cubus terrain LOD started: enabled=%s stride=%d inner=%d outer=%d vertical=%d concurrent=%d uploads=%d"
+            "Cubus terrain LOD started: enabled=%s stride=%d overlap=%d outer=%d vertical=%d concurrent=%d uploads=%d"
         ),
         bEnableTerrainLod ? TEXT("true") : TEXT("false"),
         Lod1CanonicalVoxelStride,
-        Lod1InnerRadiusTiles,
+        Lod1OverlapTiles,
         Lod1OuterRadiusTiles,
         Lod1VerticalRadiusTiles,
         MaxConcurrentLodBuilds,
@@ -193,11 +193,69 @@ void ACubusTerrainLodWorldActor::UpdateStreaming()
     RequiredTiles.Reset();
     PendingTiles.Reset();
 
+    /*
+    * Derive the LOD1 exclusion from the actual LOD0 gameplay-streaming radius.
+    *
+    * LOD0 chunk coordinates represent chunk centres. Its outer world-space
+    * extent is therefore:
+    *
+    *     (HorizontalViewRadius + 0.5) * ChunkWorldSize
+    *
+    * One LOD1 tile covers SafeStride LOD0 chunks.
+    */
+    const int32 Lod0HorizontalRadiusChunks =
+        FMath::Max(
+            0,
+            BlockWorld->GetClientHorizontalViewDistance()
+        );
+
+    const double Lod0HorizontalRadiusInLod1Tiles =
+        (
+            static_cast<double>(
+                Lod0HorizontalRadiusChunks
+            ) +
+            0.5
+        ) /
+        static_cast<double>(SafeStride);
+
+    /*
+    * A coarse tile at distance D begins at D - 0.5 tile extents.
+    *
+    * FirstNonOverlappingTileDistance is therefore the first LOD1 tile whose
+    * near face would sit completely outside the detailed LOD0 footprint.
+    */
+    const int32 FirstNonOverlappingTileDistance =
+        FMath::CeilToInt(
+            Lod0HorizontalRadiusInLod1Tiles +
+            0.5
+        );
+
+    const int32 SafeOverlapTiles =
+        FMath::Clamp(
+            Lod1OverlapTiles,
+            0,
+            2
+        );
+
+    /*
+    * RequiredTiles excludes offsets <= SafeInnerRadius.
+    *
+    * Pull the start inward by SafeOverlapTiles so LOD0 and LOD1 overlap while
+    * we do not yet have explicit transition meshes.
+    */
     const int32 SafeInnerRadius =
-        FMath::Max(0, Lod1InnerRadiusTiles);
+        FMath::Max(
+            0,
+            FirstNonOverlappingTileDistance -
+            1 -
+            SafeOverlapTiles
+        );
 
     const int32 SafeOuterRadius =
-        FMath::Max(SafeInnerRadius + 1, Lod1OuterRadiusTiles);
+        FMath::Max(
+            SafeInnerRadius + 1,
+            Lod1OuterRadiusTiles
+        );
 
     const int32 SafeVerticalRadius =
         FMath::Clamp(Lod1VerticalRadiusTiles, 0, 4);
@@ -272,11 +330,14 @@ void ACubusTerrainLodWorldActor::UpdateStreaming()
         LogTemp,
         Display,
         TEXT(
-            "Cubus terrain LOD window: centre=(%d,%d,%d) required=%d loaded=%d pending=%d building=%d tile=%.0fm"
+            "Cubus terrain LOD window: centre=(%d,%d,%d) lod0H=%d inner=%d overlap=%d required=%d loaded=%d pending=%d building=%d tile=%.0fm"
         ),
         CentreTile.X,
         CentreTile.Y,
         CentreTile.Z,
+        Lod0HorizontalRadiusChunks,
+        SafeInnerRadius,
+        SafeOverlapTiles,
         RequiredTiles.Num(),
         TileComponents.Num(),
         PendingTiles.Num(),
@@ -448,6 +509,11 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
 
     int32 UploadedThisTick = 0;
 
+    double WorkerMillisecondsThisTick = 0.0;
+
+    const double UploadTickStart =
+        FPlatformTime::Seconds();
+
     while (
         UploadedThisTick < UploadLimit &&
         !CompletedBuilds.IsEmpty()
@@ -514,7 +580,34 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
             Component
         );
 
+        WorkerMillisecondsThisTick +=
+            Result.BuildTimeMilliseconds;
+
         ++UploadedThisTick;
+    }
+
+    if (UploadedThisTick > 0)
+    {
+        const double UploadMilliseconds =
+            (
+                FPlatformTime::Seconds() -
+                UploadTickStart
+            ) * 1000.0;
+
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT(
+                "Cubus terrain LOD upload: tiles=%d worker=%.2fms upload=%.2fms loaded=%d completed=%d building=%d pending=%d"
+            ),
+            UploadedThisTick,
+            WorkerMillisecondsThisTick,
+            UploadMilliseconds,
+            TileComponents.Num(),
+            CompletedBuilds.Num(),
+            ActiveBuilds.Num(),
+            PendingTiles.Num()
+        );
     }
 }
 
@@ -619,6 +712,17 @@ UProceduralMeshComponent* ACubusTerrainLodWorldActor::CreateTileComponent(
     Component->SetGenerateOverlapEvents(false);
     Component->SetCanEverAffectNavigation(false);
     Component->SetCastShadow(false);
+    /*
+    * Coarse streamed terrain must not participate in hardware ray tracing.
+    *
+    * Procedural mesh ray-tracing geometry can be evicted while these transient
+    * LOD tiles are being streamed, which causes Renderer ensures such as:
+    *
+    *     Dynamic ray tracing instance skipped because geometry is evicted.
+    *
+    * LOD0 remains untouched. These coarse tiles are visual distance geometry.
+    */
+    Component->SetVisibleInRayTracing(false);
     Component->bUseAsyncCooking = true;
 
     const int32 SafeStride =

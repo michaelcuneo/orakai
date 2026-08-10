@@ -207,10 +207,10 @@ protected:
     int32 InitialLoadRadius = 2;
 
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "32"))
-    int32 HorizontalViewRadius = 8;
+    int32 HorizontalViewRadius = 4;
 
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
-    int32 VerticalViewRadius = 3;
+    int32 VerticalViewRadius = 2;
 
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
     int32 MaxChunksGeneratedPerTick = 8;

@@ -71,9 +71,24 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "2", ClampMax = "64"))
     int32 Lod1CanonicalVoxelStride = 4;
 
-    /** Number of LOD1 tile centres omitted around the camera for LOD0 terrain. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "0", ClampMax = "16"))
-    int32 Lod1InnerRadiusTiles = 1;
+    /*
+    * Number of coarse LOD1 tiles allowed to overlap the outer edge of LOD0.
+    *
+    * LOD1 derives its inner exclusion radius from the Block World's actual
+    * horizontal detailed-chunk view radius. Keeping one coarse tile of overlap
+    * prevents temporary holes while proper LOD transition ownership is still
+    * being implemented.
+    */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Terrain LOD|LOD1",
+        meta = (
+            ClampMin = "0",
+            ClampMax = "2"
+        )
+    )
+    int32 Lod1OverlapTiles = 1;
 
     /** Conservative first-test radius; later tiers extend the horizon farther. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "1", ClampMax = "32"))
