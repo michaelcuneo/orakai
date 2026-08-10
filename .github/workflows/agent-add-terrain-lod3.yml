@@ -23,308 +23,216 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
-          def once(text, old, new, label):
-              count = text.count(old)
+          def sub1(text, pattern, replacement, label, flags=0):
+              result, count = re.subn(pattern, replacement, text, count=1, flags=flags)
               if count != 1:
                   raise RuntimeError(f"{label}: expected 1 match, found {count}")
-              return text.replace(old, new, 1)
+              return result
 
-          h = Path('Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h')
-          s = h.read_text(encoding='utf-8')
+          header_path = Path('Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h')
+          header = header_path.read_text(encoding='utf-8')
 
-          s = once(s,
-          '''    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "0", ClampMax = "4"))
-              int32 Lod2VerticalRadiusTiles = 0;
+          header = sub1(
+              header,
+              r'(\s*UPROPERTY\(EditAnywhere, BlueprintReadWrite, Category = "Cubus\|Terrain LOD\|LOD2", meta = \(ClampMin = "0", ClampMax = "4"\)\)\s*\n\s*int32 Lod2VerticalRadiusTiles = 0;\s*\n)',
+              r'''\1
+    /** LOD3 samples one point every sixty-four canonical voxels. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "16", ClampMax = "256"))
+    int32 Lod3CanonicalVoxelStride = 64;
 
-          ''',
-          '''    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "0", ClampMax = "4"))
-              int32 Lod2VerticalRadiusTiles = 0;
+    /** Number of LOD3 tiles allowed to overlap the outer edge of LOD2. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "0", ClampMax = "2"))
+    int32 Lod3OverlapTiles = 1;
 
-              /** LOD3 samples one point every sixty-four canonical voxels. */
-              UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "16", ClampMax = "256"))
-              int32 Lod3CanonicalVoxelStride = 64;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "1", ClampMax = "32"))
+    int32 Lod3OuterRadiusTiles = 4;
 
-              /** Number of LOD3 tiles allowed to overlap the outer edge of LOD2. */
-              UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "0", ClampMax = "2"))
-              int32 Lod3OverlapTiles = 1;
-
-              UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "1", ClampMax = "32"))
-              int32 Lod3OuterRadiusTiles = 4;
-
-              UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "0", ClampMax = "4"))
-              int32 Lod3VerticalRadiusTiles = 0;
-
-          ''', 'header LOD3 settings')
-
-          s = once(s,
-          '''    FCubusTerrainLodTierRuntime Lod1Runtime;
-              FCubusTerrainLodTierRuntime Lod2Runtime;
-
-          ''',
-          '''    FCubusTerrainLodTierRuntime Lod1Runtime;
-              FCubusTerrainLodTierRuntime Lod2Runtime;
-              FCubusTerrainLodTierRuntime Lod3Runtime;
-
-          ''', 'header runtime')
-          h.write_text(s, encoding='utf-8')
-
-          p = Path('Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp')
-          s = p.read_text(encoding='utf-8')
-
-          s = once(s,
-          '''    Lod1Runtime.LodLevel = 1;
-              Lod2Runtime.LodLevel = 2;
-          ''',
-          '''    Lod1Runtime.LodLevel = 1;
-              Lod2Runtime.LodLevel = 2;
-              Lod3Runtime.LodLevel = 3;
-          ''', 'constructor runtime level')
-
-          s = once(s,
-          '''            "Cubus terrain LOD started: enabled=%s lod1=(stride=%d overlap=%d outer=%d vertical=%d) lod2=(stride=%d overlap=%d outer=%d vertical=%d) concurrent=%d uploads=%d"
-          ''',
-          '''            "Cubus terrain LOD started: enabled=%s lod1=(stride=%d overlap=%d outer=%d vertical=%d) lod2=(stride=%d overlap=%d outer=%d vertical=%d) lod3=(stride=%d overlap=%d outer=%d vertical=%d) concurrent=%d uploads=%d"
-          ''', 'startup log format')
-
-          s = once(s,
-          '''        Lod2CanonicalVoxelStride,
-              Lod2OverlapTiles,
-              Lod2OuterRadiusTiles,
-              Lod2VerticalRadiusTiles,
-              MaxConcurrentLodBuilds,
-          ''',
-          '''        Lod2CanonicalVoxelStride,
-              Lod2OverlapTiles,
-              Lod2OuterRadiusTiles,
-              Lod2VerticalRadiusTiles,
-              Lod3CanonicalVoxelStride,
-              Lod3OverlapTiles,
-              Lod3OuterRadiusTiles,
-              Lod3VerticalRadiusTiles,
-              MaxConcurrentLodBuilds,
-          ''', 'startup log args')
-
-          s = once(s,
-          '''    LoadedLodTileCount =
-              Lod1Runtime.TileComponents.Num() +
-              Lod2Runtime.TileComponents.Num();
-
-              BuildingLodTileCount =
-                  Lod1Runtime.ActiveBuilds.Num() +
-                  Lod2Runtime.ActiveBuilds.Num();
-
-              PendingLodTileCount =
-                  Lod1Runtime.PendingTiles.Num() +
-                  Lod2Runtime.PendingTiles.Num();
-          ''',
-          '''    LoadedLodTileCount =
-              Lod1Runtime.TileComponents.Num() +
-              Lod2Runtime.TileComponents.Num() +
-              Lod3Runtime.TileComponents.Num();
-
-              BuildingLodTileCount =
-                  Lod1Runtime.ActiveBuilds.Num() +
-                  Lod2Runtime.ActiveBuilds.Num() +
-                  Lod3Runtime.ActiveBuilds.Num();
-
-              PendingLodTileCount =
-                  Lod1Runtime.PendingTiles.Num() +
-                  Lod2Runtime.PendingTiles.Num() +
-                  Lod3Runtime.PendingTiles.Num();
-          ''', 'diagnostic totals')
-
-          lod2_call = '''    UpdateTierStreaming(
-              Lod2Runtime,
-              StreamingGridLocation,
-              CanonicalChunkWorldSize,
-              Lod1HalfExtentCanonicalChunks,
-              SafeLod2Stride,
-              Lod2OverlapTiles,
-              Lod2OuterRadiusTiles,
-              Lod2VerticalRadiusTiles
-          );
-          '''
-          lod3 = lod2_call + '''
-              const int32 SafeLod2OuterRadius =
-                  FMath::Max(
-                      Lod2Runtime.InnerRadiusTiles + 1,
-                      Lod2Runtime.OuterRadiusTiles
-                  );
-
-              const double Lod2HalfExtentCanonicalChunks =
-                  (
-                      static_cast<double>(SafeLod2OuterRadius) +
-                      0.5
-                  ) *
-                  static_cast<double>(SafeLod2Stride);
-
-              const int32 SafeLod3Stride =
-                  FMath::Clamp(
-                      Lod3CanonicalVoxelStride,
-                      SafeLod2Stride + 1,
-                      256
-                  );
-
-              UpdateTierStreaming(
-                  Lod3Runtime,
-                  StreamingGridLocation,
-                  CanonicalChunkWorldSize,
-                  Lod2HalfExtentCanonicalChunks,
-                  SafeLod3Stride,
-                  Lod3OverlapTiles,
-                  Lod3OuterRadiusTiles,
-                  Lod3VerticalRadiusTiles
-              );
-          '''
-          s = once(s, lod2_call, lod3, 'LOD3 streaming update')
-
-          s = once(s,
-          '''    CollectCompletedBuildsForTier(Lod1Runtime);
-              CollectCompletedBuildsForTier(Lod2Runtime);
-          ''',
-          '''    CollectCompletedBuildsForTier(Lod1Runtime);
-              CollectCompletedBuildsForTier(Lod2Runtime);
-              CollectCompletedBuildsForTier(Lod3Runtime);
-          ''', 'collect LOD3')
-
-          s = once(s,
-          '''    if (
-              Lod1Runtime.PendingTiles.IsEmpty() &&
-              Lod2Runtime.PendingTiles.IsEmpty()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "0", ClampMax = "4"))
+    int32 Lod3VerticalRadiusTiles = 0;
+''',
+              'header LOD3 settings'
           )
-          ''',
-          '''    if (
-              Lod1Runtime.PendingTiles.IsEmpty() &&
-              Lod2Runtime.PendingTiles.IsEmpty() &&
-              Lod3Runtime.PendingTiles.IsEmpty()
+
+          header = sub1(
+              header,
+              r'(\s*FCubusTerrainLodTierRuntime Lod2Runtime;\s*\n)',
+              r'\1    FCubusTerrainLodTierRuntime Lod3Runtime;\n',
+              'header LOD3 runtime'
           )
-          ''', 'pending empty LOD3')
 
-          s = once(s,
-          '''        const int32 ActiveBuildCount =
-                  Lod1Runtime.ActiveBuilds.Num() +
-                  Lod2Runtime.ActiveBuilds.Num();
-          ''',
-          '''        const int32 ActiveBuildCount =
-                  Lod1Runtime.ActiveBuilds.Num() +
-                  Lod2Runtime.ActiveBuilds.Num() +
-                  Lod3Runtime.ActiveBuilds.Num();
-          ''', 'active build total')
+          header_path.write_text(header, encoding='utf-8')
 
-          s = once(s,
-          '''        else if (!Lod2Runtime.PendingTiles.IsEmpty())
-              {
-                  Tier = &Lod2Runtime;
-              }
-              else
-          ''',
-          '''        else if (!Lod2Runtime.PendingTiles.IsEmpty())
-              {
-                  Tier = &Lod2Runtime;
-              }
-              else if (!Lod3Runtime.PendingTiles.IsEmpty())
-              {
-                  Tier = &Lod3Runtime;
-              }
-              else
-          ''', 'build priority LOD3')
+          cpp_path = Path('Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp')
+          cpp = cpp_path.read_text(encoding='utf-8')
 
-          s = once(s,
-          '''    if (
-              Lod1Runtime.CompletedBuilds.IsEmpty() &&
-              Lod2Runtime.CompletedBuilds.IsEmpty()
+          cpp = sub1(
+              cpp,
+              r'(\s*Lod2Runtime\.LodLevel = 2;\s*\n)',
+              r'\1    Lod3Runtime.LodLevel = 3;\n',
+              'constructor LOD3 level'
           )
-          ''',
-          '''    if (
-              Lod1Runtime.CompletedBuilds.IsEmpty() &&
-              Lod2Runtime.CompletedBuilds.IsEmpty() &&
-              Lod3Runtime.CompletedBuilds.IsEmpty()
+
+          # Add LOD3 to aggregate diagnostics without changing per-tier mechanics.
+          cpp = sub1(
+              cpp,
+              r'(LoadedLodTileCount\s*=\s*\n\s*Lod1Runtime\.TileComponents\.Num\(\)\s*\+\s*\n\s*Lod2Runtime\.TileComponents\.Num\(\))\s*;',
+              r'\1 +\n        Lod3Runtime.TileComponents.Num();',
+              'loaded diagnostics'
           )
-          ''', 'completed empty LOD3')
+          cpp = sub1(
+              cpp,
+              r'(BuildingLodTileCount\s*=\s*\n\s*Lod1Runtime\.ActiveBuilds\.Num\(\)\s*\+\s*\n\s*Lod2Runtime\.ActiveBuilds\.Num\(\))\s*;',
+              r'\1 +\n        Lod3Runtime.ActiveBuilds.Num();',
+              'building diagnostics'
+          )
+          cpp = sub1(
+              cpp,
+              r'(PendingLodTileCount\s*=\s*\n\s*Lod1Runtime\.PendingTiles\.Num\(\)\s*\+\s*\n\s*Lod2Runtime\.PendingTiles\.Num\(\))\s*;',
+              r'\1 +\n        Lod3Runtime.PendingTiles.Num();',
+              'pending diagnostics'
+          )
 
-          s = once(s,
-          '''        else if (!Lod2Runtime.CompletedBuilds.IsEmpty())
-              {
-                  bUploaded = UploadOneCompletedBuild(
-                      Lod2Runtime,
-                      CanonicalVoxelSize,
-                      TerrainMaterial,
-                      WorkerMillisecondsThisTick
-                  );
-              }
-              else
-          ''',
-          '''        else if (!Lod2Runtime.CompletedBuilds.IsEmpty())
-              {
-                  bUploaded = UploadOneCompletedBuild(
-                      Lod2Runtime,
-                      CanonicalVoxelSize,
-                      TerrainMaterial,
-                      WorkerMillisecondsThisTick
-                  );
-              }
-              else if (!Lod3Runtime.CompletedBuilds.IsEmpty())
-              {
-                  bUploaded = UploadOneCompletedBuild(
-                      Lod3Runtime,
-                      CanonicalVoxelSize,
-                      TerrainMaterial,
-                      WorkerMillisecondsThisTick
-                  );
-              }
-              else
-          ''', 'upload priority LOD3')
+          update_start = cpp.index('void ACubusTerrainLodWorldActor::UpdateStreaming()')
+          update_end = cpp.index('void ACubusTerrainLodWorldActor::UpdateTierStreaming(', update_start)
+          update = cpp[update_start:update_end]
 
-          s = once(s,
-          '''    RetireStaleTilesIfResident(Lod1Runtime);
-              RetireStaleTilesIfResident(Lod2Runtime);
-          ''',
-          '''    RetireStaleTilesIfResident(Lod1Runtime);
-              RetireStaleTilesIfResident(Lod2Runtime);
-              RetireStaleTilesIfResident(Lod3Runtime);
-          ''', 'retire LOD3')
+          update = sub1(
+              update,
+              r'(const int32 SafeLod2Stride\s*=\s*\n\s*FMath::Clamp\(\s*\n\s*Lod2CanonicalVoxelStride,\s*\n\s*SafeLod1Stride \+ 1,\s*\n\s*)256(\s*\n\s*\);)',
+              r'\g<1>255\2',
+              'reserve stride 256 for LOD3'
+          )
 
-          s = once(s,
-          '''                "Cubus terrain LOD upload: tiles=%d worker=%.2fms upload=%.2fms loaded=(lod1=%d lod2=%d) completed=(%d,%d) building=(%d,%d) pending=(%d,%d)"
-          ''',
-          '''                "Cubus terrain LOD upload: tiles=%d worker=%.2fms upload=%.2fms loaded=(lod1=%d lod2=%d lod3=%d) completed=(%d,%d,%d) building=(%d,%d,%d) pending=(%d,%d,%d)"
-          ''', 'upload log format')
+          lod2_call = re.search(
+              r'\s*UpdateTierStreaming\(\s*\n\s*Lod2Runtime,.*?Lod2VerticalRadiusTiles\s*\n\s*\);',
+              update,
+              flags=re.S
+          )
+          if not lod2_call:
+              raise RuntimeError('LOD2 streaming call not found')
 
-          s = once(s,
-          '''            Lod1Runtime.TileComponents.Num(),
-              Lod2Runtime.TileComponents.Num(),
-              Lod1Runtime.CompletedBuilds.Num(),
-              Lod2Runtime.CompletedBuilds.Num(),
-              Lod1Runtime.ActiveBuilds.Num(),
-              Lod2Runtime.ActiveBuilds.Num(),
-              Lod1Runtime.PendingTiles.Num(),
-              Lod2Runtime.PendingTiles.Num()
-          ''',
-          '''            Lod1Runtime.TileComponents.Num(),
-              Lod2Runtime.TileComponents.Num(),
-              Lod3Runtime.TileComponents.Num(),
-              Lod1Runtime.CompletedBuilds.Num(),
-              Lod2Runtime.CompletedBuilds.Num(),
-              Lod3Runtime.CompletedBuilds.Num(),
-              Lod1Runtime.ActiveBuilds.Num(),
-              Lod2Runtime.ActiveBuilds.Num(),
-              Lod3Runtime.ActiveBuilds.Num(),
-              Lod1Runtime.PendingTiles.Num(),
-              Lod2Runtime.PendingTiles.Num(),
-              Lod3Runtime.PendingTiles.Num()
-          ''', 'upload log args')
+          lod3_block = '''
 
-          s = once(s,
-          '''    ClearTier(Lod1Runtime);
-              ClearTier(Lod2Runtime);
-          ''',
-          '''    ClearTier(Lod1Runtime);
-              ClearTier(Lod2Runtime);
-              ClearTier(Lod3Runtime);
-          ''', 'clear LOD3')
+    const int32 SafeLod2OuterRadius =
+        FMath::Max(
+            Lod2Runtime.InnerRadiusTiles + 1,
+            Lod2Runtime.OuterRadiusTiles
+        );
 
-          p.write_text(s, encoding='utf-8')
+    const double Lod2HalfExtentCanonicalChunks =
+        (
+            static_cast<double>(SafeLod2OuterRadius) +
+            0.5
+        ) *
+        static_cast<double>(SafeLod2Stride);
+
+    const int32 SafeLod3Stride =
+        FMath::Clamp(
+            Lod3CanonicalVoxelStride,
+            SafeLod2Stride + 1,
+            256
+        );
+
+    UpdateTierStreaming(
+        Lod3Runtime,
+        StreamingGridLocation,
+        CanonicalChunkWorldSize,
+        Lod2HalfExtentCanonicalChunks,
+        SafeLod3Stride,
+        Lod3OverlapTiles,
+        Lod3OuterRadiusTiles,
+        Lod3VerticalRadiusTiles
+    );'''
+          insert_at = lod2_call.end()
+          update = update[:insert_at] + lod3_block + update[insert_at:]
+          cpp = cpp[:update_start] + update + cpp[update_end:]
+
+          collect_start = cpp.index('void ACubusTerrainLodWorldActor::CollectCompletedBuilds()')
+          collect_end = cpp.index('void ACubusTerrainLodWorldActor::CollectCompletedBuildsForTier(', collect_start)
+          collect = cpp[collect_start:collect_end]
+          collect = sub1(
+              collect,
+              r'(\s*CollectCompletedBuildsForTier\(Lod2Runtime\);\s*\n)',
+              r'\1    CollectCompletedBuildsForTier(Lod3Runtime);\n',
+              'collect LOD3'
+          )
+          cpp = cpp[:collect_start] + collect + cpp[collect_end:]
+
+          start_start = cpp.index('void ACubusTerrainLodWorldActor::StartPendingBuilds()')
+          start_end = cpp.index('void ACubusTerrainLodWorldActor::UploadCompletedBuilds()', start_start)
+          start = cpp[start_start:start_end]
+          start = sub1(
+              start,
+              r'(Lod1Runtime\.PendingTiles\.IsEmpty\(\)\s*&&\s*\n\s*Lod2Runtime\.PendingTiles\.IsEmpty\(\))',
+              r'\1 &&\n        Lod3Runtime.PendingTiles.IsEmpty()',
+              'pending LOD3 condition'
+          )
+          start = sub1(
+              start,
+              r'(Lod1Runtime\.ActiveBuilds\.Num\(\)\s*\+\s*\n\s*Lod2Runtime\.ActiveBuilds\.Num\(\))\s*;',
+              r'\1 +\n            Lod3Runtime.ActiveBuilds.Num();',
+              'shared active build budget'
+          )
+          start = sub1(
+              start,
+              r'(else if \(!Lod2Runtime\.PendingTiles\.IsEmpty\(\)\)\s*\{\s*Tier = &Lod2Runtime;\s*\})',
+              r'''\1
+        else if (!Lod3Runtime.PendingTiles.IsEmpty())
+        {
+            Tier = &Lod3Runtime;
+        }''',
+              'LOD3 build priority',
+              flags=re.S
+          )
+          cpp = cpp[:start_start] + start + cpp[start_end:]
+
+          upload_start = cpp.index('void ACubusTerrainLodWorldActor::UploadCompletedBuilds()')
+          upload_end = cpp.index('bool ACubusTerrainLodWorldActor::UploadOneCompletedBuild(', upload_start)
+          upload = cpp[upload_start:upload_end]
+          upload = sub1(
+              upload,
+              r'(Lod1Runtime\.CompletedBuilds\.IsEmpty\(\)\s*&&\s*\n\s*Lod2Runtime\.CompletedBuilds\.IsEmpty\(\))',
+              r'\1 &&\n        Lod3Runtime.CompletedBuilds.IsEmpty()',
+              'completed LOD3 condition'
+          )
+          upload = sub1(
+              upload,
+              r'(else if \(!Lod2Runtime\.CompletedBuilds\.IsEmpty\(\)\)\s*\{\s*bUploaded = UploadOneCompletedBuild\(\s*Lod2Runtime,\s*CanonicalVoxelSize,\s*TerrainMaterial,\s*WorkerMillisecondsThisTick\s*\);\s*\})',
+              r'''\1
+        else if (!Lod3Runtime.CompletedBuilds.IsEmpty())
+        {
+            bUploaded = UploadOneCompletedBuild(
+                Lod3Runtime,
+                CanonicalVoxelSize,
+                TerrainMaterial,
+                WorkerMillisecondsThisTick
+            );
+        }''',
+              'LOD3 upload priority',
+              flags=re.S
+          )
+          upload = sub1(
+              upload,
+              r'(\s*RetireStaleTilesIfResident\(Lod2Runtime\);\s*\n)',
+              r'\1    RetireStaleTilesIfResident(Lod3Runtime);\n',
+              'LOD3 make-before-break retirement'
+          )
+          cpp = cpp[:upload_start] + upload + cpp[upload_end:]
+
+          clear_start = cpp.index('void ACubusTerrainLodWorldActor::ClearAllTiles()')
+          clear_end = cpp.index('void ACubusTerrainLodWorldActor::ClearTier(', clear_start)
+          clear = cpp[clear_start:clear_end]
+          clear = sub1(
+              clear,
+              r'(\s*ClearTier\(Lod2Runtime\);\s*\n)',
+              r'\1    ClearTier(Lod3Runtime);\n',
+              'clear LOD3'
+          )
+          cpp = cpp[:clear_start] + clear + cpp[clear_end:]
+
+          cpp_path.write_text(cpp, encoding='utf-8')
           PY
 
       - name: Validate
@@ -333,7 +241,7 @@ jobs:
           git diff --check
           grep -n "Lod3CanonicalVoxelStride = 64" Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h
           grep -n "Lod3Runtime.LodLevel = 3" Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
-          grep -n "UpdateTierStreaming(" Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp | head -4
+          grep -n "Lod3Runtime" Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp | head -20
           git diff --stat
 
       - name: Commit
