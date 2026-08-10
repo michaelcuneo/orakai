@@ -1186,6 +1186,14 @@ ACubusWorldVegetationActor::RefreshFarVegetationBatches()
             )
         );
 
+        // This component is the explicit long-range vegetation representation.
+        // Do not allow a Cull Distance Volume or inherited max draw distance to
+        // silently cull the whole far forest before our per-instance HISM range.
+        FarComponent->bAllowCullDistanceVolume = false;
+        FarComponent->SetCullDistance(0.0f);
+        FarComponent->SetVisibility(true, true);
+        FarComponent->SetHiddenInGame(false, true);
+
         const int32 MaterialCount =
             SourceComponent->GetNumMaterials();
 
@@ -1307,19 +1315,12 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     const auto& RegisteredChunks =
         BlockWorld->GetRegisteredChunks();
 
-    for (const auto& Pair : RegisteredChunks)
-    {
-        const ACubusVoxelVolumeActor* DistancePolicyChunk =
-            Pair.Value.Get();
-
-        if (IsValid(DistancePolicyChunk))
-        {
-            ApplyVegetationDistancePolicy(
-                DistancePolicyChunk->GetVoxelSize()
-            );
-            break;
-        }
-    }
+    ApplyVegetationDistancePolicy(
+        FMath::Max(
+            1.0f,
+            BlockWorld->GetGeneratedVoxelSize()
+        )
+    );
 
     for (const auto& Pair : RegisteredChunks)
     {
@@ -3124,10 +3125,14 @@ ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
         return;
     }
 
+    // Far-cell ownership and world transforms must use the canonical
+    // LOD0 voxel scale. RegisteredChunks may contain authored or transitional
+    // chunks with a different VoxelSize, so choosing the first map entry makes
+    // the entire far forest scale nondeterministically.
     const float SafeVoxelSize =
         FMath::Max(
             1.0f,
-            SnapshotChunk->GetVoxelSize()
+            BlockWorld->GetGeneratedVoxelSize()
         );
 
     const int32 CellSizeVoxels =
@@ -4065,8 +4070,27 @@ ACubusWorldVegetationActor::PublishFarVegetation(
         );
     }
 
+    int32 PublishedFarInstanceCount = 0;
+
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<
+                UHierarchicalInstancedStaticMeshComponent
+            >
+        >& Pair
+        : FarCatalogStaticBatchComponents
+    )
+    {
+        if (IsValid(Pair.Value))
+        {
+            PublishedFarInstanceCount +=
+                Pair.Value->GetInstanceCount();
+        }
+    }
+
     RenderedFarTreeCount =
-        FarTreeCount;
+        PublishedFarInstanceCount;
 
     bFarVegetationRenderDirty =
         false;
@@ -4076,12 +4100,13 @@ ACubusWorldVegetationActor::PublishFarVegetation(
         Display,
         TEXT(
             "Cubus far vegetation: cells=%d "
-            "trees=%d pending=%d building=%d"
+            "trees=%d pending=%d building=%d voxel=%.2fcm"
         ),
         FarVegetationCellCache.Num(),
         RenderedFarTreeCount,
         PendingFarVegetationCells.Num(),
-        FarVegetationBuilds.Num()
+        FarVegetationBuilds.Num(),
+        SafeVoxelSize
     );
 }
 

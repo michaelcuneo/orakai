@@ -92,6 +92,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
     int32 GetClientChunkLoadRate() const { return MaxChunksGeneratedPerTick; }
 
+    /** Canonical LOD0 voxel size used by world-space systems such as vegetation. */
+    float GetGeneratedVoxelSize() const
+    {
+        return GeneratedVoxelSize;
+    }
+
     UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Spawn")
     bool IsInitialSpawnAreaReady() const { return bInitialSpawnAreaReady; }
 
