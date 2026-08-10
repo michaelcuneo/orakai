@@ -123,6 +123,37 @@ ACubusVoxelVolumeActor::ACubusVoxelVolumeActor()
     ProceduralMesh->SetCollisionEnabled(
         ECollisionEnabled::NoCollision
     );
+
+    StagingProceduralMesh =
+    CreateDefaultSubobject<UProceduralMeshComponent>(
+        TEXT("StagingProceduralMesh")
+    );
+
+    StagingProceduralMesh->SetupAttachment(
+        ProceduralMesh
+    );
+
+    StagingProceduralMesh->SetRelativeTransform(
+        FTransform::Identity
+    );
+
+    StagingProceduralMesh->bUseAsyncCooking = true;
+    StagingProceduralMesh->SetCastShadow(true);
+    StagingProceduralMesh->SetMobility(
+        EComponentMobility::Static
+    );
+
+    StagingProceduralMesh->SetCollisionEnabled(
+        ECollisionEnabled::NoCollision
+    );
+
+    StagingProceduralMesh->SetVisibility(false);
+    StagingProceduralMesh->SetHiddenInGame(true);
+    StagingProceduralMesh->SetRenderInMainPass(false);
+    StagingProceduralMesh->SetRenderInDepthPass(false);
+
+    ActiveProceduralMesh = ProceduralMesh;
+    InactiveProceduralMesh = StagingProceduralMesh;
 }
 
 void ACubusVoxelVolumeActor::GenerateTerrainData()
@@ -154,32 +185,161 @@ void ACubusVoxelVolumeActor::GenerateTerrainData()
 void ACubusVoxelVolumeActor::RebuildVolume()
 {
     ++RebuildCount;
-    bLastBuildHadCollision = false;
     EnsureChunkData();
 
-    if (!IsValid(ProceduralMesh))
+    if (!IsValid(ActiveProceduralMesh))
+    {
+        ActiveProceduralMesh = ProceduralMesh;
+    }
+
+    if (!IsValid(ActiveProceduralMesh))
     {
         return;
     }
 
+    bHasStagedVolume = false;
+    bStagedBuildHadCollision = false;
+
+    if (IsValid(InactiveProceduralMesh))
+    {
+        InactiveProceduralMesh->ClearAllMeshSections();
+        InactiveProceduralMesh->SetCollisionEnabled(
+            ECollisionEnabled::NoCollision
+        );
+    }
+
+    bLastBuildHadCollision =
+        BuildVolumeInto(
+            *ActiveProceduralMesh,
+            true
+        );
+}
+
+bool ACubusVoxelVolumeActor::BuildStagedVolume()
+{
+    EnsureChunkData();
+
+    if (!IsValid(InactiveProceduralMesh))
+    {
+        return false;
+    }
+
+    bHasStagedVolume = false;
+    bStagedBuildHadCollision = false;
+
+    InactiveProceduralMesh->SetVisibility(false);
+    InactiveProceduralMesh->SetHiddenInGame(true);
+    InactiveProceduralMesh->SetRenderInMainPass(false);
+    InactiveProceduralMesh->SetRenderInDepthPass(false);
+    InactiveProceduralMesh->SetCollisionEnabled(
+        ECollisionEnabled::NoCollision
+    );
+
+    bStagedBuildHadCollision =
+        BuildVolumeInto(
+            *InactiveProceduralMesh,
+            false
+        );
+
+    bHasStagedVolume = true;
+    return true;
+}
+
+void ACubusVoxelVolumeActor::CommitStagedVolume()
+{
+    if (
+        !bHasStagedVolume ||
+        !IsValid(ActiveProceduralMesh) ||
+        !IsValid(InactiveProceduralMesh)
+    )
+    {
+        return;
+    }
+
+    UProceduralMeshComponent* PreviousActive =
+        ActiveProceduralMesh;
+
+    UProceduralMeshComponent* NewActive =
+        InactiveProceduralMesh;
+
+    /*
+     * Keep the old revision visible until the replacement is complete.
+     * The world-level transaction will call this method for every affected
+     * chunk in one game-thread commit pass.
+     */
+    NewActive->SetCollisionEnabled(
+        bStagedBuildHadCollision
+            ? ECollisionEnabled::QueryAndPhysics
+            : ECollisionEnabled::NoCollision
+    );
+
+    NewActive->SetRenderInMainPass(true);
+    NewActive->SetRenderInDepthPass(true);
+    NewActive->SetHiddenInGame(false);
+    NewActive->SetVisibility(true);
+
+    PreviousActive->SetCollisionEnabled(
+        ECollisionEnabled::NoCollision
+    );
+    PreviousActive->SetVisibility(false);
+    PreviousActive->SetHiddenInGame(true);
+    PreviousActive->SetRenderInMainPass(false);
+    PreviousActive->SetRenderInDepthPass(false);
+
+    ActiveProceduralMesh = NewActive;
+    InactiveProceduralMesh = PreviousActive;
+
+    bLastBuildHadCollision =
+        bStagedBuildHadCollision;
+
+    bStagedBuildHadCollision = false;
+    bHasStagedVolume = false;
+}
+
+void ACubusVoxelVolumeActor::DiscardStagedVolume()
+{
+    if (IsValid(InactiveProceduralMesh))
+    {
+        InactiveProceduralMesh->ClearAllMeshSections();
+
+        InactiveProceduralMesh->SetCollisionEnabled(
+            ECollisionEnabled::NoCollision
+        );
+
+        InactiveProceduralMesh->SetVisibility(false);
+        InactiveProceduralMesh->SetHiddenInGame(true);
+        InactiveProceduralMesh->SetRenderInMainPass(false);
+        InactiveProceduralMesh->SetRenderInDepthPass(false);
+    }
+
+    bStagedBuildHadCollision = false;
+    bHasStagedVolume = false;
+}
+
+bool ACubusVoxelVolumeActor::BuildVolumeInto(
+    UProceduralMeshComponent& TargetMesh,
+    const bool bPublishDiagnostics
+)
+{
     const double BuildStartTime =
         FPlatformTime::Seconds();
 
-    ProceduralMesh->ClearAllMeshSections();
-    ProceduralMesh->SetCollisionEnabled(
+    TargetMesh.ClearAllMeshSections();
+
+    TargetMesh.SetCollisionEnabled(
         ECollisionEnabled::NoCollision
     );
-    ProceduralMesh->SetVisibility(true);
-    ProceduralMesh->SetHiddenInGame(false);
-    ProceduralMesh->SetRenderInMainPass(true);
-    ProceduralMesh->SetRenderInDepthPass(true);
 
     ResetDiagnostics();
 
-    TotalVoxelCount = ChunkData->GetVoxelCount();
-    SolidVoxelCount = ChunkData->GetOccupiedVoxelCount();
+    TotalVoxelCount =
+        ChunkData->GetVoxelCount();
 
-    LastBuiltRenderMode = GetEffectiveRenderMode();
+    SolidVoxelCount =
+        ChunkData->GetOccupiedVoxelCount();
+
+    LastBuiltRenderMode =
+        GetEffectiveRenderMode();
 
     int32 MeshSectionIndex = 0;
     bool bBuiltCollision = false;
@@ -189,6 +349,7 @@ void ACubusVoxelVolumeActor::RebuildVolume()
         case ECubusVoxelRenderMode::Blocks:
         {
             RebuildBlockMesh(
+                TargetMesh,
                 bGenerateCollision,
                 MeshSectionIndex
             );
@@ -196,17 +357,20 @@ void ACubusVoxelVolumeActor::RebuildVolume()
             bBuiltCollision =
                 bGenerateCollision &&
                 GeneratedBlockSectionCount > 0;
+
             break;
         }
 
         case ECubusVoxelRenderMode::Density:
         {
             RebuildDensityMesh(
+                TargetMesh,
                 bGenerateCollision,
                 MeshSectionIndex
             );
 
             RebuildBlockEditOverlay(
+                TargetMesh,
                 bGenerateCollision,
                 MeshSectionIndex
             );
@@ -217,19 +381,20 @@ void ACubusVoxelVolumeActor::RebuildVolume()
                     GeneratedDensitySectionCount > 0 ||
                     GeneratedBlockSectionCount > 0
                 );
+
             break;
         }
 
         case ECubusVoxelRenderMode::Hybrid:
         {
-            // Block collision remains authoritative until block/density edits
-            // are represented by one composite scalar field.
             RebuildBlockMesh(
+                TargetMesh,
                 bGenerateCollision,
                 MeshSectionIndex
             );
 
             RebuildDensityMesh(
+                TargetMesh,
                 false,
                 MeshSectionIndex
             );
@@ -237,23 +402,48 @@ void ACubusVoxelVolumeActor::RebuildVolume()
             bBuiltCollision =
                 bGenerateCollision &&
                 GeneratedBlockSectionCount > 0;
+
             break;
         }
 
         default:
+        {
             checkNoEntry();
             break;
+        }
     }
 
-    GeneratedMaterialSectionCount = MeshSectionIndex;
+    GeneratedMaterialSectionCount =
+        MeshSectionIndex;
 
-    ProceduralMesh->SetCollisionEnabled(
-        bBuiltCollision
-            ? ECollisionEnabled::QueryAndPhysics
-            : ECollisionEnabled::NoCollision
-    );
+    /*
+     * Visible builds may activate collision immediately.
+     * Staged builds remain collision-disabled until CommitStagedVolume().
+     */
+    if (bPublishDiagnostics)
+    {
+        TargetMesh.SetCollisionEnabled(
+            bBuiltCollision
+                ? ECollisionEnabled::QueryAndPhysics
+                : ECollisionEnabled::NoCollision
+        );
 
-    bLastBuildHadCollision = bBuiltCollision;
+        TargetMesh.SetVisibility(true);
+        TargetMesh.SetHiddenInGame(false);
+        TargetMesh.SetRenderInMainPass(true);
+        TargetMesh.SetRenderInDepthPass(true);
+    }
+    else
+    {
+        TargetMesh.SetCollisionEnabled(
+            ECollisionEnabled::NoCollision
+        );
+
+        TargetMesh.SetVisibility(false);
+        TargetMesh.SetHiddenInGame(true);
+        TargetMesh.SetRenderInMainPass(false);
+        TargetMesh.SetRenderInDepthPass(false);
+    }
 
     LastBuildTimeMilliseconds =
         static_cast<float>(
@@ -264,26 +454,36 @@ void ACubusVoxelVolumeActor::RebuildVolume()
             1000.0
         );
 
-    ProceduralMesh->MarkRenderStateDirty();
+    TargetMesh.MarkRenderStateDirty();
 
-    UE_LOG(
-        LogTemp,
-        Verbose,
-        TEXT("Cubus chunk (%d, %d, %d) built mode=%d densityStep=%.1fcm rootSections=%d blockSections=%d densitySections=%d vertices=%d triangles=%d densityTriangles=%d collision=%s time=%.2fms"),
-        ChunkCoordinate.X,
-        ChunkCoordinate.Y,
-        ChunkCoordinate.Z,
-        static_cast<int32>(LastBuiltRenderMode),
-        GetDensitySampleSpacing(),
-        GeneratedMaterialSectionCount,
-        GeneratedBlockSectionCount,
-        GeneratedDensitySectionCount,
-        GeneratedVertexCount,
-        GeneratedTriangleCount,
-        GeneratedDensityTriangleCount,
-        bBuiltCollision ? TEXT("true") : TEXT("false"),
-        LastBuildTimeMilliseconds
-    );
+    if (bPublishDiagnostics)
+    {
+        UE_LOG(
+            LogTemp,
+            Verbose,
+            TEXT(
+                "Cubus chunk (%d, %d, %d) built mode=%d "
+                "densityStep=%.1fcm rootSections=%d blockSections=%d "
+                "densitySections=%d vertices=%d triangles=%d "
+                "densityTriangles=%d collision=%s time=%.2fms"
+            ),
+            ChunkCoordinate.X,
+            ChunkCoordinate.Y,
+            ChunkCoordinate.Z,
+            static_cast<int32>(LastBuiltRenderMode),
+            GetDensitySampleSpacing(),
+            GeneratedMaterialSectionCount,
+            GeneratedBlockSectionCount,
+            GeneratedDensitySectionCount,
+            GeneratedVertexCount,
+            GeneratedTriangleCount,
+            GeneratedDensityTriangleCount,
+            bBuiltCollision ? TEXT("true") : TEXT("false"),
+            LastBuildTimeMilliseconds
+        );
+    }
+
+    return bBuiltCollision;
 }
 
 ECubusVoxelRenderMode
@@ -298,6 +498,7 @@ ACubusVoxelVolumeActor::GetEffectiveRenderMode() const
 }
 
 void ACubusVoxelVolumeActor::RebuildBlockMesh(
+    UProceduralMeshComponent& TargetMesh,
     const bool bGenerateBlockCollision,
     int32& InOutMeshSectionIndex
 )
@@ -316,7 +517,7 @@ void ACubusVoxelVolumeActor::RebuildBlockMesh(
 
     GeneratedBlockSectionCount =
         CubusVoxelVolumeActor::AppendMaterialMeshes(
-            *ProceduralMesh,
+            TargetMesh,
             MaterialRegistry.Get(),
             MaterialMeshes,
             bGenerateBlockCollision,
@@ -327,6 +528,7 @@ void ACubusVoxelVolumeActor::RebuildBlockMesh(
 }
 
 void ACubusVoxelVolumeActor::RebuildBlockEditOverlay(
+    UProceduralMeshComponent& TargetMesh,
     const bool bGenerateBlockCollision,
     int32& InOutMeshSectionIndex
 )
@@ -389,7 +591,7 @@ void ACubusVoxelVolumeActor::RebuildBlockEditOverlay(
     GeneratedFaceCount += OverlayFaceCount;
     GeneratedBlockSectionCount +=
         CubusVoxelVolumeActor::AppendMaterialMeshes(
-            *ProceduralMesh,
+            TargetMesh,
             MaterialRegistry.Get(),
             MaterialMeshes,
             bGenerateBlockCollision,
@@ -602,14 +804,13 @@ ACubusVoxelVolumeActor::BuildDensitySettings() const
     return DensitySettings;
 }
 
-void ACubusVoxelVolumeActor::RebuildDensityMesh(
-    const bool bGenerateDensityCollision,
-    int32& InOutMeshSectionIndex
-)
+FCubusDensityMeshBuildResult
+ACubusVoxelVolumeActor::BuildDensityMeshData() const
 {
-    const FCubusTerrainDensitySettings
-        DensitySettings =
-            BuildDensitySettings();
+    FCubusDensityMeshBuildResult Result;
+
+    const FCubusTerrainDensitySettings DensitySettings =
+        BuildDensitySettings();
 
     const FCubusTerrainDensityField DensityField(
         DensitySettings
@@ -630,27 +831,34 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
         DensityEditSnapshot
     );
 
-    FCubusMaterialMeshMap MaterialMeshes;
-    int32 MesherTriangleCount = 0;
-
     FCubusDensityMesher::BuildAdaptiveChunk(
         EditedDensityField,
         ChunkCoordinate,
         VoxelSize,
         DensitySubdivisionsPerVoxel,
         0.0f,
-        MaterialMeshes,
-        MesherTriangleCount
+        Result.MaterialMeshes,
+        Result.GeneratedTriangleCount
     );
 
+    return Result;
+}
+
+void ACubusVoxelVolumeActor::UploadDensityMesh(
+    UProceduralMeshComponent& TargetMesh,
+    FCubusDensityMeshBuildResult& BuildResult,
+    const bool bGenerateDensityCollision,
+    int32& InOutMeshSectionIndex
+)
+{
     GeneratedDensityTriangleCount =
-        MesherTriangleCount;
+        BuildResult.GeneratedTriangleCount;
 
     GeneratedDensitySectionCount =
         CubusVoxelVolumeActor::AppendMaterialMeshes(
-            *ProceduralMesh,
+            TargetMesh,
             MaterialRegistry.Get(),
-            MaterialMeshes,
+            BuildResult.MaterialMeshes,
             bGenerateDensityCollision,
             InOutMeshSectionIndex,
             GeneratedVertexCount,
@@ -662,12 +870,32 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
         UE_LOG(
             LogTemp,
             Verbose,
-            TEXT("Cubus native density chunk (%d, %d, %d) contains no isosurface."),
+            TEXT(
+                "Cubus native density chunk (%d, %d, %d) "
+                "contains no isosurface."
+            ),
             ChunkCoordinate.X,
             ChunkCoordinate.Y,
             ChunkCoordinate.Z
         );
     }
+}
+
+void ACubusVoxelVolumeActor::RebuildDensityMesh(
+    UProceduralMeshComponent& TargetMesh,
+    const bool bGenerateDensityCollision,
+    int32& InOutMeshSectionIndex
+)
+{
+    FCubusDensityMeshBuildResult BuildResult =
+        BuildDensityMeshData();
+
+    UploadDensityMesh(
+        TargetMesh,
+        BuildResult,
+        bGenerateDensityCollision,
+        InOutMeshSectionIndex
+    );
 }
 
 void ACubusVoxelVolumeActor::EnsureChunkData()

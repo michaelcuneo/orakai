@@ -206,6 +206,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
     int32 MaxDirtyChunksRebuiltPerTick = 2;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", UIMax = "16"))
+    int32 MaxAtomicDensityChunksStagedPerTick = 1;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0.05", Units = "s"))
     float StreamingUpdateInterval = 0.25f;
 
@@ -334,7 +337,47 @@ private:
 
     TArray<FIntVector> PendingChunkGeneration;
     TArray<FIntVector> PendingChunkRemoval;
+
+    /*
+    * Ordinary block/streaming rebuilds may publish independently.
+    */
     TSet<FIntVector> DirtyChunkCoordinates;
+
+    /*
+    * Density edits may never publish independently.
+    *
+    * Every loaded chunk in this set is rebuilt into its hidden staging
+    * component first. Only after the complete set is ready do we publish
+    * the batch.
+    */
+    TSet<FIntVector> AtomicDensityDirtyChunkCoordinates;
+
+    /*
+    * Current hidden density rebuild transaction.
+    *
+    * The visible terrain remains on the previous committed revision until every
+    * coordinate in ActiveAtomicDensityBatchCoordinates has been staged.
+    */
+    TArray<FIntVector> ActiveAtomicDensityBatchCoordinates;
+
+    TArray<
+        TWeakObjectPtr<ACubusVoxelVolumeActor>
+    > ActiveAtomicDensityStagedChunks;
+
+    int32 ActiveAtomicDensityBuildIndex = 0;
+
+    /*
+    * Incremented whenever the authoritative density edit field changes.
+    */
+    uint64 DensityEditRevision = 0;
+
+    /*
+    * Revision against which the current staged transaction is being built.
+    */
+    uint64 ActiveAtomicDensityRevision = 0;
+
+    bool bAtomicDensityBatchActive = false;
+
     TSet<FIntVector> RequiredChunkCoordinates;
     TSet<FIntVector> InitialRequiredCoordinates;
 
@@ -376,6 +419,7 @@ private:
     ACubusVoxelVolumeActor* SpawnChunkAtCoordinate(const FIntVector& Coordinate, bool bGenerateVegetation);
     void UpdateRuntimeStreaming(bool bForce);
     void ProcessRuntimeQueues();
+    void ProcessAtomicDensityEditBatch();
     void ProcessDirtyChunkQueue();
     void BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius, TSet<FIntVector>& OutCoordinates) const;
     FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;

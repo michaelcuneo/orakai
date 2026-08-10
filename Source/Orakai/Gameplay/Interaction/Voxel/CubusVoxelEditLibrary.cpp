@@ -3,7 +3,6 @@
 #include "CubusCore/Actors/CubusBlockWorldActor.h"
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
-#include "CubusCore/Persistence/OrakaiPersistenceTypes.h"
 
 namespace CubusVoxelEdit
 {
@@ -165,24 +164,6 @@ namespace CubusVoxelEdit
 
         return ChangedSampleCount;
     }
-
-    void RebuildEditedChunkImmediately(
-        ACubusBlockWorldActor& BlockWorld,
-        const FIntVector& WorldSample
-    )
-    {
-        const FIntVector ChunkCoordinate =
-            OrakaiPersistence::WorldVoxelToChunk(WorldSample);
-
-        if (ACubusVoxelVolumeActor* Chunk =
-                BlockWorld.FindChunk(ChunkCoordinate))
-        {
-            // The edited chunk is the one the player is looking at. Rebuild it
-            // immediately for responsive tools; neighbouring seam and normal
-            // dependencies remain on the world's throttled dirty queue.
-            Chunk->RebuildVolume();
-        }
-    }
 }
 
 bool UCubusVoxelEditLibrary::ResolveHitVoxel(
@@ -330,14 +311,6 @@ int32 UCubusVoxelEditLibrary::RemoveDensityFromHit(
             0
         );
 
-    if (ChangedSampleCount > 0)
-    {
-        CubusVoxelEdit::RebuildEditedChunkImmediately(
-            *BlockWorld,
-            WorldSample
-        );
-    }
-
     return ChangedSampleCount;
 }
 
@@ -369,14 +342,6 @@ int32 UCubusVoxelEditLibrary::AddDensityFromHit(
             FMath::Abs(Strength),
             MaterialId
         );
-
-    if (ChangedSampleCount > 0)
-    {
-        CubusVoxelEdit::RebuildEditedChunkImmediately(
-            *BlockWorld,
-            WorldSample
-        );
-    }
 
     return ChangedSampleCount;
 }

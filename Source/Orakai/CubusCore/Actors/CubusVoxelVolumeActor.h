@@ -15,6 +15,37 @@ class UProceduralMeshComponent;
 struct FCubusBlockChunkNeighborhood;
 struct FCubusTerrainDensitySettings;
 
+struct FCubusDensityMeshBuildInput
+{
+    FCubusTerrainDensitySettings DensitySettings;
+    FCubusDensityEditMap DensityEdits;
+
+    FIntVector ChunkCoordinate = FIntVector::ZeroValue;
+
+    float VoxelSize = 100.0f;
+    int32 SubdivisionsPerVoxel = 1;
+    float IsoLevel = 0.0f;
+};
+
+struct FCubusDensityMeshBuildResult
+{
+    TMap<int32, FCubusMeshData> MaterialMeshes;
+    FCubusMaterialMeshMap MaterialMeshes;
+
+    int32 GeneratedTriangleCount = 0;
+
+    bool IsValid() const
+    {
+        return true;
+    }
+
+    void Reset()
+    {
+        MaterialMeshes.Reset();
+        GeneratedTriangleCount = 0;
+    }
+};
+
 UCLASS(
     BlueprintType,
     Blueprintable,
@@ -33,6 +64,28 @@ public:
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Rendering")
     void RebuildVolume();
+
+    /*
+    * Builds a complete replacement mesh into the hidden staging component.
+    * The currently visible terrain is not modified.
+    */
+    bool BuildStagedVolume();
+
+    /*
+    * Publishes the staged mesh and retires the previously visible mesh.
+    * Stage 3H-B will call this for all chunks in an edit batch together.
+    */
+    void CommitStagedVolume();
+
+    /*
+    * Throws away an uncommitted staged rebuild.
+    */
+    void DiscardStagedVolume();
+
+    bool HasStagedVolume() const
+    {
+        return bHasStagedVolume;
+    }
 
     UFUNCTION(BlueprintPure, Category = "Cubus|Rendering")
     ECubusVoxelRenderMode GetEffectiveRenderMode() const;
@@ -72,7 +125,7 @@ public:
 
     UProceduralMeshComponent* GetTerrainMeshComponent() const
     {
-        return ProceduralMesh.Get();
+        return ActiveProceduralMesh.Get();
     }
 
     bool HasBuiltTerrainCollision() const
@@ -170,6 +223,21 @@ protected:
      */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
     TObjectPtr<UProceduralMeshComponent> ProceduralMesh;
+
+    /*
+    * Hidden back-buffer used for transactional terrain rebuilds.
+    *
+    * Mesh generation writes here while ProceduralMesh/ActiveProceduralMesh
+    * continues displaying the previous complete terrain revision.
+    */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
+    TObjectPtr<UProceduralMeshComponent> StagingProceduralMesh;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UProceduralMeshComponent> ActiveProceduralMesh;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UProceduralMeshComponent> InactiveProceduralMesh;
 
     UPROPERTY(
         VisibleInstanceOnly,
@@ -360,25 +428,50 @@ protected:
 
 private:
     TUniquePtr<FCubusBlockChunkData> ChunkData;
+
     bool bChunkCacheDirty = false;
     bool bLastBuildHadCollision = false;
+
+    bool bHasStagedVolume = false;
+    bool bStagedBuildHadCollision = false;
 
     void EnsureChunkData();
     void SynchronizeChunkState();
 
+    bool BuildVolumeInto(
+        UProceduralMeshComponent& TargetMesh,
+        bool bPublishDiagnostics
+    );
+
     void RebuildBlockMesh(
+        UProceduralMeshComponent& TargetMesh,
         bool bGenerateBlockCollision,
         int32& InOutMeshSectionIndex
     );
 
     FCubusTerrainDensitySettings BuildDensitySettings() const;
 
+    FCubusDensityMeshBuildInput CaptureDensityMeshBuildInput() const;
+
+    static FCubusDensityMeshBuildResult BuildDensityMeshData(
+        const FCubusDensityMeshBuildInput& Input
+    );
+
+    void UploadDensityMesh(
+        UProceduralMeshComponent& TargetMesh,
+        FCubusDensityMeshBuildResult& BuildResult,
+        bool bGenerateDensityCollision,
+        int32& InOutMeshSectionIndex
+    );
+
     void RebuildDensityMesh(
+        UProceduralMeshComponent& TargetMesh,
         bool bGenerateDensityCollision,
         int32& InOutMeshSectionIndex
     );
 
     void RebuildBlockEditOverlay(
+        UProceduralMeshComponent& TargetMesh,
         bool bGenerateBlockCollision,
         int32& InOutMeshSectionIndex
     );
