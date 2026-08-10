@@ -38,7 +38,7 @@
 #include "IMeshMergeUtilities.h"
 #include "MeshMergeModule.h"
 #include "Modules/ModuleManager.h"
-#include "Engine/MeshMerging.h"
+#include "MeshMerge/MeshMergingSettings.h"
 #include "UObject/Package.h"
 #endif
 
