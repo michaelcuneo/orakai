@@ -1,0 +1,434 @@
+name: Apply pawn-centred streaming patch
+
+on:
+  push:
+    branches:
+      - agent/density-meshing
+
+permissions:
+  contents: write
+
+jobs:
+  patch-streaming-origins:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+
+      - name: Patch streaming ownership
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          # -----------------------------------------------------------------
+          # LOD0 gameplay terrain: world ownership follows the pawn.
+          # -----------------------------------------------------------------
+          block_path = Path("Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp")
+          block = block_path.read_text(encoding="utf-8")
+
+          function_start = block.index("void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)")
+          centre_anchor = block.index("    const FIntVector CentreCoordinate =", function_start)
+          old_preamble = block[function_start:centre_anchor]
+          new_preamble = '''void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
+          {
+              APawn* PlayerPawn = TrackedPawn.Get();
+
+              if (!IsValid(PlayerPawn))
+              {
+                  PlayerPawn =
+                      UGameplayStatics::GetPlayerPawn(this, 0);
+
+                  if (IsValid(PlayerPawn))
+                  {
+                      TrackedPawn = PlayerPawn;
+                  }
+              }
+
+              /*
+               * Runtime world ownership follows the controlled pawn.
+               * A third-person camera may orbit, lag or cross chunk boundaries
+               * independently and must not stream gameplay terrain underneath
+               * the character.
+               */
+              const FVector TrackingLocation =
+                  bPawnHeldForStreaming
+                      ? HeldPawnLocation
+                      : (IsValid(PlayerPawn)
+                          ? PlayerPawn->GetActorLocation()
+                          : GetActorLocation());
+
+          '''
+          block = block[:function_start] + new_preamble + block[centre_anchor:]
+          block_path.write_text(block, encoding="utf-8")
+
+          # -----------------------------------------------------------------
+          # Vegetation: chunk ownership, recentering and far cells follow pawn.
+          # Camera remains authoritative for hero/render representation only.
+          # -----------------------------------------------------------------
+          veg_path = Path("Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp")
+          veg = veg_path.read_text(encoding="utf-8")
+
+          if '#include "GameFramework/Pawn.h"' not in veg:
+              veg = replace_once(
+                  veg,
+                  '#include "GameFramework/PlayerController.h"\n',
+                  '#include "GameFramework/Pawn.h"\n#include "GameFramework/PlayerController.h"\n',
+                  "add Pawn include",
+              )
+
+          # Tick saturated-budget recenter: pawn, not camera.
+          tick_start = veg.index("void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)")
+          tick_end = veg.index("void ACubusWorldVegetationActor::EndPlay(", tick_start)
+          tick = veg[tick_start:tick_end]
+          recenter_start = tick.index("    bool bCameraRecenterRequired = false;")
+          hash_if = tick.index("    if (\n        CurrentHash !=", recenter_start)
+          old_recenter = tick[recenter_start:hash_if]
+          new_recenter = '''    bool bStreamingRecenterRequired = false;
+
+              if (
+                  bPublishedVegetationBudgetSaturated &&
+                  bHasLastFullVegetationBuildCameraLocation
+              )
+              {
+                  const APawn* PlayerPawn =
+                      UGameplayStatics::GetPlayerPawn(this, 0);
+
+                  if (IsValid(PlayerPawn))
+                  {
+                      const FVector StreamingLocation =
+                          PlayerPawn->GetActorLocation();
+
+                      const double RecenterDistance =
+                          static_cast<double>(
+                              FMath::Max(
+                                  100.0f,
+                                  VegetationRecenterDistance
+                              )
+                          );
+
+                      bStreamingRecenterRequired =
+                          FVector::DistSquared(
+                              StreamingLocation,
+                              LastFullVegetationBuildCameraLocation
+                          ) >=
+                          RecenterDistance *
+                          RecenterDistance;
+                  }
+              }
+
+          '''
+          tick = tick[:recenter_start] + new_recenter + tick[hash_if:]
+          tick = replace_once(
+              tick,
+              "        bCameraRecenterRequired\n",
+              "        bStreamingRecenterRequired\n",
+              "Tick recenter condition",
+          )
+          veg = veg[:tick_start] + tick + veg[tick_end:]
+
+          # RebuildWorldVegetation: retain camera for hero representation, add
+          # a separate pawn-centred streaming origin for ownership/budgeting.
+          rebuild_start = veg.index("void ACubusWorldVegetationActor::RebuildWorldVegetation()")
+          rebuild_end = veg.index("void ACubusWorldVegetationActor::ClearWorldVegetation()", rebuild_start)
+          rebuild = veg[rebuild_start:rebuild_end]
+
+          old_origin = '''    const APlayerController* PlayerController =
+                  UGameplayStatics::GetPlayerController(this, 0);
+
+              const bool bHasCamera =
+                  IsValid(PlayerController) &&
+                  IsValid(PlayerController->PlayerCameraManager);
+
+              const bool bUseCameraChunkCulling =
+                  bCullByCameraChunkRadius &&
+                  bHasCamera;
+
+              const FVector CameraLocation = bHasCamera
+                  ? PlayerController->PlayerCameraManager->GetCameraLocation()
+                  : FVector::ZeroVector;
+          '''
+          new_origin = '''    const APlayerController* PlayerController =
+                  UGameplayStatics::GetPlayerController(this, 0);
+
+              const bool bHasCamera =
+                  IsValid(PlayerController) &&
+                  IsValid(PlayerController->PlayerCameraManager);
+
+              const FVector CameraLocation = bHasCamera
+                  ? PlayerController->PlayerCameraManager->GetCameraLocation()
+                  : FVector::ZeroVector;
+
+              const APawn* PlayerPawn =
+                  UGameplayStatics::GetPlayerPawn(this, 0);
+
+              const bool bHasStreamingOrigin =
+                  IsValid(PlayerPawn);
+
+              const FVector StreamingLocation =
+                  bHasStreamingOrigin
+                      ? PlayerPawn->GetActorLocation()
+                      : FVector::ZeroVector;
+
+              /*
+               * Keep the existing config/property name for compatibility, but
+               * the ownership radius is centred on the pawn rather than the
+               * third-person camera.
+               */
+              const bool bUseCameraChunkCulling =
+                  bCullByCameraChunkRadius &&
+                  bHasStreamingOrigin;
+          '''
+          rebuild = replace_once(rebuild, old_origin, new_origin, "Rebuild origin block")
+
+          # Exactly two chunk-filter calls in RebuildWorldVegetation.
+          old_filter_arg = '''                CameraLocation,
+                          bUseCameraChunkCulling,
+          '''
+          if rebuild.count(old_filter_arg) != 2:
+              raise RuntimeError(
+                  f"Rebuild chunk filters: expected 2 matches, found {rebuild.count(old_filter_arg)}"
+              )
+          rebuild = rebuild.replace(
+              old_filter_arg,
+              '''                StreamingLocation,
+                          bUseCameraChunkCulling,
+          ''',
+              2,
+          )
+
+          rebuild = replace_once(
+              rebuild,
+              '''    if (
+                  bHasCamera &&
+                  bHasLastFullVegetationBuildCameraLocation
+              )
+          ''',
+              '''    if (
+                  bHasStreamingOrigin &&
+                  bHasLastFullVegetationBuildCameraLocation
+              )
+          ''',
+              "Rebuild recenter availability",
+          )
+          rebuild = replace_once(
+              rebuild,
+              '''            FVector::DistSquared(
+                      CameraLocation,
+                      LastFullVegetationBuildCameraLocation
+                  ) >=
+          ''',
+              '''            FVector::DistSquared(
+                      StreamingLocation,
+                      LastFullVegetationBuildCameraLocation
+                  ) >=
+          ''',
+              "Rebuild recenter location",
+          )
+
+          rebuild = replace_once(
+              rebuild,
+              '''    VegetationChunkCoordinates.Sort(
+                  [&RegisteredChunks, &CameraLocation](
+          ''',
+              '''    VegetationChunkCoordinates.Sort(
+                  [&RegisteredChunks, &StreamingLocation](
+          ''',
+              "Vegetation sort capture",
+          )
+          old_sort_distance = '''            return FVector::DistSquared(
+                      ChunkA->GetActorLocation(),
+                      CameraLocation
+                  ) <
+                  FVector::DistSquared(
+                      ChunkB->GetActorLocation(),
+                      CameraLocation
+                  );
+          '''
+          new_sort_distance = '''            return FVector::DistSquared(
+                      ChunkA->GetActorLocation(),
+                      StreamingLocation
+                  ) <
+                  FVector::DistSquared(
+                      ChunkB->GetActorLocation(),
+                      StreamingLocation
+                  );
+          '''
+          rebuild = replace_once(rebuild, old_sort_distance, new_sort_distance, "Vegetation nearest-first sort")
+
+          rebuild = replace_once(
+              rebuild,
+              '''    if (
+                  bFullVegetationRebuild &&
+                  bHasCamera
+              )
+              {
+                  LastFullVegetationBuildCameraLocation =
+                      CameraLocation;
+          ''',
+              '''    if (
+                  bFullVegetationRebuild &&
+                  bHasStreamingOrigin
+              )
+              {
+                  LastFullVegetationBuildCameraLocation =
+                      StreamingLocation;
+          ''',
+              "Vegetation recenter anchor publish",
+          )
+
+          veg = veg[:rebuild_start] + rebuild + veg[rebuild_end:]
+
+          # CalculateLoadedPlacementHash ownership radius follows pawn.
+          hash_start = veg.index("uint32 ACubusWorldVegetationActor::CalculateLoadedPlacementHash(")
+          hash_end = veg.index("void ACubusWorldVegetationActor::RefreshVegetationBatches()", hash_start)
+          loaded_hash = veg[hash_start:hash_end]
+          old_hash_origin = '''    const APlayerController* PlayerController =
+                  UGameplayStatics::GetPlayerController(this, 0);
+
+              const bool bHasCamera =
+                  IsValid(PlayerController) &&
+                  IsValid(PlayerController->PlayerCameraManager);
+
+              const bool bUseCameraChunkCulling =
+                  bCullByCameraChunkRadius &&
+                  bHasCamera;
+
+              const FVector CameraLocation = bHasCamera
+                  ? PlayerController->PlayerCameraManager->GetCameraLocation()
+                  : FVector::ZeroVector;
+          '''
+          new_hash_origin = '''    const APawn* PlayerPawn =
+                  UGameplayStatics::GetPlayerPawn(this, 0);
+
+              const bool bHasStreamingOrigin =
+                  IsValid(PlayerPawn);
+
+              const bool bUseCameraChunkCulling =
+                  bCullByCameraChunkRadius &&
+                  bHasStreamingOrigin;
+
+              const FVector StreamingLocation =
+                  bHasStreamingOrigin
+                      ? PlayerPawn->GetActorLocation()
+                      : FVector::ZeroVector;
+          '''
+          loaded_hash = replace_once(loaded_hash, old_hash_origin, new_hash_origin, "Loaded hash origin")
+          loaded_hash = replace_once(
+              loaded_hash,
+              '''                CameraLocation,
+                          bUseCameraChunkCulling,
+          ''',
+              '''                StreamingLocation,
+                          bUseCameraChunkCulling,
+          ''',
+              "Loaded hash chunk filter",
+          )
+          veg = veg[:hash_start] + loaded_hash + veg[hash_end:]
+
+          # Far vegetation cell ownership and radial population follow pawn.
+          far_start = veg.index("ACubusWorldVegetationActor::UpdateFarVegetationStreaming(")
+          far_end = veg.index("void\nACubusWorldVegetationActor::PublishFarVegetation(", far_start)
+          far = veg[far_start:far_end]
+
+          old_far_origin = '''    const APlayerController* PlayerController =
+                  UGameplayStatics::GetPlayerController(
+                      this,
+                      0
+                  );
+
+              if (
+                  !IsValid(PlayerController) ||
+                  !IsValid(
+                      PlayerController->PlayerCameraManager
+                  )
+              )
+              {
+                  return;
+              }
+
+              const FVector CameraLocation =
+                  PlayerController
+                      ->PlayerCameraManager
+                      ->GetCameraLocation();
+          '''
+          new_far_origin = '''    const APawn* PlayerPawn =
+                  UGameplayStatics::GetPlayerPawn(
+                      this,
+                      0
+                  );
+
+              if (!IsValid(PlayerPawn))
+              {
+                  return;
+              }
+
+              const FVector StreamingLocation =
+                  PlayerPawn->GetActorLocation();
+          '''
+          far = replace_once(far, old_far_origin, new_far_origin, "Far vegetation origin")
+          far = far.replace("CameraWorldVoxelX", "StreamingWorldVoxelX")
+          far = far.replace("CameraWorldVoxelY", "StreamingWorldVoxelY")
+          # These two location component uses are inside the inverse world-voxel transform.
+          if far.count("CameraLocation.X") != 1 or far.count("CameraLocation.Y") != 1:
+              raise RuntimeError("Far vegetation expected one CameraLocation.X/Y ownership use")
+          far = far.replace("CameraLocation.X", "StreamingLocation.X")
+          far = far.replace("CameraLocation.Y", "StreamingLocation.Y")
+          far = replace_once(
+              far,
+              '''        PublishFarVegetation(
+                      CameraLocation,
+                      SafeVoxelSize
+                  );
+          ''',
+              '''        PublishFarVegetation(
+                      StreamingLocation,
+                      SafeVoxelSize
+                  );
+          ''',
+              "Far vegetation publish origin",
+          )
+          veg = veg[:far_start] + far + veg[far_end:]
+
+          veg_path.write_text(veg, encoding="utf-8")
+
+          # Cosmetic declaration consistency for terrain LOD.
+          lod_header_path = Path("Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h")
+          lod_header = lod_header_path.read_text(encoding="utf-8")
+          lod_header = replace_once(
+              lod_header,
+              "        const FVector& CameraGridLocation,\n",
+              "        const FVector& StreamingGridLocation,\n",
+              "Terrain LOD header parameter name",
+          )
+          lod_header_path.write_text(lod_header, encoding="utf-8")
+          PY
+
+      - name: Validate patch
+        shell: bash
+        run: |
+          git diff --check
+          git diff --stat
+          grep -n "UpdateRuntimeStreaming" Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp | head -1
+          grep -n "StreamingLocation" Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp | head
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp \
+            Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp \
+            Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h
+          git commit -m "Anchor world streaming to player pawn"
+          git push origin HEAD:agent/density-meshing
