@@ -38,7 +38,7 @@ void FCubusVegetationCatalog::Rebuild(
             Entry.TypeId <= 0 ||
             (
                 Entry.GrowthStageMeshes.IsEmpty() &&
-                Entry.StaticGrowthStageMeshes.IsEmpty()
+                Entry.StaticGrowthStageAssets.IsEmpty()
             )
         )
         {

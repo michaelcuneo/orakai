@@ -2,12 +2,33 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+
+#include "CubusCore/Data/CubusVegetationInstance.h"
+#include "Tasks/Task.h"
 #include "CubusCore/Vegetation/CubusVegetationTypes.h"
 #include "CubusCore/Vegetation/CubusVegetationCatalog.h"
 #include "CubusCore/Vegetation/CubusVegetationRenderer.h"
 #include "CubusCore/Vegetation/CubusVegetationPlacement.h"
 
 #include "CubusWorldVegetationActor.generated.h"
+
+struct FCubusFarVegetationCellBuildResult
+{
+    FIntPoint CellCoordinate =
+        FIntPoint::ZeroValue;
+
+    TArray<FCubusVegetationInstance> Trees;
+};
+
+struct FCubusFarVegetationCellBuild
+{
+    FIntPoint CellCoordinate =
+        FIntPoint::ZeroValue;
+
+    UE::Tasks::TTask<
+        FCubusFarVegetationCellBuildResult
+    > Task;
+};
 
 class ACubusBlockWorldActor;
 class UInstancedStaticMeshComponent;
@@ -253,6 +274,159 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming",meta = (ClampMin = "100.0", Units = "cm"))
     float VegetationRecenterDistance = 3200.0f;
 
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming"
+    )
+    bool bEnableFarVegetation = true;
+
+    /*
+     * One far cell spans this many ordinary terrain chunks per axis.
+     *
+     * 8 chunks * 32 voxels * 1m = 256m with the current world scale.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "1",
+            ClampMax = "32"
+        )
+    )
+    int32 FarVegetationCellSizeChunks = 8;
+
+    /*
+     * 16 cells * 256m ~= 4.1km of far-forest coverage.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "1",
+            ClampMax = "32"
+        )
+    )
+    int32 FarVegetationRadiusCells = 16;
+
+    /*
+     * Far representatives are hidden close to the camera because ordinary
+     * streamed vegetation owns that region.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "0.0",
+            Units = "cm"
+        )
+    )
+    float FarVegetationInnerRadius = 20000.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "10000.0",
+            Units = "cm"
+        )
+    )
+    float FarVegetationEndCullDistance = 450000.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "2",
+            ClampMax = "64"
+        )
+    )
+    int32 FarTreeSampleStrideVoxels = 4;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "0.0",
+            ClampMax = "1.0"
+        )
+    )
+    float FarTreeDensityScale = 0.35f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "1",
+            ClampMax = "16"
+        )
+    )
+    int32 MaxConcurrentFarVegetationBuilds = 4;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "1",
+            ClampMax = "16"
+        )
+    )
+    int32 MaxFarVegetationBuildStartsPerTick = 4;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "0.1",
+            ClampMax = "5.0",
+            Units = "s"
+        )
+    )
+    float FarVegetationPublishInterval = 0.5f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming",
+        meta = (
+            ClampMin = "1000",
+            ClampMax = "500000"
+        )
+    )
+    int32 MaximumFarRenderedTrees = 150000;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Far Streaming"
+    )
+    bool bCastFarVegetationShadows = false;
+
+    UPROPERTY(
+        VisibleAnywhere,
+        BlueprintReadOnly,
+        Transient,
+        Category = "Cubus|Vegetation|Diagnostics"
+    )
+    int32 LoadedFarVegetationCellCount = 0;
+
+    UPROPERTY(
+        VisibleAnywhere,
+        BlueprintReadOnly,
+        Transient,
+        Category = "Cubus|Vegetation|Diagnostics"
+    )
+    int32 RenderedFarTreeCount = 0;
+    
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Vegetation|Diagnostics")
     int32 LoadedChunkCount = 0;
 
@@ -316,6 +490,12 @@ private:
         TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
     > CatalogStaticBatchComponents;
 
+     UPROPERTY(Transient)
+    TMap<
+        int64,
+        TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+    > FarCatalogStaticBatchComponents;
+
     UPROPERTY(Transient)
     TMap<
         int64,
@@ -354,6 +534,35 @@ private:
 
     float TimeUntilRefresh = 0.0f;
 
+    FIntPoint LastFarVegetationCentreCell =
+        FIntPoint(
+            MAX_int32,
+            MAX_int32
+        );
+
+    TSet<FIntPoint>
+        RequiredFarVegetationCells;
+
+    TSet<FIntPoint>
+        FarVegetationCellsBuilding;
+
+    TArray<FIntPoint>
+        PendingFarVegetationCells;
+
+    TArray<FCubusFarVegetationCellBuild>
+        FarVegetationBuilds;
+
+    TMap<
+        FIntPoint,
+        TArray<FCubusVegetationInstance>
+    > FarVegetationCellCache;
+
+    float TimeUntilFarVegetationPublish =
+        0.0f;
+
+    bool bFarVegetationRenderDirty =
+        false;
+
     FCubusVegetationCatalog VegetationCatalog;
     FCubusVegetationRenderer VegetationRenderer;
     FCubusVegetationPlacement VegetationPlacement;
@@ -361,6 +570,16 @@ private:
     void ResolveBlockWorld();
     void RefreshVegetationBatches();
     void UpdateDynamicWindBridge();
+
+    void RefreshFarVegetationBatches();
+    void UpdateFarVegetationStreaming(
+        float DeltaSeconds
+    );
+    void PublishFarVegetation(
+        const FVector& CameraLocation,
+        float VoxelSize
+    );
+    void ClearFarVegetation();
 
     uint32 CalculateLoadedPlacementHash(int32& OutLoadedChunkCount) const;
     uint32 CalculateVegetationSettingsHash() const;

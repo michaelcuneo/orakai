@@ -53,8 +53,12 @@ struct FCubusVegetationSpeciesCatalogEntry
     TArray<TSoftObjectPtr<UObject>> GrowthStageMeshes;
 
     /** Static representations used outside the interactive hero radius. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
-    TArray<TSoftObjectPtr<UStaticMesh>> StaticGrowthStageMeshes;
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Catalog",
+        meta = (AllowedClasses = "/Script/Engine.StaticMesh,/Script/Engine.SkeletalMesh,/Script/Engine.Blueprint"))
+    TArray<TSoftObjectPtr<UObject>> StaticGrowthStageAssets;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (AllowedClasses = "/Script/Engine.Actor"))
     TSoftClassPtr<AActor> HeroPveActorClassOverride;

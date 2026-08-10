@@ -611,98 +611,127 @@ void FCubusVegetationRenderer::EnsureBatches(
             )
             : Entry.SpeciesId.ToString();
 
-        for (
-            int32 GrowthStageIndex = 0;
-            GrowthStageIndex < Entry.StaticGrowthStageMeshes.Num();
-            ++GrowthStageIndex
-        )
-        {
-            const TSoftObjectPtr<UStaticMesh>& StaticMeshReference =
-                Entry.StaticGrowthStageMeshes[GrowthStageIndex];
+    for (
+        int32 GrowthStageIndex = 0;
+        GrowthStageIndex < Entry.StaticGrowthStageAssets.Num();
+        ++GrowthStageIndex
+    )
+    {
+    const TSoftObjectPtr<UObject>& AssetReference =
+        Entry.StaticGrowthStageAssets[
+            GrowthStageIndex
+        ];
 
-            if (StaticMeshReference.IsNull())
-            {
-                continue;
-            }
-
-            UStaticMesh* StaticFallbackMesh =
-                StaticMeshReference.LoadSynchronous();
-
-            if (!IsValid(StaticFallbackMesh))
-            {
-                UE_LOG(
-                    LogTemp,
-                    Warning,
-                    TEXT(
-                        "Cubus vegetation failed to load static fallback "
-                        "for species '%s', growth stage %d."
-                    ),
-                    *Entry.SpeciesId.ToString(),
-                    GrowthStageIndex
-                );
-
-                continue;
-            }
-
-            const int64 StaticFallbackBatchKey =
-                MakeStaticFallbackBatchKey(
-                    SpeciesIndex,
-                    GrowthStageIndex
-                );
-
-            UHierarchicalInstancedStaticMeshComponent* Component =
-                StaticBatchComponents.FindRef(
-                    StaticFallbackBatchKey
-                );
-
-            if (!IsValid(Component))
-            {
-                const FName ComponentName(
-                    *FString::Printf(
-                        TEXT("CubusWorldCatalogFallback_%s_%d"),
-                        *SpeciesToken,
-                        GrowthStageIndex
-                    )
-                );
-
-                Component = CreateStaticBatch(
-                    Owner,
-                    Root,
-                    ComponentName,
-                    bCastShadow,
-                    StartCullDistance,
-                    EndCullDistance
-                );
-            }
-
-            if (!IsValid(Component))
-            {
-                continue;
-            }
-
-            Component->SetStaticMesh(
-                StaticFallbackMesh
-            );
-
-            Component->SetCastShadow(
-                bCastShadow
-            );
-
-            Component->SetCullDistances(
-                FMath::Max(0, StartCullDistance),
-                FMath::Max(
-                    StartCullDistance,
-                    EndCullDistance
-                )
-            );
-
-            NewStaticBatches.Add(
-                StaticFallbackBatchKey,
-                Component
-            );
-        }
+    if (AssetReference.IsNull())
+    {
+        continue;
     }
 
+    UObject* LoadedAsset =
+        AssetReference.LoadSynchronous();
+
+    if (!IsValid(LoadedAsset))
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT(
+                "Cubus vegetation failed to load far/static "
+                "representation for species '%s', stage %d."
+            ),
+            *Entry.SpeciesId.ToString(),
+            GrowthStageIndex
+        );
+
+        continue;
+    }
+
+    UStaticMesh* StaticFallbackMesh =
+        Cast<UStaticMesh>(
+            LoadedAsset
+        );
+
+    if (!IsValid(StaticFallbackMesh))
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT(
+                "Cubus vegetation far representation '%s' "
+                "is class '%s', not a directly renderable "
+                "UStaticMesh yet."
+            ),
+            *LoadedAsset->GetName(),
+            *LoadedAsset->GetClass()->GetName()
+        );
+
+        continue;
+    }
+
+    const int64 StaticFallbackBatchKey =
+        MakeStaticFallbackBatchKey(
+            SpeciesIndex,
+            GrowthStageIndex
+        );
+
+    UHierarchicalInstancedStaticMeshComponent* Component =
+        StaticBatchComponents.FindRef(
+            StaticFallbackBatchKey
+        );
+
+    if (!IsValid(Component))
+    {
+        const FName ComponentName(
+            *FString::Printf(
+                TEXT(
+                    "CubusWorldCatalogFallback_%s_%d"
+                ),
+                *SpeciesToken,
+                GrowthStageIndex
+            )
+        );
+
+        Component =
+            CreateStaticBatch(
+                Owner,
+                Root,
+                ComponentName,
+                bCastShadow,
+                StartCullDistance,
+                EndCullDistance
+            );
+    }
+
+    if (!IsValid(Component))
+    {
+        continue;
+    }
+
+    Component->SetStaticMesh(
+        StaticFallbackMesh
+    );
+
+    Component->SetCastShadow(
+        bCastShadow
+    );
+
+    Component->SetCullDistances(
+        FMath::Max(
+            0,
+            StartCullDistance
+        ),
+        FMath::Max(
+            StartCullDistance,
+            EndCullDistance
+        )
+    );
+
+    NewStaticBatches.Add(
+        StaticFallbackBatchKey,
+        Component
+    );
+}
+}
     for (
         const TPair<
             int64,

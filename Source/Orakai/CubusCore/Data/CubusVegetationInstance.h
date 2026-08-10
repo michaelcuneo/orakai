@@ -23,3 +23,13 @@ struct FCubusVegetationInstance
     int32 TypeId = 0;
     int32 BiomeMask = CubusVegetationBiome::All;
 };
+
+/**
+ * Immutable inputs required to generate vegetation directly from world
+ * coordinates without constructing a terrain chunk.
+ */
+struct FCubusVegetationRegion
+{
+    FIntPoint Minimum = FIntPoint::ZeroValue;
+    FIntPoint Maximum = FIntPoint::ZeroValue;
+};

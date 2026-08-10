@@ -94,6 +94,18 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Rendering")
     void RebuildVolume();
 
+    FCubusTerrainDensitySettings
+    CaptureTerrainDensitySettings() const
+    {
+        return BuildDensitySettings();
+    }
+
+    const UCubusGeologyProfile*
+    GetGeologyProfile() const
+    {
+        return GeologyProfile.Get();
+    }
+
     FCubusDensityMeshBuildInput CaptureDensityMeshBuildInput() const;
 
     static FCubusDensityMeshBuildResult BuildDensityMeshData(

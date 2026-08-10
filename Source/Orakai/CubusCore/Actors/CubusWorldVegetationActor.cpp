@@ -8,6 +8,8 @@
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
+#include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
+#include "CubusCore/Generation/CubusTerrainDensityField.h"
 #include "CubusCore/Data/CubusVegetationInstance.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -150,7 +152,10 @@ void ACubusWorldVegetationActor::BeginPlay()
 
     ResolveBlockWorld();
     RefreshVegetationBatches();
+    RefreshFarVegetationBatches();
+
     TimeUntilRefresh = 0.0f;
+    TimeUntilFarVegetationPublish = 0.0f;
 }
 
 void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
@@ -159,16 +164,19 @@ void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
 
     UpdateDynamicWindBridge();
 
-    TimeUntilRefresh -= DeltaSeconds;
+    ResolveBlockWorld();
 
+    UpdateFarVegetationStreaming(
+        DeltaSeconds
+    );
+
+    TimeUntilRefresh -= DeltaSeconds;
     if (TimeUntilRefresh > 0.0f)
     {
         return;
     }
 
     TimeUntilRefresh = FMath::Max(0.1f, RefreshInterval);
-
-    ResolveBlockWorld();
 
     int32 CurrentLoadedChunkCount = 0;
     const uint32 CurrentHash =
@@ -239,6 +247,7 @@ void ACubusWorldVegetationActor::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
 {
+    ClearFarVegetation();
     ClearWorldVegetation();
     VegetationPlacement.Reset();
     Super::EndPlay(EndPlayReason);
@@ -1101,6 +1110,148 @@ bool ACubusWorldVegetationActor::FindInteractiveTreeAlongRay(
     return bFound;
 }
 
+void
+ACubusWorldVegetationActor::RefreshFarVegetationBatches()
+{
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<
+                UHierarchicalInstancedStaticMeshComponent
+            >
+        >& Pair
+        : FarCatalogStaticBatchComponents
+    )
+    {
+        if (IsValid(Pair.Value))
+        {
+            Pair.Value->ClearInstances();
+            Pair.Value->DestroyComponent();
+        }
+    }
+
+    FarCatalogStaticBatchComponents.Reset();
+
+    if (!bEnableFarVegetation)
+    {
+        return;
+    }
+
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<
+                UHierarchicalInstancedStaticMeshComponent
+            >
+        >& Pair
+        : CatalogStaticBatchComponents
+    )
+    {
+        UHierarchicalInstancedStaticMeshComponent*
+            SourceComponent =
+                Pair.Value;
+
+        if (
+            !IsValid(SourceComponent) ||
+            !IsValid(
+                SourceComponent->GetStaticMesh()
+            )
+        )
+        {
+            continue;
+        }
+
+        const FName ComponentName(
+            *FString::Printf(
+                TEXT("CubusFarVegetation_%llu"),
+                static_cast<uint64>(
+                    Pair.Key
+                )
+            )
+        );
+
+        UHierarchicalInstancedStaticMeshComponent*
+            FarComponent =
+                VegetationRenderer.CreateStaticBatch(
+                    this,
+                    Root,
+                    ComponentName,
+                    bCastFarVegetationShadows,
+                    0,
+                    FMath::RoundToInt(
+                        FarVegetationEndCullDistance
+                    )
+                );
+
+        if (!IsValid(FarComponent))
+        {
+            continue;
+        }
+
+        FarComponent->SetStaticMesh(
+            SourceComponent->GetStaticMesh()
+        );
+
+        FarComponent->SetCastShadow(
+            bCastFarVegetationShadows
+        );
+
+        FarComponent->SetCullDistances(
+            0,
+            FMath::Max(
+                1,
+                FMath::RoundToInt(
+                    FarVegetationEndCullDistance
+                )
+            )
+        );
+
+        const int32 MaterialCount =
+            SourceComponent->GetNumMaterials();
+
+        for (
+            int32 MaterialIndex = 0;
+            MaterialIndex < MaterialCount;
+            ++MaterialIndex
+        )
+        {
+            UMaterialInterface* Material =
+                SourceComponent->GetMaterial(
+                    MaterialIndex
+                );
+
+            if (IsValid(Material))
+            {
+                FarComponent->SetMaterial(
+                    MaterialIndex,
+                    Material
+                );
+            }
+        }
+
+        FarCatalogStaticBatchComponents.Add(
+            Pair.Key,
+            FarComponent
+        );
+    }
+
+    bFarVegetationRenderDirty = true;
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT(
+            "Cubus far vegetation batches: "
+            "sourceStatic=%d farStatic=%d enabled=%s"
+        ),
+        CatalogStaticBatchComponents.Num(),
+        FarCatalogStaticBatchComponents.Num(),
+        bEnableFarVegetation
+            ? TEXT("true")
+            : TEXT("false")
+    );
+}
+
 void ACubusWorldVegetationActor::RebuildWorldVegetation()
 {
     ResolveBlockWorld();
@@ -1128,6 +1279,7 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
     )
     {
         RefreshVegetationBatches();
+        RefreshFarVegetationBatches();
     }
 
     if (!IsValid(BlockWorld))
@@ -1769,12 +1921,15 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
             int64 TargetBatchKey = PrimaryBatchKey;
 
             /*
-            * Skeletal trees outside the hero animation radius use their matching
-            * static HISM representation instead.
+            * Near/detail vegetation keeps its authored primary representation.
+            *
+            * StaticGrowthStageAssets are reserved for the independent far
+            * vegetation renderer and must not replace close skeletal trees.
             */
             if (
                 bPrimaryBatchIsSkeletal &&
                 bTreeType &&
+                bEnableHeroSkeletalWindMode &&
                 bHasCamera
             )
             {
@@ -1783,26 +1938,25 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                     continue;
                 }
 
-                const int64 StaticFallbackBatchKey =
-                    FCubusVegetationRenderer::MakeStaticFallbackBatchKey(
-                        SpeciesIndex,
-                        GrowthStage
-                    );
-
                 FCubusVegetationRepresentationCandidate Candidate;
-                Candidate.PrimaryBatchKey = PrimaryBatchKey;
+
+                Candidate.PrimaryBatchKey =
+                    PrimaryBatchKey;
+
                 Candidate.StaticFallbackBatchKey =
-                    StaticFallbackBatchKey;
-                Candidate.LocalTransform = LocalTransform;
+                    INDEX_NONE;
+
+                Candidate.LocalTransform =
+                    LocalTransform;
+
                 Candidate.DistanceSquared =
                     FVector::DistSquared(
                         FinalLocation,
                         CameraLocation
                     );
+
                 Candidate.bHasStaticFallback =
-                    CatalogStaticBatchComponents.Contains(
-                        StaticFallbackBatchKey
-                    );
+                    false;
 
                 HeroTreeCandidates.Add(
                     MoveTemp(Candidate)
@@ -2603,8 +2757,8 @@ uint32 ACubusWorldVegetationActor::CalculateVegetationSettingsHash() const
         }
 
         for (
-            const TSoftObjectPtr<UStaticMesh>& MeshReference :
-            Entry.StaticGrowthStageMeshes
+            const TSoftObjectPtr<UObject>& MeshReference :
+            Entry.StaticGrowthStageAssets
         )
         {
             Hash = HashCombineFast(
@@ -2731,4 +2885,1102 @@ void ACubusWorldVegetationActor::RefreshVegetationBatches()
         CatalogStaticBatchComponents,
         CatalogSkeletalBatchComponents
     );
+}
+
+void
+ACubusWorldVegetationActor::UpdateFarVegetationStreaming(
+    const float DeltaSeconds
+)
+{
+    static bool bLoggedFarStreamingActivation =
+        false;
+
+    if (!bLoggedFarStreamingActivation)
+    {
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT(
+                "Cubus far streaming entered: "
+                "enabled=%s blockWorld=%s"
+            ),
+            bEnableFarVegetation
+                ? TEXT("true")
+                : TEXT("false"),
+            IsValid(BlockWorld)
+                ? TEXT("valid")
+                : TEXT("null")
+        );
+
+        bLoggedFarStreamingActivation =
+            true;
+    }
+
+    TimeUntilFarVegetationPublish -=
+        DeltaSeconds;
+
+    if (
+        !bEnableFarVegetation ||
+        !IsValid(BlockWorld)
+    )
+    {
+        return;
+    }
+
+    const APlayerController* PlayerController =
+        UGameplayStatics::GetPlayerController(
+            this,
+            0
+        );
+
+    if (
+        !IsValid(PlayerController) ||
+        !IsValid(
+            PlayerController->PlayerCameraManager
+        )
+    )
+    {
+        return;
+    }
+
+    const FVector CameraLocation =
+        PlayerController
+            ->PlayerCameraManager
+            ->GetCameraLocation();
+
+    ACubusVoxelVolumeActor* SnapshotChunk =
+        nullptr;
+
+    const auto& RegisteredChunks =
+        BlockWorld->GetRegisteredChunks();
+
+    for (
+        const TPair<
+            FIntVector,
+            TWeakObjectPtr<ACubusVoxelVolumeActor>
+        >& Pair
+        : RegisteredChunks
+    )
+    {
+        ACubusVoxelVolumeActor* Candidate =
+            Pair.Value.Get();
+
+        if (
+            IsValid(Candidate) &&
+            Candidate->GetChunkData() != nullptr
+        )
+        {
+            SnapshotChunk = Candidate;
+            break;
+        }
+    }
+
+    if (!IsValid(SnapshotChunk))
+    {
+        return;
+    }
+
+    const float SafeVoxelSize =
+        FMath::Max(
+            1.0f,
+            SnapshotChunk->GetVoxelSize()
+        );
+
+    const int32 CellSizeVoxels =
+        FMath::Max(
+            1,
+            FarVegetationCellSizeChunks
+        ) *
+        Cubus::ChunkSize;
+
+    const double HalfChunkWorldExtent =
+        static_cast<double>(
+            Cubus::ChunkSize
+        ) *
+        static_cast<double>(
+            SafeVoxelSize
+        ) *
+        0.5;
+
+    /*
+     * Inverse of the same world-voxel transform used by the existing
+     * vegetation renderer.
+     */
+    const int32 CameraWorldVoxelX =
+        FMath::FloorToInt(
+            (
+                static_cast<double>(
+                    CameraLocation.X
+                ) +
+                HalfChunkWorldExtent
+            ) /
+            static_cast<double>(
+                SafeVoxelSize
+            )
+        );
+
+    const int32 CameraWorldVoxelY =
+        FMath::FloorToInt(
+            (
+                static_cast<double>(
+                    CameraLocation.Y
+                ) +
+                HalfChunkWorldExtent
+            ) /
+            static_cast<double>(
+                SafeVoxelSize
+            )
+        );
+
+    const FIntPoint CentreCell(
+        FMath::FloorToInt(
+            static_cast<double>(
+                CameraWorldVoxelX
+            ) /
+            static_cast<double>(
+                CellSizeVoxels
+            )
+        ),
+        FMath::FloorToInt(
+            static_cast<double>(
+                CameraWorldVoxelY
+            ) /
+            static_cast<double>(
+                CellSizeVoxels
+            )
+        )
+    );
+
+    if (
+        CentreCell !=
+        LastFarVegetationCentreCell
+    )
+    {
+        LastFarVegetationCentreCell =
+            CentreCell;
+
+        RequiredFarVegetationCells.Reset();
+        PendingFarVegetationCells.Reset();
+
+        const int32 SafeRadius =
+            FMath::Clamp(
+                FarVegetationRadiusCells,
+                1,
+                32
+            );
+
+        const double RadiusExtent =
+            static_cast<double>(
+                SafeRadius
+            ) +
+            0.5;
+
+        const double RadiusSquared =
+            RadiusExtent *
+            RadiusExtent;
+
+        for (
+            int32 Y = -SafeRadius;
+            Y <= SafeRadius;
+            ++Y
+        )
+        {
+            for (
+                int32 X = -SafeRadius;
+                X <= SafeRadius;
+                ++X
+            )
+            {
+                const double DistanceSquared =
+                    static_cast<double>(
+                        X * X +
+                        Y * Y
+                    );
+
+                if (
+                    DistanceSquared >
+                    RadiusSquared
+                )
+                {
+                    continue;
+                }
+
+                RequiredFarVegetationCells.Add(
+                    CentreCell +
+                    FIntPoint(
+                        X,
+                        Y
+                    )
+                );
+            }
+        }
+
+        /*
+         * Drop cached cells outside the new fixed window.
+         */
+        TArray<FIntPoint> CachedCoordinates;
+
+        FarVegetationCellCache.GetKeys(
+            CachedCoordinates
+        );
+
+        for (
+            const FIntPoint& Cell
+            : CachedCoordinates
+        )
+        {
+            if (
+                !RequiredFarVegetationCells
+                    .Contains(Cell)
+            )
+            {
+                FarVegetationCellCache.Remove(
+                    Cell
+                );
+
+                bFarVegetationRenderDirty =
+                    true;
+            }
+        }
+
+        for (
+            const FIntPoint& Cell
+            : RequiredFarVegetationCells
+        )
+        {
+            if (
+                FarVegetationCellCache.Contains(
+                    Cell
+                ) ||
+                FarVegetationCellsBuilding.Contains(
+                    Cell
+                )
+            )
+            {
+                continue;
+            }
+
+            PendingFarVegetationCells.Add(
+                Cell
+            );
+        }
+
+        PendingFarVegetationCells.Sort(
+            [CentreCell](
+                const FIntPoint& A,
+                const FIntPoint& B
+            )
+            {
+                const int32 DistanceA =
+                    FMath::Abs(
+                        A.X -
+                        CentreCell.X
+                    ) +
+                    FMath::Abs(
+                        A.Y -
+                        CentreCell.Y
+                    );
+
+                const int32 DistanceB =
+                    FMath::Abs(
+                        B.X -
+                        CentreCell.X
+                    ) +
+                    FMath::Abs(
+                        B.Y -
+                        CentreCell.Y
+                    );
+
+                /*
+                 * Pop() then returns nearest-first.
+                 */
+                return
+                    DistanceA >
+                    DistanceB;
+            }
+        );
+
+        bFarVegetationRenderDirty =
+            true;
+    }
+
+    /*
+     * Collect completed worker cells.
+     */
+    for (
+        int32 BuildIndex =
+            FarVegetationBuilds.Num() - 1;
+        BuildIndex >= 0;
+        --BuildIndex
+    )
+    {
+        FCubusFarVegetationCellBuild&
+            Build =
+                FarVegetationBuilds[
+                    BuildIndex
+                ];
+
+        if (!Build.Task.IsCompleted())
+        {
+            continue;
+        }
+
+        FCubusFarVegetationCellBuildResult
+            Result =
+                MoveTemp(
+                    Build.Task.GetResult()
+                );
+
+        FarVegetationCellsBuilding.Remove(
+            Build.CellCoordinate
+        );
+
+        if (
+            RequiredFarVegetationCells.Contains(
+                Result.CellCoordinate
+            )
+        )
+        {
+            FarVegetationCellCache.Add(
+                Result.CellCoordinate,
+                MoveTemp(
+                    Result.Trees
+                )
+            );
+
+            bFarVegetationRenderDirty =
+                true;
+        }
+
+        FarVegetationBuilds.RemoveAtSwap(
+            BuildIndex,
+            1,
+            EAllowShrinking::No
+        );
+    }
+
+    /*
+     * Start a bounded number of new worker jobs.
+     */
+    const int32 SafeConcurrentBuilds =
+        FMath::Clamp(
+            MaxConcurrentFarVegetationBuilds,
+            1,
+            16
+        );
+
+    const int32 SafeStartsPerTick =
+        FMath::Clamp(
+            MaxFarVegetationBuildStartsPerTick,
+            1,
+            16
+        );
+
+    int32 StartedThisTick = 0;
+
+    while (
+        FarVegetationBuilds.Num() <
+            SafeConcurrentBuilds &&
+        StartedThisTick <
+            SafeStartsPerTick &&
+        !PendingFarVegetationCells.IsEmpty()
+    )
+    {
+        const FIntPoint Cell =
+            PendingFarVegetationCells.Pop(
+                EAllowShrinking::No
+            );
+
+        if (
+            !RequiredFarVegetationCells.Contains(
+                Cell
+            ) ||
+            FarVegetationCellCache.Contains(
+                Cell
+            ) ||
+            FarVegetationCellsBuilding.Contains(
+                Cell
+            )
+        )
+        {
+            continue;
+        }
+
+        const FCubusGenerationSeeds
+            GenerationSeeds =
+                BlockWorld->GetGenerationSeeds();
+
+        const FCubusVegetationGenerationSettings
+            GenerationSettings =
+                FCubusBlockVegetationGenerator::
+                    CaptureGenerationSettings(
+                        SnapshotChunk
+                            ->GetGeologyProfile(),
+                        GenerationSeeds
+                    );
+
+        const FCubusTerrainDensitySettings
+            DensitySettings =
+                SnapshotChunk
+                    ->CaptureTerrainDensitySettings();
+
+        FCubusVegetationRegion Region;
+
+        Region.Minimum =
+            FIntPoint(
+                Cell.X *
+                    CellSizeVoxels,
+                Cell.Y *
+                    CellSizeVoxels
+            );
+
+        Region.Maximum =
+            Region.Minimum +
+            FIntPoint(
+                CellSizeVoxels,
+                CellSizeVoxels
+            );
+
+        const int32 SampleStride =
+            FMath::Clamp(
+                FarTreeSampleStrideVoxels,
+                2,
+                64
+            );
+
+        const float DensityScale =
+            FMath::Clamp(
+                FarTreeDensityScale,
+                0.0f,
+                1.0f
+            );
+
+        FCubusFarVegetationCellBuild Build;
+
+        Build.CellCoordinate =
+            Cell;
+
+        Build.Task =
+            UE::Tasks::Launch(
+                TEXT(
+                    "CubusFarVegetationCell"
+                ),
+                [
+                    Cell,
+                    Region,
+                    GenerationSeeds,
+                    GenerationSettings,
+                    DensitySettings,
+                    SampleStride,
+                    DensityScale
+                ]()
+                {
+                    FCubusFarVegetationCellBuildResult
+                        Result;
+
+                    Result.CellCoordinate =
+                        Cell;
+
+                    const FCubusTerrainDensityField
+                        DensityField(
+                            DensitySettings
+                        );
+
+                    FCubusBlockVegetationGenerator::
+                        GenerateFarTreesForRegion(
+                            Region,
+                            GenerationSeeds,
+                            GenerationSettings,
+                            DensityField,
+                            SampleStride,
+                            DensityScale,
+                            Result.Trees
+                        );
+
+                    return Result;
+                }
+            );
+
+        FarVegetationCellsBuilding.Add(
+            Cell
+        );
+
+        FarVegetationBuilds.Add(
+            MoveTemp(Build)
+        );
+
+        ++StartedThisTick;
+    }
+
+    LoadedFarVegetationCellCount =
+        FarVegetationCellCache.Num();
+
+    if (
+        bFarVegetationRenderDirty &&
+        TimeUntilFarVegetationPublish <=
+            0.0f
+    )
+    {
+        PublishFarVegetation(
+            CameraLocation,
+            SafeVoxelSize
+        );
+
+        TimeUntilFarVegetationPublish =
+            FMath::Max(
+                0.1f,
+                FarVegetationPublishInterval
+            );
+    }
+}
+
+void
+ACubusWorldVegetationActor::PublishFarVegetation(
+    const FVector& CameraLocation,
+    const float VoxelSize
+)
+{
+    if (!bEnableFarVegetation)
+    {
+        return;
+    }
+
+    if (
+        FarCatalogStaticBatchComponents.IsEmpty()
+    )
+    {
+        static bool
+            bLoggedMissingFarStaticBatches =
+                false;
+
+        if (
+            !bLoggedMissingFarStaticBatches
+        )
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT(
+                    "Cubus far vegetation cannot publish: "
+                    "no static far-tree batches exist. "
+                    "CatalogStaticBatchComponents=%d"
+                ),
+                CatalogStaticBatchComponents.Num()
+            );
+
+            bLoggedMissingFarStaticBatches =
+                true;
+        }
+
+        return;
+    }
+
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<
+                UHierarchicalInstancedStaticMeshComponent
+            >
+        >& Pair
+        : FarCatalogStaticBatchComponents
+    )
+    {
+        if (IsValid(Pair.Value))
+        {
+            Pair.Value->ClearInstances();
+        }
+    }
+
+    const float SafeVoxelSize =
+        FMath::Max(
+            1.0f,
+            VoxelSize
+        );
+
+    const double HalfChunkWorldExtent =
+        static_cast<double>(
+            Cubus::ChunkSize
+        ) *
+        static_cast<double>(
+            SafeVoxelSize
+        ) *
+        0.5;
+
+    const double InnerRadiusSquared =
+        FMath::Square(
+            static_cast<double>(
+                FMath::Max(
+                    0.0f,
+                    FarVegetationInnerRadius
+                )
+            )
+        );
+
+    const double OuterRadiusSquared =
+        FMath::Square(
+            static_cast<double>(
+                FMath::Max(
+                    FarVegetationInnerRadius,
+                    FarVegetationEndCullDistance
+                )
+            )
+        );
+
+    const FCubusVegetationRandomizationSettings
+        RandomizationSettings
+    {
+        bEnableRuntimeRandomization,
+        RuntimeRandomizationSeed,
+        RandomPruneProbability,
+        RandomScaleJitterMin,
+        RandomScaleJitterMax,
+        RandomPositionJitterVoxelFraction,
+        RandomYawJitterDegrees
+    };
+
+    TMap<
+        int64,
+        TArray<FTransform>
+    > TransformsByBatchKey;
+
+    TArray<FIntPoint> Cells;
+
+    FarVegetationCellCache.GetKeys(
+        Cells
+    );
+
+    const int32 CellSizeVoxels =
+        FMath::Max(
+            1,
+            FarVegetationCellSizeChunks
+        ) *
+        Cubus::ChunkSize;
+
+    Cells.Sort(
+        [
+            CameraLocation,
+            SafeVoxelSize,
+            CellSizeVoxels,
+            HalfChunkWorldExtent
+        ](
+            const FIntPoint& A,
+            const FIntPoint& B
+        )
+        {
+            const FVector LocationA(
+                (
+                    static_cast<double>(
+                        A.X *
+                            CellSizeVoxels
+                    ) +
+                    static_cast<double>(
+                        CellSizeVoxels
+                    ) *
+                        0.5
+                ) *
+                    SafeVoxelSize -
+                    HalfChunkWorldExtent,
+                (
+                    static_cast<double>(
+                        A.Y *
+                            CellSizeVoxels
+                    ) +
+                    static_cast<double>(
+                        CellSizeVoxels
+                    ) *
+                        0.5
+                ) *
+                    SafeVoxelSize -
+                    HalfChunkWorldExtent,
+                CameraLocation.Z
+            );
+
+            const FVector LocationB(
+                (
+                    static_cast<double>(
+                        B.X *
+                            CellSizeVoxels
+                    ) +
+                    static_cast<double>(
+                        CellSizeVoxels
+                    ) *
+                        0.5
+                ) *
+                    SafeVoxelSize -
+                    HalfChunkWorldExtent,
+                (
+                    static_cast<double>(
+                        B.Y *
+                            CellSizeVoxels
+                    ) +
+                    static_cast<double>(
+                        CellSizeVoxels
+                    ) *
+                        0.5
+                ) *
+                    SafeVoxelSize -
+                    HalfChunkWorldExtent,
+                CameraLocation.Z
+            );
+
+            return
+                FVector::DistSquared(
+                    LocationA,
+                    CameraLocation
+                ) <
+                FVector::DistSquared(
+                    LocationB,
+                    CameraLocation
+                );
+        }
+    );
+
+    const int32 TreeLimit =
+        FMath::Max(
+            1000,
+            MaximumFarRenderedTrees
+        );
+
+    int32 FarTreeCount = 0;
+
+    for (
+        const FIntPoint& Cell
+        : Cells
+    )
+    {
+        if (FarTreeCount >= TreeLimit)
+        {
+            break;
+        }
+
+        if (
+            !RequiredFarVegetationCells.Contains(
+                Cell
+            )
+        )
+        {
+            continue;
+        }
+
+        const TArray<FCubusVegetationInstance>*
+            Trees =
+                FarVegetationCellCache.Find(
+                    Cell
+                );
+
+        if (Trees == nullptr)
+        {
+            continue;
+        }
+
+        for (
+            const FCubusVegetationInstance&
+                Instance
+            : *Trees
+        )
+        {
+            if (FarTreeCount >= TreeLimit)
+            {
+                break;
+            }
+
+            const FVector BaseWorldLocation(
+                (
+                    static_cast<double>(
+                        Instance.WorldVoxel.X
+                    ) +
+                    0.5
+                ) *
+                    SafeVoxelSize -
+                    HalfChunkWorldExtent,
+                (
+                    static_cast<double>(
+                        Instance.WorldVoxel.Y
+                    ) +
+                    0.5
+                ) *
+                    SafeVoxelSize -
+                    HalfChunkWorldExtent,
+                static_cast<double>(
+                    Instance.WorldVoxel.Z
+                ) *
+                    SafeVoxelSize -
+                    HalfChunkWorldExtent
+            );
+
+            const double DistanceSquared =
+                FVector::DistSquared(
+                    BaseWorldLocation,
+                    CameraLocation
+                );
+
+            if (
+                DistanceSquared <
+                    InnerRadiusSquared ||
+                DistanceSquared >
+                    OuterRadiusSquared
+            )
+            {
+                continue;
+            }
+
+            const float TypeScaleMultiplier =
+                ResolveTypeScaleMultiplier(
+                    Instance.TypeId,
+                    bEnablePerTypeScaleOverrides,
+                    BroadleafScaleMultiplier,
+                    ConiferScaleMultiplier,
+                    ShrubScaleMultiplier,
+                    GrassScaleMultiplier,
+                    ReedsScaleMultiplier,
+                    AlpineScaleMultiplier
+                );
+
+            const float CombinedScale =
+                FMath::Max(
+                    0.01f,
+                    Instance.Scale *
+                        FMath::Max(
+                            0.01f,
+                            GlobalPlantScaleMultiplier
+                        ) *
+                        FMath::Max(
+                            0.01f,
+                            TypeScaleMultiplier
+                        )
+                );
+
+            const FCubusResolvedVegetationPlacement
+                ResolvedPlacement =
+                    VegetationPlacement.Resolve(
+                        Instance,
+                        BaseWorldLocation,
+                        SafeVoxelSize,
+                        CombinedScale,
+                        RandomizationSettings
+                    );
+
+            if (ResolvedPlacement.bPruned)
+            {
+                continue;
+            }
+
+            const int32 SpeciesIndex =
+                VegetationCatalog
+                    .SelectSpeciesIndex(
+                        Instance,
+                        SpeciesCatalog,
+                        bClusterTreeFamilies,
+                        TreeFamilyCellSizeVoxels,
+                        RuntimeRandomizationSeed
+                    );
+
+            if (SpeciesIndex == INDEX_NONE)
+            {
+                continue;
+            }
+
+            const FCubusVegetationSpeciesCatalogEntry&
+                Entry =
+                    SpeciesCatalog[
+                        SpeciesIndex
+                    ];
+
+            const int32 StageCount =
+                Entry.GrowthStageMeshes.Num();
+
+            if (StageCount <= 0)
+            {
+                continue;
+            }
+
+            const int32 GrowthStage =
+                VegetationCatalog
+                    .ResolveGrowthStageIndex(
+                        Instance,
+                        StageCount,
+                        bClusterTreeFamilies,
+                        TreeFamilyCellSizeVoxels,
+                        TreeFamilyCenterJitterFraction,
+                        MatureTreeCoreRadius,
+                        YoungTreeRingRadius,
+                        SaplingTreeRingRadius,
+                        TreeFamilyGrowthNoise,
+                        RuntimeRandomizationSeed
+                    );
+
+            const int64 PrimaryBatchKey =
+                FCubusVegetationRenderer::
+                    MakePrimaryBatchKey(
+                        SpeciesIndex,
+                        GrowthStage
+                    );
+
+            const int64 StaticFallbackBatchKey =
+                FCubusVegetationRenderer::
+                    MakeStaticFallbackBatchKey(
+                        SpeciesIndex,
+                        GrowthStage
+                    );
+
+            int64 TargetBatchKey =
+                PrimaryBatchKey;
+
+            if (
+                !FarCatalogStaticBatchComponents
+                    .Contains(
+                        TargetBatchKey
+                    )
+            )
+            {
+                TargetBatchKey =
+                    StaticFallbackBatchKey;
+            }
+
+            if (
+                !FarCatalogStaticBatchComponents
+                    .Contains(
+                        TargetBatchKey
+                    )
+            )
+            {
+                continue;
+            }
+
+            const FTransform WorldTransform(
+                FRotator(
+                    0.0f,
+                    ResolvedPlacement.Yaw,
+                    0.0f
+                ),
+                ResolvedPlacement.Location,
+                FVector(
+                    ResolvedPlacement.Scale
+                )
+            );
+
+            TransformsByBatchKey
+                .FindOrAdd(
+                    TargetBatchKey
+                )
+                .Add(
+                    WorldTransform
+                        .GetRelativeTransform(
+                            GetActorTransform()
+                        )
+                );
+
+            ++FarTreeCount;
+        }
+    }
+
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<
+                UHierarchicalInstancedStaticMeshComponent
+            >
+        >& Pair
+        : FarCatalogStaticBatchComponents
+    )
+    {
+        UHierarchicalInstancedStaticMeshComponent*
+            Component =
+                Pair.Value;
+
+        if (!IsValid(Component))
+        {
+            continue;
+        }
+
+        const TArray<FTransform>* Transforms =
+            TransformsByBatchKey.Find(
+                Pair.Key
+            );
+
+        if (
+            Transforms == nullptr ||
+            Transforms->IsEmpty()
+        )
+        {
+            continue;
+        }
+
+        Component->AddInstances(
+            *Transforms,
+            false,
+            false,
+            false
+        );
+
+        Component->BuildTreeIfOutdated(
+            false,
+            false
+        );
+    }
+
+    RenderedFarTreeCount =
+        FarTreeCount;
+
+    bFarVegetationRenderDirty =
+        false;
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT(
+            "Cubus far vegetation: cells=%d "
+            "trees=%d pending=%d building=%d"
+        ),
+        FarVegetationCellCache.Num(),
+        RenderedFarTreeCount,
+        PendingFarVegetationCells.Num(),
+        FarVegetationBuilds.Num()
+    );
+}
+
+void
+ACubusWorldVegetationActor::ClearFarVegetation()
+{
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<
+                UHierarchicalInstancedStaticMeshComponent
+            >
+        >& Pair
+        : FarCatalogStaticBatchComponents
+    )
+    {
+        if (!IsValid(Pair.Value))
+        {
+            continue;
+        }
+
+        Pair.Value->ClearInstances();
+        Pair.Value->DestroyComponent();
+    }
+
+    FarCatalogStaticBatchComponents.Reset();
+
+    RequiredFarVegetationCells.Reset();
+    FarVegetationCellsBuilding.Reset();
+    PendingFarVegetationCells.Reset();
+    FarVegetationBuilds.Reset();
+    FarVegetationCellCache.Reset();
+
+    LastFarVegetationCentreCell =
+        FIntPoint(
+            MAX_int32,
+            MAX_int32
+        );
+
+    LoadedFarVegetationCellCount = 0;
+    RenderedFarTreeCount = 0;
+
+    TimeUntilFarVegetationPublish =
+        0.0f;
+
+    bFarVegetationRenderDirty =
+        false;
 }
