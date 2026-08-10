@@ -27,9 +27,18 @@ public:
     ) override;
     virtual void RecordFoliageEdit(const FOrakaiFoliageEdit& Edit) override;
     virtual void ClearFoliageEdit(const FIntVector& WorldVoxel) override;
-    virtual void RecordDensityEdit(const FOrakaiDensityEdit& Edit) override;
-    virtual void ClearDensityEdit(const FIntVector& WorldSample) override;
+    virtual void RecordDensityEdit(
+        const FOrakaiDensityEdit& Edit
+    ) override;
 
+    virtual void ClearDensityEdit(
+        const FIntVector& WorldSample
+    ) override;
+
+    virtual void ApplyDensityEditBatch(
+        const TArray<FOrakaiDensityEdit>& Records,
+        const TArray<FIntVector>& Clears
+    ) override;
     virtual void GetVoxelEditsForChunk(
         const FIntVector& ChunkCoordinate,
         TArray<FOrakaiVoxelEdit>& OutEdits

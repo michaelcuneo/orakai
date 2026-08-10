@@ -26,12 +26,15 @@ struct FCubusDensityMeshBuildInput
     FCubusDensityEditMap DensityEdits;
 
     /*
-     * Immutable generated subdivision-1 baseline captured on the game thread.
-     *
-     * Density edits are applied to a worker-local copy, so this cached
-     * baseline is never mutated by an async build.
-     */
-    FCubusDensitySamplingBuffer GeneratedDensityBuffer;
+    * Immutable generated subdivision-1 baseline shared with the worker.
+    *
+    * The worker creates its own mutable copy before applying density edits,
+    * so this baseline is never modified by an async build.
+    */
+    TSharedPtr<
+        const FCubusDensitySamplingBuffer,
+        ESPMode::ThreadSafe
+    > GeneratedDensityBuffer;
 
     FIntVector ChunkCoordinate =
         FIntVector::ZeroValue;
@@ -317,8 +320,14 @@ protected:
     * generation seeds, geology, or chunk identity changes.
     *
     * Player density edits are never written into this buffer.
+    *
+    * Build inputs share this immutable baseline rather than copying all
+    * 42,875 samples on the game thread.
     */
-    FCubusDensitySamplingBuffer CachedGeneratedDensityBuffer;
+    TSharedPtr<
+        const FCubusDensitySamplingBuffer,
+        ESPMode::ThreadSafe
+    > CachedGeneratedDensityBuffer;
 
     bool bHasCachedGeneratedDensityBuffer = false;
 

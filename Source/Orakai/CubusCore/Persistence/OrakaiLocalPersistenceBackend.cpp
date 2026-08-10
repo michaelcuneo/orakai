@@ -187,6 +187,56 @@ void FOrakaiLocalPersistenceBackend::ClearDensityEdit(
     MarkDirty();
 }
 
+void FOrakaiLocalPersistenceBackend::ApplyDensityEditBatch(
+    const TArray<FOrakaiDensityEdit>& Records,
+    const TArray<FIntVector>& Clears
+)
+{
+    if (
+        Records.IsEmpty() &&
+        Clears.IsEmpty()
+    )
+    {
+        return;
+    }
+
+    for (const FIntVector& WorldSample : Clears)
+    {
+        DensityEdits.Remove(
+            WorldSample
+        );
+    }
+
+    for (const FOrakaiDensityEdit& Edit : Records)
+    {
+        if (
+            FMath::IsNearlyZero(
+                Edit.DensityDelta
+            )
+        )
+        {
+            DensityEdits.Remove(
+                Edit.WorldSample
+            );
+
+            continue;
+        }
+
+        DensityEdits.Add(
+            Edit.WorldSample,
+            Edit
+        );
+    }
+
+    /*
+     * One brush stroke is one persistence mutation batch.
+     *
+     * The local store is still written later by Tick(), but we no longer
+     * repeatedly dirty it for every individual density sample.
+     */
+    MarkDirty();
+}
+
 void FOrakaiLocalPersistenceBackend::GetVoxelEditsForChunk(
     const FIntVector& ChunkCoordinate,
     TArray<FOrakaiVoxelEdit>& OutEdits

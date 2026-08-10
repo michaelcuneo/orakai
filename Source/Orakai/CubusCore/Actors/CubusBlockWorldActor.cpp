@@ -1178,6 +1178,31 @@ int32 ACubusBlockWorldActor::EditDensitySphereAtWorldSample(
 
     int32 ChangedSampleCount = 0;
 
+    TArray<FOrakaiDensityEdit> PersistenceRecords;
+    TArray<FIntVector> PersistenceClears;
+
+    const int32 MaximumBrushSampleCount =
+        (
+            SafeRadius * 2 +
+            1
+        ) *
+        (
+            SafeRadius * 2 +
+            1
+        ) *
+        (
+            SafeRadius * 2 +
+            1
+        );
+
+    PersistenceRecords.Reserve(
+        MaximumBrushSampleCount
+    );
+
+    PersistenceClears.Reserve(
+        MaximumBrushSampleCount
+    );
+
     for (int32 Z = -SafeRadius; Z <= SafeRadius; ++Z)
     {
         for (int32 Y = -SafeRadius; Y <= SafeRadius; ++Y)
@@ -1212,18 +1237,9 @@ int32 ACubusBlockWorldActor::EditDensitySphereAtWorldSample(
                         WorldSample
                     );
 
-                    if (
-                        UOrakaiPersistenceSubsystem*
-                            Persistence =
-                                UOrakaiPersistenceSubsystem::Get(
-                                    this
-                                )
-                    )
-                    {
-                        Persistence->ClearDensityEdit(
-                            WorldSample
-                        );
-                    }
+                    PersistenceClears.Add(
+                        WorldSample
+                    );
                 }
                 else
                 {
@@ -1231,20 +1247,20 @@ int32 ACubusBlockWorldActor::EditDensitySphereAtWorldSample(
                         WorldSample
                     );
 
-                    if (
-                        UOrakaiPersistenceSubsystem*
-                            Persistence =
-                                UOrakaiPersistenceSubsystem::Get(
-                                    this
-                                )
-                    )
-                    {
-                        Persistence->RecordDensityEdit(
-                            WorldSample,
-                            Edit.DensityDelta,
-                            Edit.MaterialId
-                        );
-                    }
+                    FOrakaiDensityEdit PersistenceEdit;
+
+                    PersistenceEdit.WorldSample =
+                        WorldSample;
+
+                    PersistenceEdit.DensityDelta =
+                        Edit.DensityDelta;
+
+                    PersistenceEdit.MaterialId =
+                        Edit.MaterialId;
+
+                    PersistenceRecords.Add(
+                        PersistenceEdit
+                    );
                 }
 
                 ChangedSampleMinimum.X =
@@ -1285,6 +1301,25 @@ int32 ACubusBlockWorldActor::EditDensitySphereAtWorldSample(
 
                 ++ChangedSampleCount;
             }
+        }
+    }
+
+    if (
+        !PersistenceRecords.IsEmpty() ||
+        !PersistenceClears.IsEmpty()
+    )
+    {
+        if (
+            UOrakaiPersistenceSubsystem* Persistence =
+                UOrakaiPersistenceSubsystem::Get(
+                    this
+                )
+        )
+        {
+            Persistence->ApplyDensityEditBatch(
+                PersistenceRecords,
+                PersistenceClears
+            );
         }
     }
 

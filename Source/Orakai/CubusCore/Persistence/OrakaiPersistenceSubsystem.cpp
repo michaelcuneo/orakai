@@ -212,6 +212,28 @@ void UOrakaiPersistenceSubsystem::ClearDensityEdit(
     }
 }
 
+void UOrakaiPersistenceSubsystem::ApplyDensityEditBatch(
+    const TArray<FOrakaiDensityEdit>& Records,
+    const TArray<FIntVector>& Clears
+)
+{
+    if (
+        !Backend.IsValid() ||
+        (
+            Records.IsEmpty() &&
+            Clears.IsEmpty()
+        )
+    )
+    {
+        return;
+    }
+
+    Backend->ApplyDensityEditBatch(
+        Records,
+        Clears
+    );
+}
+
 void UOrakaiPersistenceSubsystem::GetVoxelEditsForChunk(
     const FIntVector& ChunkCoordinate,
     TArray<FOrakaiVoxelEdit>& OutEdits

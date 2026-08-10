@@ -27,32 +27,6 @@ namespace CubusDensityTools
         const float T = 1.0f - Distance / static_cast<float>(Radius + 1);
         return T * T * (3.0f - 2.0f * T);
     }
-
-    void PersistDensityEdit(
-        const UObject* Context,
-        const FIntVector& WorldSample,
-        const FCubusDensityEdit* Edit
-    )
-    {
-        UOrakaiPersistenceSubsystem* Persistence =
-            UOrakaiPersistenceSubsystem::Get(Context);
-        if (Persistence == nullptr)
-        {
-            return;
-        }
-
-        if (Edit == nullptr || FMath::IsNearlyZero(Edit->DensityDelta))
-        {
-            Persistence->ClearDensityEdit(WorldSample);
-            return;
-        }
-
-        Persistence->RecordDensityEdit(
-            WorldSample,
-            Edit->DensityDelta,
-            Edit->MaterialId
-        );
-    }
 }
 
 int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
@@ -61,8 +35,19 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
     const float Strength
 )
 {
-    const int32 SafeRadius = FMath::Max(0, BrushRadius);
-    const float BlendStrength = FMath::Clamp(Strength, 0.0f, 1.0f);
+    const int32 SafeRadius =
+        FMath::Max(
+            0,
+            BrushRadius
+        );
+
+    const float BlendStrength =
+        FMath::Clamp(
+            Strength,
+            0.0f,
+            1.0f
+        );
+
     if (BlendStrength <= KINDA_SMALL_NUMBER)
     {
         return 0;
@@ -93,7 +78,11 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
             {
                 const FIntVector Sample =
                     CentreWorldSample +
-                    FIntVector(X, Y, Z);
+                    FIntVector(
+                        X,
+                        Y,
+                        Z
+                    );
 
                 const FCubusDensityEdit* Edit =
                     DensityEdits.Find(
@@ -113,6 +102,117 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
 
     FCubusDensityEditMap PendingEdits;
 
+    static const FIntVector Neighbours[] =
+    {
+        FIntVector(1, 0, 0),
+        FIntVector(-1, 0, 0),
+        FIntVector(0, 1, 0),
+        FIntVector(0, -1, 0),
+        FIntVector(0, 0, 1),
+        FIntVector(0, 0, -1)
+    };
+
+    for (
+        int32 Z = -SafeRadius;
+        Z <= SafeRadius;
+        ++Z
+    )
+    {
+        for (
+            int32 Y = -SafeRadius;
+            Y <= SafeRadius;
+            ++Y
+        )
+        {
+            for (
+                int32 X = -SafeRadius;
+                X <= SafeRadius;
+                ++X
+            )
+            {
+                const FIntVector Offset(
+                    X,
+                    Y,
+                    Z
+                );
+
+                const float Weight =
+                    CubusDensityTools::BrushWeight(
+                        Offset,
+                        SafeRadius
+                    );
+
+                if (Weight <= KINDA_SMALL_NUMBER)
+                {
+                    continue;
+                }
+
+                const FIntVector Sample =
+                    CentreWorldSample +
+                    Offset;
+
+                const FCubusDensityEdit* Existing =
+                    SourceEdits.Find(
+                        Sample
+                    );
+
+                const float CurrentDelta =
+                    Existing != nullptr
+                        ? Existing->DensityDelta
+                        : 0.0f;
+
+                float Sum =
+                    CurrentDelta;
+
+                int32 Count =
+                    1;
+
+                for (
+                    const FIntVector& Neighbour
+                    : Neighbours
+                )
+                {
+                    if (
+                        const FCubusDensityEdit* Nearby =
+                            SourceEdits.Find(
+                                Sample +
+                                Neighbour
+                            )
+                    )
+                    {
+                        Sum +=
+                            Nearby->DensityDelta;
+                    }
+
+                    ++Count;
+                }
+
+                FCubusDensityEdit Result;
+
+                Result.DensityDelta =
+                    FMath::Lerp(
+                        CurrentDelta,
+                        Sum /
+                            static_cast<float>(
+                                Count
+                            ),
+                        BlendStrength *
+                            Weight
+                    );
+
+                Result.MaterialId =
+                    Existing != nullptr
+                        ? Existing->MaterialId
+                        : 0;
+
+                PendingEdits.Add(
+                    Sample,
+                    Result
+                );
+            }
+        }
+    }
+
     FIntVector ChangedSampleMinimum(
         MAX_int32,
         MAX_int32,
@@ -125,55 +225,30 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
         MIN_int32
     );
 
-    static const FIntVector Neighbours[] =
-    {
-        FIntVector(1, 0, 0), FIntVector(-1, 0, 0),
-        FIntVector(0, 1, 0), FIntVector(0, -1, 0),
-        FIntVector(0, 0, 1), FIntVector(0, 0, -1)
-    };
+    TArray<FOrakaiDensityEdit>
+        PersistenceRecords;
 
-    for (int32 Z = -SafeRadius; Z <= SafeRadius; ++Z)
-    {
-        for (int32 Y = -SafeRadius; Y <= SafeRadius; ++Y)
-        {
-            for (int32 X = -SafeRadius; X <= SafeRadius; ++X)
-            {
-                const FIntVector Offset(X, Y, Z);
-                const float Weight = CubusDensityTools::BrushWeight(Offset, SafeRadius);
-                if (Weight <= KINDA_SMALL_NUMBER)
-                {
-                    continue;
-                }
+    TArray<FIntVector>
+        PersistenceClears;
 
-                const FIntVector Sample = CentreWorldSample + Offset;
-                const FCubusDensityEdit* Existing = SourceEdits.Find(Sample);
-                const float CurrentDelta = Existing != nullptr ? Existing->DensityDelta : 0.0f;
+    PersistenceRecords.Reserve(
+        PendingEdits.Num()
+    );
 
-                float Sum = CurrentDelta;
-                int32 Count = 1;
-                for (const FIntVector& Neighbour : Neighbours)
-                {
-                    if (const FCubusDensityEdit* Nearby = SourceEdits.Find(Sample + Neighbour))
-                    {
-                        Sum += Nearby->DensityDelta;
-                    }
-                    ++Count;
-                }
+    PersistenceClears.Reserve(
+        PendingEdits.Num()
+    );
 
-                FCubusDensityEdit Result;
-                Result.DensityDelta = FMath::Lerp(
-                    CurrentDelta,
-                    Sum / static_cast<float>(Count),
-                    BlendStrength * Weight
-                );
-                Result.MaterialId = Existing != nullptr ? Existing->MaterialId : 0;
-                PendingEdits.Add(Sample, Result);
-            }
-        }
-    }
+    int32 ChangedCount =
+        0;
 
-    int32 ChangedCount = 0;
-    for (const TPair<FIntVector, FCubusDensityEdit>& Pair : PendingEdits)
+    for (
+        const TPair<
+            FIntVector,
+            FCubusDensityEdit
+        >& Pair
+        : PendingEdits
+    )
     {
         if (
             FMath::IsNearlyZero(
@@ -189,10 +264,8 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
                 Pair.Key
             );
 
-            CubusDensityTools::PersistDensityEdit(
-                this,
-                Pair.Key,
-                nullptr
+            PersistenceClears.Add(
+                Pair.Key
             );
         }
         else
@@ -206,10 +279,20 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
                 Pair.Key
             );
 
-            CubusDensityTools::PersistDensityEdit(
-                this,
-                Pair.Key,
-                &Pair.Value
+            FOrakaiDensityEdit
+                PersistenceEdit;
+
+            PersistenceEdit.WorldSample =
+                Pair.Key;
+
+            PersistenceEdit.DensityDelta =
+                Pair.Value.DensityDelta;
+
+            PersistenceEdit.MaterialId =
+                Pair.Value.MaterialId;
+
+            PersistenceRecords.Add(
+                PersistenceEdit
             );
         }
 
@@ -252,6 +335,25 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
         ++ChangedCount;
     }
 
+    if (
+        !PersistenceRecords.IsEmpty() ||
+        !PersistenceClears.IsEmpty()
+    )
+    {
+        if (
+            UOrakaiPersistenceSubsystem* Persistence =
+                UOrakaiPersistenceSubsystem::Get(
+                    this
+                )
+        )
+        {
+            Persistence->ApplyDensityEditBatch(
+                PersistenceRecords,
+                PersistenceClears
+            );
+        }
+    }
+
     if (ChangedCount > 0)
     {
         QueueDensityEditDependenciesForRebuild(
@@ -290,6 +392,31 @@ int32 ACubusBlockWorldActor::LevelDensityEditsAtWorldSample(
     );
 
     int32 ChangedCount = 0;
+
+    TArray<FOrakaiDensityEdit> PersistenceRecords;
+    TArray<FIntVector> PersistenceClears;
+
+    const int32 MaximumBrushSampleCount =
+        (
+            SafeRadius * 2 +
+            1
+        ) *
+        (
+            SafeRadius * 2 +
+            1
+        ) *
+        (
+            SafeRadius * 2 +
+            1
+        );
+
+    PersistenceRecords.Reserve(
+        MaximumBrushSampleCount
+    );
+
+    PersistenceClears.Reserve(
+        MaximumBrushSampleCount
+    );
 
     for (int32 Z = -SafeRadius; Z <= SafeRadius; ++Z)
     {
@@ -332,10 +459,8 @@ int32 ACubusBlockWorldActor::LevelDensityEditsAtWorldSample(
                         Sample
                     );
 
-                    CubusDensityTools::PersistDensityEdit(
-                        this,
-                        Sample,
-                        nullptr
+                    PersistenceClears.Add(
+                        Sample
                     );
                 }
                 else
@@ -344,10 +469,19 @@ int32 ACubusBlockWorldActor::LevelDensityEditsAtWorldSample(
                         Sample
                     );
 
-                    CubusDensityTools::PersistDensityEdit(
-                        this,
-                        Sample,
-                        &Edit
+                    FOrakaiDensityEdit PersistenceEdit;
+
+                    PersistenceEdit.WorldSample =
+                        Sample;
+
+                    PersistenceEdit.DensityDelta =
+                        Edit.DensityDelta;
+
+                    PersistenceEdit.MaterialId =
+                        Edit.MaterialId;
+
+                    PersistenceRecords.Add(
+                        PersistenceEdit
                     );
                 }
 
@@ -392,6 +526,25 @@ int32 ACubusBlockWorldActor::LevelDensityEditsAtWorldSample(
         }
     }
 
+    if (
+        !PersistenceRecords.IsEmpty() ||
+        !PersistenceClears.IsEmpty()
+    )
+    {
+        if (
+            UOrakaiPersistenceSubsystem* Persistence =
+                UOrakaiPersistenceSubsystem::Get(
+                    this
+                )
+        )
+        {
+            Persistence->ApplyDensityEditBatch(
+                PersistenceRecords,
+                PersistenceClears
+            );
+        }
+    }
+
     if (ChangedCount > 0)
     {
         QueueDensityEditDependenciesForRebuild(
@@ -429,6 +582,31 @@ int32 ACubusBlockWorldActor::RestoreDensityEditsAtWorldSample(
     );
 
     int32 ChangedCount = 0;
+
+    TArray<FOrakaiDensityEdit> PersistenceRecords;
+    TArray<FIntVector> PersistenceClears;
+
+    const int32 MaximumBrushSampleCount =
+        (
+            SafeRadius * 2 +
+            1
+        ) *
+        (
+            SafeRadius * 2 +
+            1
+        ) *
+        (
+            SafeRadius * 2 +
+            1
+        );
+
+    PersistenceRecords.Reserve(
+        MaximumBrushSampleCount
+    );
+
+    PersistenceClears.Reserve(
+        MaximumBrushSampleCount
+    );
 
     for (int32 Z = -SafeRadius; Z <= SafeRadius; ++Z)
     {
@@ -471,10 +649,8 @@ int32 ACubusBlockWorldActor::RestoreDensityEditsAtWorldSample(
                         Sample
                     );
 
-                    CubusDensityTools::PersistDensityEdit(
-                        this,
-                        Sample,
-                        nullptr
+                    PersistenceClears.Add(
+                        Sample
                     );
                 }
                 else
@@ -483,13 +659,22 @@ int32 ACubusBlockWorldActor::RestoreDensityEditsAtWorldSample(
                         Sample
                     );
 
-                    CubusDensityTools::PersistDensityEdit(
-                        this,
-                        Sample,
-                        Existing
+                    FOrakaiDensityEdit PersistenceEdit;
+
+                    PersistenceEdit.WorldSample =
+                        Sample;
+
+                    PersistenceEdit.DensityDelta =
+                        Existing->DensityDelta;
+
+                    PersistenceEdit.MaterialId =
+                        Existing->MaterialId;
+
+                    PersistenceRecords.Add(
+                        PersistenceEdit
                     );
                 }
-                
+
                 ChangedSampleMinimum.X =
                     FMath::Min(
                         ChangedSampleMinimum.X,
@@ -528,6 +713,25 @@ int32 ACubusBlockWorldActor::RestoreDensityEditsAtWorldSample(
 
                 ++ChangedCount;
             }
+        }
+    }
+
+    if (
+        !PersistenceRecords.IsEmpty() ||
+        !PersistenceClears.IsEmpty()
+    )
+    {
+        if (
+            UOrakaiPersistenceSubsystem* Persistence =
+                UOrakaiPersistenceSubsystem::Get(
+                    this
+                )
+        )
+        {
+            Persistence->ApplyDensityEditBatch(
+                PersistenceRecords,
+                PersistenceClears
+            );
         }
     }
 

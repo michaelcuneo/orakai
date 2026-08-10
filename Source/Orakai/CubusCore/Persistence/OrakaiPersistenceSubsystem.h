@@ -84,7 +84,14 @@ public:
         int32 MaterialId
     );
 
-    void ClearDensityEdit(const FIntVector& WorldSample);
+    void ClearDensityEdit(
+        const FIntVector& WorldSample
+    );
+
+    void ApplyDensityEditBatch(
+        const TArray<FOrakaiDensityEdit>& Records,
+        const TArray<FIntVector>& Clears
+    );
 
     void GetVoxelEditsForChunk(
         const FIntVector& ChunkCoordinate,

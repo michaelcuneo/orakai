@@ -226,8 +226,17 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Runtime Randomization", meta = (EditCondition = "bEnableRuntimeRandomization", ClampMin = "0.0", ClampMax = "180.0", UIMin = "0.0", UIMax = "90.0", Units = "deg"))
     float RandomYawJitterDegrees = 35.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering", meta = (ClampMin = "0"))
-    int32 MaximumRenderedPlants = 100000;
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Rendering",
+        meta = (
+            ClampMin = "0",
+            ClampMax = "500000",
+            UIMax = "500000"
+        )
+    )
+    int32 MaximumRenderedPlants = 500000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0.1", Units = "s"))
     float RefreshInterval = 1.0f;

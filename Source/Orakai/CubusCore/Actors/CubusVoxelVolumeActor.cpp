@@ -318,8 +318,13 @@ bool ACubusVoxelVolumeActor::BuildStagedVolumeFromDensityMesh(
     )
     {
         CachedGeneratedDensityBuffer =
-            MoveTemp(
-                BuildResult.GeneratedDensityBuffer
+            MakeShared<
+                FCubusDensitySamplingBuffer,
+                ESPMode::ThreadSafe
+            >(
+                MoveTemp(
+                    BuildResult.GeneratedDensityBuffer
+                )
             );
 
         bHasCachedGeneratedDensityBuffer =
@@ -981,9 +986,15 @@ ACubusVoxelVolumeActor::CaptureDensityMeshBuildInput() const
 
     if (
         bHasCachedGeneratedDensityBuffer &&
-        CachedGeneratedDensityBuffer.IsBuilt()
+        CachedGeneratedDensityBuffer.IsValid() &&
+        CachedGeneratedDensityBuffer->IsBuilt()
     )
     {
+        /*
+        * Cheap thread-safe shared-pointer copy only.
+        *
+        * No FCubusDensitySamplingBuffer sample array is copied here.
+        */
         Input.GeneratedDensityBuffer =
             CachedGeneratedDensityBuffer;
 
@@ -1019,17 +1030,18 @@ ACubusVoxelVolumeActor::BuildDensityMeshData(
 
         if (
             Input.bHasGeneratedDensityBuffer &&
-            Input.GeneratedDensityBuffer.IsBuilt()
+            Input.GeneratedDensityBuffer.IsValid() &&
+            Input.GeneratedDensityBuffer->IsBuilt()
         )
         {
             /*
-            * Fast edit path:
+            * One intentional copy remains here.
             *
-            * Copy the immutable generated baseline instead of reevaluating
-            * ~42,875 procedural density samples.
+            * This worker-local buffer is the only copy that receives player edits.
+            * The shared generated baseline stays permanently immutable.
             */
             DensityBuffer =
-                Input.GeneratedDensityBuffer;
+                *Input.GeneratedDensityBuffer;
         }
         else
         {
@@ -1158,12 +1170,22 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
     )
     {
         CachedGeneratedDensityBuffer =
-            BuildResult.GeneratedDensityBuffer;
+            MakeShared<
+                FCubusDensitySamplingBuffer,
+                ESPMode::ThreadSafe
+            >(
+                MoveTemp(
+                    BuildResult.GeneratedDensityBuffer
+                )
+            );
 
         bHasCachedGeneratedDensityBuffer =
             true;
-    }
 
+        BuildResult.bHasGeneratedDensityBuffer =
+            false;
+    }
+    
     UploadDensityMesh(
         TargetMesh,
         BuildResult,
@@ -1302,7 +1324,7 @@ void ACubusVoxelVolumeActor::ConfigureTerrain(
 )
 {
     InvalidateGeneratedDensityCache();
-    
+
     bUseHeightTerrain = bInUseHeightTerrain;
     TerrainSurfaceWorldZ = InTerrainSurfaceWorldZ;
     TerrainBaseHeight = InTerrainBaseHeight;

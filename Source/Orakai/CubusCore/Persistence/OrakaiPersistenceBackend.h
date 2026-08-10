@@ -54,9 +54,43 @@ public:
     /** Remove a foliage delta, restoring the generated foliage. */
     virtual void ClearFoliageEdit(const FIntVector& WorldVoxel) = 0;
 
-    /** Optional density-delta support. Older remote backends may ignore it. */
-    virtual void RecordDensityEdit(const FOrakaiDensityEdit& Edit) {}
-    virtual void ClearDensityEdit(const FIntVector& WorldSample) {}
+    virtual void RecordDensityEdit(
+        const FOrakaiDensityEdit& Edit
+    )
+    {
+    }
+
+    virtual void ClearDensityEdit(
+        const FIntVector& WorldSample
+    )
+    {
+    }
+
+    /*
+    * Apply one complete density-brush persistence batch.
+    *
+    * The default implementation preserves compatibility with backends that
+    * only implement the existing single-record operations.
+    */
+    virtual void ApplyDensityEditBatch(
+        const TArray<FOrakaiDensityEdit>& Records,
+        const TArray<FIntVector>& Clears
+    )
+    {
+    for (const FIntVector& WorldSample : Clears)
+    {
+        ClearDensityEdit(
+            WorldSample
+        );
+    }
+
+    for (const FOrakaiDensityEdit& Edit : Records)
+    {
+        RecordDensityEdit(
+            Edit
+        );
+    }
+}
 
     /** Read the complete delta snapshot for a generated world/chunk. */
     virtual void GetVoxelEditsForChunk(
