@@ -76,6 +76,12 @@ public:
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation")
     void ClearWorldVegetation();
 
+    /** Bake whole-tree static far proxies from skeletal growth stages. */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Vegetation|Far Proxies")
+    void BakeFarVegetationProxies();
+
+    bool EnsureFarVegetationProxyAssets(bool bSaveGeneratedAssets);
+
     /**
      * Invalidates only the cached wind/weather targets and last published
      * values. The next ordinary actor tick reapplies the existing bridge to
@@ -169,6 +175,12 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
     TArray<FCubusVegetationSpeciesCatalogEntry> SpeciesCatalog;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Proxies")
+    bool bAutoBakeMissingFarProxies = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Proxies")
+    FString FarProxyPackageRoot = TEXT("/Game/OrakaiGenerated/Vegetation/Far");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Families")
     bool bClusterTreeFamilies = true;

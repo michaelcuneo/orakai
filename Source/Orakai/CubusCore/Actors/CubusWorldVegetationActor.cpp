@@ -33,6 +33,15 @@
 #include "Materials/MaterialInterface.h"
 #include "UObject/SoftObjectPtr.h"
 
+#if WITH_EDITOR
+#include "FileHelpers.h"
+#include "IMeshMergeUtilities.h"
+#include "MeshMergeModule.h"
+#include "Modules/ModuleManager.h"
+#include "Engine/MeshMerging.h"
+#include "UObject/Package.h"
+#endif
+
 namespace
 {
     constexpr int32 WorldGrassType = 1;
@@ -1090,6 +1099,239 @@ bool ACubusWorldVegetationActor::FindInteractiveTreeAlongRay(
     return bFound;
 }
 
+bool ACubusWorldVegetationActor::EnsureFarVegetationProxyAssets(
+    const bool bSaveGeneratedAssets
+)
+{
+#if WITH_EDITOR
+    UWorld* World = GetWorld();
+
+    if (!IsValid(World))
+    {
+        return false;
+    }
+
+    const FString SafeRoot = FarProxyPackageRoot.IsEmpty()
+        ? TEXT("/Game/OrakaiGenerated/Vegetation/Far")
+        : FarProxyPackageRoot;
+
+    IMeshMergeModule& MeshMergeModule =
+        FModuleManager::LoadModuleChecked<IMeshMergeModule>(
+            TEXT("MeshMergeUtilities")
+        );
+
+    IMeshMergeUtilities& MeshMergeUtilities =
+        MeshMergeModule.GetUtilities();
+
+    TArray<UPackage*> PackagesToSave;
+    int32 BakedProxyCount = 0;
+    int32 ReusedProxyCount = 0;
+    int32 FailedProxyCount = 0;
+    bool bCatalogChanged = false;
+
+    for (int32 SpeciesIndex = 0; SpeciesIndex < SpeciesCatalog.Num(); ++SpeciesIndex)
+    {
+        FCubusVegetationSpeciesCatalogEntry& Entry = SpeciesCatalog[SpeciesIndex];
+        const int32 StageCount = Entry.GrowthStageMeshes.Num();
+
+        if (StageCount <= 0)
+        {
+            continue;
+        }
+
+        if (Entry.StaticGrowthStageAssets.Num() != StageCount)
+        {
+            Entry.StaticGrowthStageAssets.SetNum(StageCount);
+            bCatalogChanged = true;
+        }
+
+        FString SpeciesToken = Entry.SpeciesId.IsNone()
+            ? FString::Printf(TEXT("Species_%d"), SpeciesIndex)
+            : Entry.SpeciesId.ToString();
+
+        SpeciesToken.ReplaceInline(TEXT(" "), TEXT("_"));
+        SpeciesToken.ReplaceInline(TEXT("/"), TEXT("_"));
+        SpeciesToken.ReplaceInline(TEXT("\\"), TEXT("_"));
+        SpeciesToken.ReplaceInline(TEXT("."), TEXT("_"));
+
+        for (int32 StageIndex = 0; StageIndex < StageCount; ++StageIndex)
+        {
+            const TSoftObjectPtr<UObject>& SourceReference =
+                Entry.GrowthStageMeshes[StageIndex];
+
+            if (SourceReference.IsNull())
+            {
+                continue;
+            }
+
+            UObject* SourceAsset = SourceReference.LoadSynchronous();
+
+            if (!IsValid(SourceAsset))
+            {
+                ++FailedProxyCount;
+                continue;
+            }
+
+            if (UStaticMesh* SourceStaticMesh = Cast<UStaticMesh>(SourceAsset))
+            {
+                const TSoftObjectPtr<UObject> StaticReference(SourceStaticMesh);
+                if (
+                    Entry.StaticGrowthStageAssets[StageIndex].ToSoftObjectPath() !=
+                    StaticReference.ToSoftObjectPath()
+                )
+                {
+                    Entry.StaticGrowthStageAssets[StageIndex] = StaticReference;
+                    bCatalogChanged = true;
+                }
+                continue;
+            }
+
+            USkeletalMesh* SourceSkeletalMesh = Cast<USkeletalMesh>(SourceAsset);
+
+            if (!IsValid(SourceSkeletalMesh))
+            {
+                ++FailedProxyCount;
+                continue;
+            }
+
+            const FString AssetName = FString::Printf(
+                TEXT("%s_Stage_%d_FarProxy"),
+                *SpeciesToken,
+                StageIndex
+            );
+            const FString PackageName = SafeRoot / AssetName;
+            const FString ObjectPath = PackageName + TEXT(".") + AssetName;
+
+            UStaticMesh* GeneratedMesh = LoadObject<UStaticMesh>(nullptr, *ObjectPath);
+
+            if (!IsValid(GeneratedMesh))
+            {
+                USkeletalMeshComponent* PreviewComponent =
+                    NewObject<USkeletalMeshComponent>(this, NAME_None, RF_Transient);
+
+                if (!IsValid(PreviewComponent))
+                {
+                    ++FailedProxyCount;
+                    continue;
+                }
+
+                PreviewComponent->SetSkinnedAssetAndUpdate(SourceSkeletalMesh);
+                PreviewComponent->SetWorldTransform(FTransform::Identity);
+                PreviewComponent->RegisterComponent();
+                PreviewComponent->RefreshBoneTransforms();
+                PreviewComponent->UpdateComponentToWorld();
+
+                TArray<UPrimitiveComponent*> ComponentsToMerge;
+                ComponentsToMerge.Add(PreviewComponent);
+
+                FMeshMergingSettings MergeSettings;
+                TArray<UObject*> GeneratedAssets;
+                FVector MergedActorLocation = FVector::ZeroVector;
+
+                MeshMergeUtilities.MergeComponentsToStaticMesh(
+                    ComponentsToMerge,
+                    World,
+                    MergeSettings,
+                    nullptr,
+                    nullptr,
+                    PackageName,
+                    GeneratedAssets,
+                    MergedActorLocation,
+                    1.0f,
+                    true
+                );
+
+                PreviewComponent->DestroyComponent();
+
+                for (UObject* GeneratedAsset : GeneratedAssets)
+                {
+                    if (UStaticMesh* Candidate = Cast<UStaticMesh>(GeneratedAsset))
+                    {
+                        GeneratedMesh = Candidate;
+                        break;
+                    }
+                }
+
+                if (IsValid(GeneratedMesh))
+                {
+                    GeneratedMesh->MarkPackageDirty();
+                    PackagesToSave.AddUnique(GeneratedMesh->GetPackage());
+                    ++BakedProxyCount;
+                }
+            }
+            else
+            {
+                ++ReusedProxyCount;
+            }
+
+            if (!IsValid(GeneratedMesh))
+            {
+                ++FailedProxyCount;
+                UE_LOG(
+                    LogTemp,
+                    Error,
+                    TEXT("Cubus far proxy bake failed: species=%s stage=%d source=%s"),
+                    *SpeciesToken,
+                    StageIndex,
+                    *SourceSkeletalMesh->GetName()
+                );
+                continue;
+            }
+
+            const TSoftObjectPtr<UObject> GeneratedReference(GeneratedMesh);
+            if (
+                Entry.StaticGrowthStageAssets[StageIndex].ToSoftObjectPath() !=
+                GeneratedReference.ToSoftObjectPath()
+            )
+            {
+                Entry.StaticGrowthStageAssets[StageIndex] = GeneratedReference;
+                bCatalogChanged = true;
+            }
+        }
+    }
+
+    if (bCatalogChanged)
+    {
+        Modify();
+        MarkPackageDirty();
+    }
+
+    if (bSaveGeneratedAssets && !PackagesToSave.IsEmpty())
+    {
+        UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
+    }
+
+    if (BakedProxyCount > 0 || ReusedProxyCount > 0 || FailedProxyCount > 0)
+    {
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT("Cubus far proxy assets: baked=%d reused=%d failed=%d root=%s"),
+            BakedProxyCount,
+            ReusedProxyCount,
+            FailedProxyCount,
+            *SafeRoot
+        );
+    }
+
+    return bCatalogChanged || BakedProxyCount > 0;
+#else
+    return false;
+#endif
+}
+
+void ACubusWorldVegetationActor::BakeFarVegetationProxies()
+{
+#if WITH_EDITOR
+    const bool bChanged = EnsureFarVegetationProxyAssets(true);
+    if (bChanged)
+    {
+        RefreshVegetationBatches();
+        RefreshFarVegetationBatches();
+    }
+#endif
+}
+
 void
 ACubusWorldVegetationActor::RefreshFarVegetationBatches()
 {
@@ -1243,6 +1485,13 @@ ACubusWorldVegetationActor::RefreshFarVegetationBatches()
 void ACubusWorldVegetationActor::RebuildWorldVegetation()
 {
     ResolveBlockWorld();
+
+#if WITH_EDITOR
+    if (bAutoBakeMissingFarProxies)
+    {
+        EnsureFarVegetationProxyAssets(true);
+    }
+#endif
 
     const FCubusVegetationRandomizationSettings
     RandomizationSettings
@@ -4211,173 +4460,6 @@ ACubusWorldVegetationActor::PublishFarVegetation(
 
     RenderedFarTreeCount =
         PublishedFarInstanceCount;
-
-    // TEMPORARY FAR-VISIBILITY PROBE. This deliberately uses one of the
-    // already-populated far HISM batches so the test exercises the exact same
-    // static mesh/material path as the invisible horizon trees. The first
-    // populated batch gets one obvious witness instance placed in front of the
-    // player and a detailed one-time renderer diagnostic.
-    static bool bFarVisibilityProbePublished = false;
-
-    if (!bFarVisibilityProbePublished)
-    {
-        const APawn* ProbePawn =
-            UGameplayStatics::GetPlayerPawn(this, 0);
-
-        if (IsValid(ProbePawn))
-        {
-            for (
-                const TPair<
-                    int64,
-                    TObjectPtr<
-                        UHierarchicalInstancedStaticMeshComponent
-                    >
-                >& Pair
-                : FarCatalogStaticBatchComponents
-            )
-            {
-                UHierarchicalInstancedStaticMeshComponent* Component =
-                    Pair.Value;
-
-                if (
-                    !IsValid(Component) ||
-                    Component->GetInstanceCount() <= 0 ||
-                    !IsValid(Component->GetStaticMesh())
-                )
-                {
-                    continue;
-                }
-
-                FTransform FirstWorldTransform;
-                const bool bGotFirstInstance =
-                    Component->GetInstanceTransform(
-                        0,
-                        FirstWorldTransform,
-                        true
-                    );
-
-                const FVector PawnLocation =
-                    ProbePawn->GetActorLocation();
-
-                const FVector ProbeLocation =
-                    PawnLocation +
-                    ProbePawn->GetActorForwardVector() * 4000.0f +
-                    FVector(0.0f, 0.0f, 100.0f);
-
-                FTransform ProbeWorldTransform(
-                    FRotator::ZeroRotator,
-                    ProbeLocation,
-                    FVector(2.0f)
-                );
-
-                const FTransform ProbeLocalTransform =
-                    ProbeWorldTransform.GetRelativeTransform(
-                        GetActorTransform()
-                    );
-
-                Component->AddInstance(
-                    ProbeLocalTransform,
-                    false
-                );
-
-                Component->BuildTreeIfOutdated(
-                    false,
-                    true
-                );
-                Component->UpdateBounds();
-                Component->MarkRenderTransformDirty();
-                Component->MarkRenderStateDirty();
-
-                const FBoxSphereBounds MeshBounds =
-                    Component->GetStaticMesh()->GetBounds();
-
-                const FBoxSphereBounds ComponentBounds =
-                    Component->Bounds;
-
-                FString MaterialList;
-
-                const int32 MaterialCount =
-                    Component->GetNumMaterials();
-
-                for (
-                    int32 MaterialIndex = 0;
-                    MaterialIndex < MaterialCount;
-                    ++MaterialIndex
-                )
-                {
-                    UMaterialInterface* Material =
-                        Component->GetMaterial(MaterialIndex);
-
-                    if (!MaterialList.IsEmpty())
-                    {
-                        MaterialList += TEXT(",");
-                    }
-
-                    MaterialList += IsValid(Material)
-                        ? Material->GetName()
-                        : TEXT("None");
-                }
-
-                const double FirstDistance =
-                    bGotFirstInstance
-                        ? FVector::Distance(
-                            FirstWorldTransform.GetLocation(),
-                            PawnLocation
-                        )
-                        : -1.0;
-
-                UE_LOG(
-                    LogTemp,
-                    Warning,
-                    TEXT(
-                        "Cubus FAR VISIBILITY PROBE: mesh=%s instances=%d "
-                        "meshExtent=(%.1f,%.1f,%.1f) "
-                        "componentOrigin=(%.0f,%.0f,%.0f) "
-                        "componentExtent=(%.0f,%.0f,%.0f) "
-                        "firstWorld=(%.0f,%.0f,%.0f) firstScale=(%.2f,%.2f,%.2f) "
-                        "firstDistance=%.0fcm probeWorld=(%.0f,%.0f,%.0f) materials=[%s]"
-                    ),
-                    *Component->GetStaticMesh()->GetName(),
-                    Component->GetInstanceCount(),
-                    MeshBounds.BoxExtent.X,
-                    MeshBounds.BoxExtent.Y,
-                    MeshBounds.BoxExtent.Z,
-                    ComponentBounds.Origin.X,
-                    ComponentBounds.Origin.Y,
-                    ComponentBounds.Origin.Z,
-                    ComponentBounds.BoxExtent.X,
-                    ComponentBounds.BoxExtent.Y,
-                    ComponentBounds.BoxExtent.Z,
-                    bGotFirstInstance
-                        ? FirstWorldTransform.GetLocation().X
-                        : 0.0,
-                    bGotFirstInstance
-                        ? FirstWorldTransform.GetLocation().Y
-                        : 0.0,
-                    bGotFirstInstance
-                        ? FirstWorldTransform.GetLocation().Z
-                        : 0.0,
-                    bGotFirstInstance
-                        ? FirstWorldTransform.GetScale3D().X
-                        : 0.0,
-                    bGotFirstInstance
-                        ? FirstWorldTransform.GetScale3D().Y
-                        : 0.0,
-                    bGotFirstInstance
-                        ? FirstWorldTransform.GetScale3D().Z
-                        : 0.0,
-                    FirstDistance,
-                    ProbeLocation.X,
-                    ProbeLocation.Y,
-                    ProbeLocation.Z,
-                    *MaterialList
-                );
-
-                bFarVisibilityProbePublished = true;
-                break;
-            }
-        }
-    }
 
     bFarVegetationRenderDirty =
         false;
