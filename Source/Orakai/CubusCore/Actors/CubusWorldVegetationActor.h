@@ -284,7 +284,7 @@ protected:
     /*
      * One far cell spans this many ordinary terrain chunks per axis.
      *
-     * 8 chunks * 32 voxels * 1m = 256m with the current world scale.
+     * Default 12 chunks keeps cell count manageable while reaching the horizon tier.
      */
     UPROPERTY(
         EditAnywhere,
@@ -295,10 +295,10 @@ protected:
             ClampMax = "32"
         )
     )
-    int32 FarVegetationCellSizeChunks = 8;
+    int32 FarVegetationCellSizeChunks = 12;
 
     /*
-     * 16 cells * 256m ~= 4.1km of far-forest coverage.
+     * With the current 80cm canonical voxel, 24.5 * 12 * 32 * 0.8m ~= 7.5km.
      */
     UPROPERTY(
         EditAnywhere,
@@ -309,11 +309,11 @@ protected:
             ClampMax = "32"
         )
     )
-    int32 FarVegetationRadiusCells = 16;
+    int32 FarVegetationRadiusCells = 24;
 
     /*
-     * Far representatives are hidden close to the camera because ordinary
-     * streamed vegetation owns that region.
+     * Far representatives begin outside the dense gameplay vegetation core,
+     * with a broad overlap so the forest does not disappear at the handoff.
      */
     UPROPERTY(
         EditAnywhere,
@@ -324,7 +324,7 @@ protected:
             Units = "cm"
         )
     )
-    float FarVegetationInnerRadius = 20000.0f;
+    float FarVegetationInnerRadius = 60000.0f;
 
     UPROPERTY(
         EditAnywhere,
@@ -335,7 +335,7 @@ protected:
             Units = "cm"
         )
     )
-    float FarVegetationEndCullDistance = 450000.0f;
+    float FarVegetationEndCullDistance = 800000.0f;
 
     UPROPERTY(
         EditAnywhere,
@@ -346,7 +346,7 @@ protected:
             ClampMax = "64"
         )
     )
-    int32 FarTreeSampleStrideVoxels = 4;
+    int32 FarTreeSampleStrideVoxels = 3;
 
     UPROPERTY(
         EditAnywhere,
@@ -357,7 +357,7 @@ protected:
             ClampMax = "1.0"
         )
     )
-    float FarTreeDensityScale = 0.35f;
+    float FarTreeDensityScale = 0.75f;
 
     UPROPERTY(
         EditAnywhere,
@@ -391,7 +391,7 @@ protected:
             Units = "s"
         )
     )
-    float FarVegetationPublishInterval = 0.5f;
+    float FarVegetationPublishInterval = 1.0f;
 
     UPROPERTY(
         EditAnywhere,
@@ -399,10 +399,10 @@ protected:
         Category = "Cubus|Vegetation|Far Streaming",
         meta = (
             ClampMin = "1000",
-            ClampMax = "500000"
+            ClampMax = "2000000"
         )
     )
-    int32 MaximumFarRenderedTrees = 150000;
+    int32 MaximumFarRenderedTrees = 750000;
 
     UPROPERTY(
         EditAnywhere,
