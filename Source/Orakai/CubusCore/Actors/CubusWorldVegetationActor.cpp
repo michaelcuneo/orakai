@@ -4204,6 +4204,161 @@ ACubusWorldVegetationActor::PublishFarVegetation(
     RenderedFarTreeCount =
         PublishedFarInstanceCount;
 
+    // TEMPORARY FAR-VISIBILITY PROBE. This deliberately uses one of the
+    // already-populated far HISM batches so the test exercises the exact same
+    // static mesh/material path as the invisible horizon trees. The first
+    // populated batch gets one obvious witness instance placed in front of the
+    // player and a detailed one-time renderer diagnostic.
+    static bool bFarVisibilityProbePublished = false;
+
+    if (!bFarVisibilityProbePublished)
+    {
+        const APawn* ProbePawn =
+            UGameplayStatics::GetPlayerPawn(this, 0);
+
+        if (IsValid(ProbePawn))
+        {
+            for (
+                const TPair<
+                    int64,
+                    TObjectPtr<
+                        UHierarchicalInstancedStaticMeshComponent
+                    >
+                >& Pair
+                : FarCatalogStaticBatchComponents
+            )
+            {
+                UHierarchicalInstancedStaticMeshComponent* Component =
+                    Pair.Value;
+
+                if (
+                    !IsValid(Component) ||
+                    Component->GetInstanceCount() <= 0 ||
+                    !IsValid(Component->GetStaticMesh())
+                )
+                {
+                    continue;
+                }
+
+                FTransform FirstWorldTransform;
+                const bool bGotFirstInstance =
+                    Component->GetInstanceTransform(
+                        0,
+                        FirstWorldTransform,
+                        true
+                    );
+
+                const FVector PawnLocation =
+                    ProbePawn->GetActorLocation();
+
+                const FVector ProbeLocation =
+                    PawnLocation +
+                    ProbePawn->GetActorForwardVector() * 4000.0f +
+                    FVector(0.0f, 0.0f, 100.0f);
+
+                FTransform ProbeWorldTransform(
+                    FRotator::ZeroRotator,
+                    ProbeLocation,
+                    FVector(2.0f)
+                );
+
+                const FTransform ProbeLocalTransform =
+                    ProbeWorldTransform.GetRelativeTransform(
+                        GetActorTransform()
+                    );
+
+                Component->AddInstance(
+                    ProbeLocalTransform,
+                    false
+                );
+
+                Component->BuildTreeIfOutdated(
+                    false,
+                    true
+                );
+
+                const FBoxSphereBounds MeshBounds =
+                    Component->GetStaticMesh()->GetBounds();
+
+                const FBoxSphereBounds ComponentBounds =
+                    Component->Bounds;
+
+                FString MaterialList;
+
+                const int32 MaterialCount =
+                    Component->GetNumMaterials();
+
+                for (
+                    int32 MaterialIndex = 0;
+                    MaterialIndex < MaterialCount;
+                    ++MaterialIndex
+                )
+                {
+                    UMaterialInterface* Material =
+                        Component->GetMaterial(MaterialIndex);
+
+                    if (!MaterialList.IsEmpty())
+                    {
+                        MaterialList += TEXT(",");
+                    }
+
+                    MaterialList += IsValid(Material)
+                        ? Material->GetName()
+                        : TEXT("None");
+                }
+
+                const double FirstDistance =
+                    bGotFirstInstance
+                        ? FVector::Distance(
+                            FirstWorldTransform.GetLocation(),
+                            PawnLocation
+                        )
+                        : -1.0;
+
+                UE_LOG(
+                    LogTemp,
+                    Warning,
+                    TEXT(
+                        "Cubus FAR VISIBILITY PROBE: mesh=%s instances=%d "
+                        "meshExtent=(%.1f,%.1f,%.1f) "
+                        "componentOrigin=(%.0f,%.0f,%.0f) "
+                        "componentExtent=(%.0f,%.0f,%.0f) "
+                        "firstWorld=(%.0f,%.0f,%.0f) firstDistance=%.0fcm "
+                        "probeWorld=(%.0f,%.0f,%.0f) materials=[%s]"
+                    ),
+                    *Component->GetStaticMesh()->GetName(),
+                    Component->GetInstanceCount(),
+                    MeshBounds.BoxExtent.X,
+                    MeshBounds.BoxExtent.Y,
+                    MeshBounds.BoxExtent.Z,
+                    ComponentBounds.Origin.X,
+                    ComponentBounds.Origin.Y,
+                    ComponentBounds.Origin.Z,
+                    ComponentBounds.BoxExtent.X,
+                    ComponentBounds.BoxExtent.Y,
+                    ComponentBounds.BoxExtent.Z,
+                    bGotFirstInstance
+                        ? FirstWorldTransform.GetLocation().X
+                        : 0.0,
+                    bGotFirstInstance
+                        ? FirstWorldTransform.GetLocation().Y
+                        : 0.0,
+                    bGotFirstInstance
+                        ? FirstWorldTransform.GetLocation().Z
+                        : 0.0,
+                    FirstDistance,
+                    ProbeLocation.X,
+                    ProbeLocation.Y,
+                    ProbeLocation.Z,
+                    *MaterialList
+                );
+
+                bFarVisibilityProbePublished = true;
+                break;
+            }
+        }
+    }
+
     bFarVegetationRenderDirty =
         false;
 
