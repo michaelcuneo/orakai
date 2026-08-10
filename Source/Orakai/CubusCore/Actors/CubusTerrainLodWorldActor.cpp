@@ -1130,7 +1130,8 @@ ACubusTerrainLodWorldActor::BuildTile(
             static_cast<float>(SafeStride),
         Input.IsoLevel,
         Result.MaterialMeshes,
-        Result.GeneratedTriangleCount
+        Result.GeneratedTriangleCount,
+        &ScaledField
     );
 
     Result.BuildTimeMilliseconds =

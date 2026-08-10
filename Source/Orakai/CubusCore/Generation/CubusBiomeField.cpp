@@ -24,7 +24,18 @@ FCubusBiomeFieldSettings FCubusBiomeField::MakeSettings(
     Settings.Frequency = GeologyProfile->BiomeFrequency;
     Settings.ForestThreshold = GeologyProfile->ForestThreshold;
     Settings.WetlandRiverDistance = GeologyProfile->WetlandRiverDistance;
-    Settings.RockySlopeThreshold = GeologyProfile->RockySlopeThreshold;
+    // RockySlopeThreshold is a height-gradient magnitude, not degrees.
+    // The legacy default of 4.0 corresponds to ~76 degrees and allowed grass
+    // and forest well onto cliff faces. Migrate only that exact old default so
+    // explicitly authored geology values remain authoritative.
+    Settings.RockySlopeThreshold =
+        FMath::IsNearlyEqual(
+            GeologyProfile->RockySlopeThreshold,
+            4.0f,
+            0.001f
+        )
+            ? 1.15f
+            : GeologyProfile->RockySlopeThreshold;
     Settings.RockyMinimumWorldZ = static_cast<float>(
         GeologyProfile->RockyMinimumWorldZ
     );

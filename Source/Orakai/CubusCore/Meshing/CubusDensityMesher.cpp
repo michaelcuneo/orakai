@@ -1238,7 +1238,8 @@ void FCubusDensityMesher::BuildChunk(
     const float VoxelSize,
     const float IsoLevel,
     TMap<int32, FCubusMeshData>& OutMaterialMeshes,
-    int32& OutGeneratedTriangleCount
+    int32& OutGeneratedTriangleCount,
+    const ICubusDensityField* SurfaceMaterialField
 )
 {
     using namespace CubusDensityMesher;
@@ -1546,21 +1547,69 @@ void FCubusDensityMesher::BuildChunk(
                                     IsoLevel
                                 );
 
-                            EdgeVertices[
-                                EdgeIndex
-                            ].MaterialBlend =
-                                BuildCellMaterialBlend(
-                                    CornerSamples,
-                                    EdgeVertices[
-                                        EdgeIndex
-                                    ].GlobalSamplePosition,
-                                    GlobalCellOrigin,
-                                    1.0f,
-                                    IsoLevel,
-                                    EdgeVertices[
-                                        EdgeIndex
-                                    ].MaterialId
-                                );
+                            if (SurfaceMaterialField != nullptr)
+                            {
+                                FInterpolatedVertex& SurfaceVertex =
+                                    EdgeVertices[EdgeIndex];
+
+                                // Probe a tiny distance toward the solid side.
+                                // Coarse LOD passes its scaled canonical field,
+                                // so biome and slope are resolved at the actual
+                                // interpolated surface position instead of at
+                                // cell corners separated by an entire LOD stride.
+                                constexpr float MaterialProbeDepth = 0.001f;
+                                const FVector MaterialProbePosition =
+                                    SurfaceVertex.GlobalSamplePosition -
+                                    SurfaceVertex.Normal * MaterialProbeDepth;
+
+                                const FCubusDensitySample SurfaceSample =
+                                    SurfaceMaterialField->SampleContinuous(
+                                        MaterialProbePosition
+                                    );
+
+                                if (SurfaceSample.MaterialId > 0)
+                                {
+                                    SurfaceVertex.MaterialId =
+                                        ClampDensityMaterialId(
+                                            SurfaceSample.MaterialId
+                                        );
+
+                                    SetSingleMaterialBlend(
+                                        SurfaceVertex.MaterialBlend,
+                                        SurfaceVertex.MaterialId
+                                    );
+                                }
+                                else
+                                {
+                                    SurfaceVertex.MaterialBlend =
+                                        BuildCellMaterialBlend(
+                                            CornerSamples,
+                                            SurfaceVertex.GlobalSamplePosition,
+                                            GlobalCellOrigin,
+                                            1.0f,
+                                            IsoLevel,
+                                            SurfaceVertex.MaterialId
+                                        );
+                                }
+                            }
+                            else
+                            {
+                                EdgeVertices[
+                                    EdgeIndex
+                                ].MaterialBlend =
+                                    BuildCellMaterialBlend(
+                                        CornerSamples,
+                                        EdgeVertices[
+                                            EdgeIndex
+                                        ].GlobalSamplePosition,
+                                        GlobalCellOrigin,
+                                        1.0f,
+                                        IsoLevel,
+                                        EdgeVertices[
+                                            EdgeIndex
+                                        ].MaterialId
+                                    );
+                            }
 
                             bEdgeVertexBuilt[
                                 EdgeIndex

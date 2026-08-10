@@ -103,7 +103,7 @@ public:
     float WetlandRiverDistance = 0.10f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "32.0"))
-    float RockySlopeThreshold = 4.0f;
+    float RockySlopeThreshold = 1.15f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes")
     int32 RockyMinimumWorldZ = 48;

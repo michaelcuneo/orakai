@@ -32,7 +32,8 @@ public:
         float VoxelSize,
         float IsoLevel,
         TMap<int32, FCubusMeshData>& OutMaterialMeshes,
-        int32& OutGeneratedTriangleCount
+        int32& OutGeneratedTriangleCount,
+        const ICubusDensityField* SurfaceMaterialField = nullptr
     );
 
     /**
