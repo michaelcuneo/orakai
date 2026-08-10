@@ -35,10 +35,7 @@
 
 #if WITH_EDITOR
 #include "FileHelpers.h"
-#include "IMeshMergeUtilities.h"
-#include "MeshMergeModule.h"
-#include "Modules/ModuleManager.h"
-#include "MeshMerge/MeshMergingSettings.h"
+#include "AnimToTextureBPLibrary.h"
 #include "UObject/Package.h"
 #endif
 
@@ -1115,14 +1112,6 @@ bool ACubusWorldVegetationActor::EnsureFarVegetationProxyAssets(
         ? TEXT("/Game/OrakaiGenerated/Vegetation/Far")
         : FarProxyPackageRoot;
 
-    IMeshMergeModule& MeshMergeModule =
-        FModuleManager::LoadModuleChecked<IMeshMergeModule>(
-            TEXT("MeshMergeUtilities")
-        );
-
-    IMeshMergeUtilities& MeshMergeUtilities =
-        MeshMergeModule.GetUtilities();
-
     TArray<UPackage*> PackagesToSave;
     int32 BakedProxyCount = 0;
     int32 ReusedProxyCount = 0;
@@ -1206,57 +1195,33 @@ bool ACubusWorldVegetationActor::EnsureFarVegetationProxyAssets(
 
             if (!IsValid(GeneratedMesh))
             {
-                USkeletalMeshComponent* PreviewComponent =
-                    NewObject<USkeletalMeshComponent>(this, NAME_None, RF_Transient);
-
-                if (!IsValid(PreviewComponent))
-                {
-                    ++FailedProxyCount;
-                    continue;
-                }
-
-                PreviewComponent->SetSkinnedAssetAndUpdate(SourceSkeletalMesh);
-                PreviewComponent->SetWorldTransform(FTransform::Identity);
-                PreviewComponent->RegisterComponent();
-                PreviewComponent->RefreshBoneTransforms();
-                PreviewComponent->UpdateComponentToWorld();
-
-                TArray<UPrimitiveComponent*> ComponentsToMerge;
-                ComponentsToMerge.Add(PreviewComponent);
-
-                FMeshMergingSettings MergeSettings;
-                TArray<UObject*> GeneratedAssets;
-                FVector MergedActorLocation = FVector::ZeroVector;
-
-                MeshMergeUtilities.MergeComponentsToStaticMesh(
-                    ComponentsToMerge,
-                    World,
-                    MergeSettings,
-                    nullptr,
-                    nullptr,
-                    PackageName,
-                    GeneratedAssets,
-                    MergedActorLocation,
-                    1.0f,
-                    true
-                );
-
-                PreviewComponent->DestroyComponent();
-
-                for (UObject* GeneratedAsset : GeneratedAssets)
-                {
-                    if (UStaticMesh* Candidate = Cast<UStaticMesh>(GeneratedAsset))
-                    {
-                        GeneratedMesh = Candidate;
-                        break;
-                    }
-                }
+                // Epic's dedicated editor utility converts the skeletal mesh
+                // asset directly into a static mesh. Unlike the generic component
+                // merge path, this is explicitly designed for USkeletalMesh input.
+                GeneratedMesh =
+                    UAnimToTextureBPLibrary::ConvertSkeletalMeshToStaticMesh(
+                        SourceSkeletalMesh,
+                        PackageName,
+                        0
+                    );
 
                 if (IsValid(GeneratedMesh))
                 {
                     GeneratedMesh->MarkPackageDirty();
                     PackagesToSave.AddUnique(GeneratedMesh->GetPackage());
                     ++BakedProxyCount;
+
+                    UE_LOG(
+                        LogTemp,
+                        Display,
+                        TEXT(
+                            "Cubus far proxy baked: species=%s stage=%d source=%s proxy=%s"
+                        ),
+                        *SpeciesToken,
+                        StageIndex,
+                        *SourceSkeletalMesh->GetName(),
+                        *GeneratedMesh->GetName()
+                    );
                 }
             }
             else
