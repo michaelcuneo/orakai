@@ -37,11 +37,31 @@ struct FCubusTerrainLodTileBuild
     UE::Tasks::TTask<FCubusTerrainLodTileBuildResult> Task;
 };
 
+struct FCubusTerrainLodTierRuntime
+{
+    int32 LodLevel = 1;
+    int32 CanonicalVoxelStride = 4;
+    int32 InnerRadiusTiles = 0;
+    int32 OuterRadiusTiles = 4;
+    int32 VerticalRadiusTiles = 0;
+    int32 OverlapTiles = 1;
+
+    TMap<FIntVector, TObjectPtr<UProceduralMeshComponent>> TileComponents;
+    TSet<FIntVector> RequiredTiles;
+    TSet<FIntVector> TilesBuilding;
+    TArray<FIntVector> PendingTiles;
+    TArray<FCubusTerrainLodTileBuild> ActiveBuilds;
+    TArray<FCubusTerrainLodTileBuildResult> CompletedBuilds;
+
+    FIntVector LastCentreTile =
+        FIntVector(MAX_int32, MAX_int32, MAX_int32);
+};
+
 /**
  * World-level owner for coarse visual terrain tiles.
  *
- * LOD0 gameplay chunks remain owned by ACubusBlockWorldActor. This actor only
- * renders coarse density terrain outside the detailed gameplay radius.
+ * LOD0 gameplay chunks remain owned by ACubusBlockWorldActor. This actor owns
+ * visual-only coarse density tiers outside the detailed gameplay radius.
  */
 UCLASS(
     BlueprintType,
@@ -67,36 +87,33 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD")
     bool bEnableTerrainLod = true;
 
-    /** LOD1 samples one point every four canonical voxels: 32 cells = 128 m. */
+    /** LOD1 samples one point every four canonical voxels. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "2", ClampMax = "64"))
     int32 Lod1CanonicalVoxelStride = 4;
 
-    /*
-    * Number of coarse LOD1 tiles allowed to overlap the outer edge of LOD0.
-    *
-    * LOD1 derives its inner exclusion radius from the Block World's actual
-    * horizontal detailed-chunk view radius. Keeping one coarse tile of overlap
-    * prevents temporary holes while proper LOD transition ownership is still
-    * being implemented.
-    */
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Terrain LOD|LOD1",
-        meta = (
-            ClampMin = "0",
-            ClampMax = "2"
-        )
-    )
+    /** Number of LOD1 tiles allowed to overlap the outer edge of LOD0. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "0", ClampMax = "2"))
     int32 Lod1OverlapTiles = 1;
 
-    /** Conservative first-test radius; later tiers extend the horizon farther. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "1", ClampMax = "32"))
     int32 Lod1OuterRadiusTiles = 4;
 
-    /** One 128 m vertical tile is enough for the first surface-terrain test. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "0", ClampMax = "4"))
     int32 Lod1VerticalRadiusTiles = 0;
+
+    /** LOD2 samples one point every sixteen canonical voxels. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "4", ClampMax = "256"))
+    int32 Lod2CanonicalVoxelStride = 16;
+
+    /** Number of LOD2 tiles allowed to overlap the outer edge of LOD1. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "0", ClampMax = "2"))
+    int32 Lod2OverlapTiles = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "1", ClampMax = "32"))
+    int32 Lod2OuterRadiusTiles = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "0", ClampMax = "4"))
+    int32 Lod2VerticalRadiusTiles = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|Streaming", meta = (ClampMin = "1", ClampMax = "16"))
     int32 MaxConcurrentLodBuilds = 4;
@@ -122,13 +139,32 @@ protected:
 private:
     void ResolveBlockWorld();
     void UpdateStreaming();
+    void UpdateTierStreaming(
+        FCubusTerrainLodTierRuntime& Tier,
+        const FVector& CameraGridLocation,
+        float CanonicalChunkWorldSize,
+        double PreviousTierHalfExtentCanonicalChunks,
+        int32 CanonicalVoxelStride,
+        int32 OverlapTiles,
+        int32 OuterRadiusTiles,
+        int32 VerticalRadiusTiles
+    );
     void CollectCompletedBuilds();
+    void CollectCompletedBuildsForTier(FCubusTerrainLodTierRuntime& Tier);
     void StartPendingBuilds();
     void UploadCompletedBuilds();
-    void RemoveUnneededTiles();
+    bool UploadOneCompletedBuild(
+        FCubusTerrainLodTierRuntime& Tier,
+        float CanonicalVoxelSize,
+        UMaterialInterface* TerrainMaterial,
+        double& WorkerMilliseconds
+    );
+    void RemoveUnneededTiles(FCubusTerrainLodTierRuntime& Tier);
     void ClearAllTiles();
+    void ClearTier(FCubusTerrainLodTierRuntime& Tier);
 
     UProceduralMeshComponent* CreateTileComponent(
+        FCubusTerrainLodTierRuntime& Tier,
         const FIntVector& TileCoordinate,
         float TileWorldSize
     );
@@ -143,13 +179,8 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<ACubusBlockWorldActor> BlockWorld;
 
-    TMap<FIntVector, TObjectPtr<UProceduralMeshComponent>> TileComponents;
-    TSet<FIntVector> RequiredTiles;
-    TSet<FIntVector> TilesBuilding;
-    TArray<FIntVector> PendingTiles;
-    TArray<FCubusTerrainLodTileBuild> ActiveBuilds;
-    TArray<FCubusTerrainLodTileBuildResult> CompletedBuilds;
+    FCubusTerrainLodTierRuntime Lod1Runtime;
+    FCubusTerrainLodTierRuntime Lod2Runtime;
 
-    FIntVector LastCentreTile = FIntVector(MAX_int32, MAX_int32, MAX_int32);
     float TimeUntilStreamingUpdate = 0.0f;
 };
