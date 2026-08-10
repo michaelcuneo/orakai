@@ -30,7 +30,6 @@ jobs:
                   raise RuntimeError(f"{label}: expected 1 match, found {count}")
               return text.replace(old, new, 1)
 
-          # New assets should use a realistic rocky slope threshold.
           p = Path('Source/Orakai/CubusCore/Data/CubusGeologyProfile.h')
           s = p.read_text(encoding='utf-8')
           s = once(
@@ -41,8 +40,6 @@ jobs:
           )
           p.write_text(s, encoding='utf-8')
 
-          # Existing geology assets serialized with the old 4.0 default must
-          # get the corrected behavior without forcing the user to recreate them.
           p = Path('Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp')
           s = p.read_text(encoding='utf-8')
           s = once(
@@ -53,15 +50,12 @@ jobs:
           )
           p.write_text(s, encoding='utf-8')
 
-          # Allow a caller to provide a material field that is sampled at the
-          # actual interpolated isosurface vertex. Ordinary LOD0 callers remain
-          # unchanged through the default nullptr.
           p = Path('Source/Orakai/CubusCore/Meshing/CubusDensityMesher.h')
           s = p.read_text(encoding='utf-8')
           s = once(
               s,
-              '''        TMap<int32, FCubusMeshData>& OutMaterialMeshes,\n        int32& OutGeneratedTriangleCount\n    );''',
-              '''        TMap<int32, FCubusMeshData>& OutMaterialMeshes,\n        int32& OutGeneratedTriangleCount,\n        const ICubusDensityField* SurfaceMaterialField = nullptr\n    );''',
+              '''    static void BuildChunk(\n        const FCubusDensitySamplingBuffer& DensityBuffer,\n        float VoxelSize,\n        float IsoLevel,\n        TMap<int32, FCubusMeshData>& OutMaterialMeshes,\n        int32& OutGeneratedTriangleCount\n    );''',
+              '''    static void BuildChunk(\n        const FCubusDensitySamplingBuffer& DensityBuffer,\n        float VoxelSize,\n        float IsoLevel,\n        TMap<int32, FCubusMeshData>& OutMaterialMeshes,\n        int32& OutGeneratedTriangleCount,\n        const ICubusDensityField* SurfaceMaterialField = nullptr\n    );''',
               'BuildChunk declaration'
           )
           p.write_text(s, encoding='utf-8')
@@ -70,24 +64,22 @@ jobs:
           s = p.read_text(encoding='utf-8')
           s = once(
               s,
-              '''    TMap<int32, FCubusMeshData>& OutMaterialMeshes,\n    int32& OutGeneratedTriangleCount\n)''',
-              '''    TMap<int32, FCubusMeshData>& OutMaterialMeshes,\n    int32& OutGeneratedTriangleCount,\n    const ICubusDensityField* SurfaceMaterialField\n)''',
+              '''void FCubusDensityMesher::BuildChunk(\n    const FCubusDensitySamplingBuffer& DensityBuffer,\n    const float VoxelSize,\n    const float IsoLevel,\n    TMap<int32, FCubusMeshData>& OutMaterialMeshes,\n    int32& OutGeneratedTriangleCount\n)''',
+              '''void FCubusDensityMesher::BuildChunk(\n    const FCubusDensitySamplingBuffer& DensityBuffer,\n    const float VoxelSize,\n    const float IsoLevel,\n    TMap<int32, FCubusMeshData>& OutMaterialMeshes,\n    int32& OutGeneratedTriangleCount,\n    const ICubusDensityField* SurfaceMaterialField\n)''',
               'BuildChunk definition'
           )
 
           old = '''                            EdgeVertices[\n                                EdgeIndex\n                            ].MaterialBlend =\n                                BuildCellMaterialBlend(\n                                    CornerSamples,\n                                    EdgeVertices[\n                                        EdgeIndex\n                                    ].GlobalSamplePosition,\n                                    GlobalCellOrigin,\n                                    1.0f,\n                                    IsoLevel,\n                                    EdgeVertices[\n                                        EdgeIndex\n                                    ].MaterialId\n                                );\n'''
-          new = '''                            if (SurfaceMaterialField != nullptr)\n                            {\n                                FInterpolatedVertex& SurfaceVertex =\n                                    EdgeVertices[EdgeIndex];\n\n                                // Probe a tiny distance toward the solid side.\n                                // The field passed by coarse LOD is the scaled\n                                // canonical field, so this resolves biome and\n                                // slope at the actual interpolated surface\n                                // position instead of at a coarse cell corner.\n                                constexpr float MaterialProbeDepth = 0.001f;\n                                const FVector MaterialProbePosition =\n                                    SurfaceVertex.GlobalSamplePosition -\n                                    SurfaceVertex.Normal * MaterialProbeDepth;\n\n                                const FCubusDensitySample SurfaceSample =\n                                    SurfaceMaterialField->SampleContinuous(\n                                        MaterialProbePosition\n                                    );\n\n                                if (SurfaceSample.MaterialId > 0)\n                                {\n                                    SurfaceVertex.MaterialId =\n                                        ClampDensityMaterialId(\n                                            SurfaceSample.MaterialId\n                                        );\n\n                                    SetSingleMaterialBlend(\n                                        SurfaceVertex.MaterialBlend,\n                                        SurfaceVertex.MaterialId\n                                    );\n                                }\n                                else\n                                {\n                                    SurfaceVertex.MaterialBlend =\n                                        BuildCellMaterialBlend(\n                                            CornerSamples,\n                                            SurfaceVertex.GlobalSamplePosition,\n                                            GlobalCellOrigin,\n                                            1.0f,\n                                            IsoLevel,\n                                            SurfaceVertex.MaterialId\n                                        );\n                                }\n                            }\n                            else\n                            {\n                                EdgeVertices[\n                                    EdgeIndex\n                                ].MaterialBlend =\n                                    BuildCellMaterialBlend(\n                                        CornerSamples,\n                                        EdgeVertices[\n                                            EdgeIndex\n                                        ].GlobalSamplePosition,\n                                        GlobalCellOrigin,\n                                        1.0f,\n                                        IsoLevel,\n                                        EdgeVertices[\n                                            EdgeIndex\n                                        ].MaterialId\n                                    );\n                            }\n'''
+          new = '''                            if (SurfaceMaterialField != nullptr)\n                            {\n                                FInterpolatedVertex& SurfaceVertex =\n                                    EdgeVertices[EdgeIndex];\n\n                                // Probe a tiny distance toward the solid side.\n                                // Coarse LOD passes its scaled canonical field,\n                                // so biome and slope are resolved at the actual\n                                // interpolated surface position instead of at\n                                // cell corners separated by an entire LOD stride.\n                                constexpr float MaterialProbeDepth = 0.001f;\n                                const FVector MaterialProbePosition =\n                                    SurfaceVertex.GlobalSamplePosition -\n                                    SurfaceVertex.Normal * MaterialProbeDepth;\n\n                                const FCubusDensitySample SurfaceSample =\n                                    SurfaceMaterialField->SampleContinuous(\n                                        MaterialProbePosition\n                                    );\n\n                                if (SurfaceSample.MaterialId > 0)\n                                {\n                                    SurfaceVertex.MaterialId =\n                                        ClampDensityMaterialId(\n                                            SurfaceSample.MaterialId\n                                        );\n\n                                    SetSingleMaterialBlend(\n                                        SurfaceVertex.MaterialBlend,\n                                        SurfaceVertex.MaterialId\n                                    );\n                                }\n                                else\n                                {\n                                    SurfaceVertex.MaterialBlend =\n                                        BuildCellMaterialBlend(\n                                            CornerSamples,\n                                            SurfaceVertex.GlobalSamplePosition,\n                                            GlobalCellOrigin,\n                                            1.0f,\n                                            IsoLevel,\n                                            SurfaceVertex.MaterialId\n                                        );\n                                }\n                            }\n                            else\n                            {\n                                EdgeVertices[\n                                    EdgeIndex\n                                ].MaterialBlend =\n                                    BuildCellMaterialBlend(\n                                        CornerSamples,\n                                        EdgeVertices[\n                                            EdgeIndex\n                                        ].GlobalSamplePosition,\n                                        GlobalCellOrigin,\n                                        1.0f,\n                                        IsoLevel,\n                                        EdgeVertices[\n                                            EdgeIndex\n                                        ].MaterialId\n                                    );\n                            }\n'''
           s = once(s, old, new, 'coarse surface material resample')
           p.write_text(s, encoding='utf-8')
 
-          # LOD tiles opt into exact surface material resampling via the same
-          # scaled field they use for geometry. LOD0 keeps existing behavior.
           p = Path('Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp')
           s = p.read_text(encoding='utf-8')
           s = once(
               s,
-              '''        Result.MaterialMeshes,\n        Result.GeneratedTriangleCount\n    );''',
-              '''        Result.MaterialMeshes,\n        Result.GeneratedTriangleCount,\n        &ScaledField\n    );''',
+              '''    FCubusDensityMesher::BuildChunk(\n        DensityBuffer,\n        Input.CanonicalVoxelSize *\n            static_cast<float>(SafeStride),\n        Input.IsoLevel,\n        Result.MaterialMeshes,\n        Result.GeneratedTriangleCount\n    );''',
+              '''    FCubusDensityMesher::BuildChunk(\n        DensityBuffer,\n        Input.CanonicalVoxelSize *\n            static_cast<float>(SafeStride),\n        Input.IsoLevel,\n        Result.MaterialMeshes,\n        Result.GeneratedTriangleCount,\n        &ScaledField\n    );''',
               'LOD BuildChunk material field'
           )
           p.write_text(s, encoding='utf-8')
