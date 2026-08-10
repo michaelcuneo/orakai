@@ -117,6 +117,25 @@ void ACubusBlockWorldActor::OnConstruction(
     MaxChunksGeneratedPerTick = FMath::Max(1, MaxChunksGeneratedPerTick);
     MaxChunksRemovedPerTick = FMath::Max(1, MaxChunksRemovedPerTick);
     MaxDirtyChunksRebuiltPerTick = FMath::Max(1, MaxDirtyChunksRebuiltPerTick);
+    MaxConcurrentStreamingChunkBuilds =
+        FMath::Clamp(
+            MaxConcurrentStreamingChunkBuilds,
+            1,
+            16
+        );
+
+    MaxStreamingChunkUploadsPerTick =
+        FMath::Clamp(
+            MaxStreamingChunkUploadsPerTick,
+            1,
+            16
+        );
+    InitialVerticalLoadRadius =
+        FMath::Clamp(
+            InitialVerticalLoadRadius,
+            0,
+            4
+        );
     StreamingUpdateInterval = FMath::Max(0.05f, StreamingUpdateInterval);
     WeatherMaterialUpdateInterval =
         FMath::Max(0.01f, WeatherMaterialUpdateInterval);
@@ -362,8 +381,15 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
         ProcessRuntimeQueues();
     }
 
-    TryReleasePawnToTerrain();
+    ProcessCompletedStreamingChunkBuilds();
+    QueueStreamingChunkBuilds();
 
+    if (!bInitialSpawnAreaReady)
+    {
+        ProcessInitialStreaming();
+    }
+
+    TryReleasePawnToTerrain();
     RecordTrackedPawnCoordinate();
 }
 
@@ -464,9 +490,20 @@ void ACubusBlockWorldActor::RegisterChunk(
     // A newly available block neighbour changes which boundary faces should
     // exist. Density chunks are independent, but sharing this cheap queue keeps
     // hybrid mode border-safe as well.
-    for (const FIntVector& Offset : CubusBlockWorldActor::NeighbourOffsets)
+    if (
+        GetVoxelRenderMode() !=
+        ECubusVoxelRenderMode::Density
+    )
     {
-        QueueChunkForRebuild(Coordinate + Offset);
+        for (
+            const FIntVector& Offset :
+            CubusBlockWorldActor::NeighbourOffsets
+        )
+        {
+            QueueChunkForRebuild(
+                Coordinate + Offset
+            );
+        }
     }
 }
 
@@ -494,11 +531,25 @@ void ACubusBlockWorldActor::UnregisterChunk(
 
     // When a block chunk disappears, adjacent chunks must expose their border
     // faces. Queue after removal so their neighbourhood snapshot sees null.
-    for (const FIntVector& Coordinate : RemovedCoordinates)
+    if (
+        GetVoxelRenderMode() !=
+        ECubusVoxelRenderMode::Density
+    )
     {
-        for (const FIntVector& Offset : CubusBlockWorldActor::NeighbourOffsets)
+        for (
+            const FIntVector& Coordinate :
+            RemovedCoordinates
+        )
         {
-            QueueChunkForRebuild(Coordinate + Offset);
+            for (
+                const FIntVector& Offset :
+                CubusBlockWorldActor::NeighbourOffsets
+            )
+            {
+                QueueChunkForRebuild(
+                    Coordinate + Offset
+                );
+            }
         }
     }
 }
@@ -558,34 +609,79 @@ void ACubusBlockWorldActor::QueueChunkAndFaceNeighboursForRebuild(
 }
 
 void ACubusBlockWorldActor::QueueDensityEditDependenciesForRebuild(
-    const FIntVector& ChunkCoordinate
+    const FIntVector& ChangedSampleMinimum,
+    const FIntVector& ChangedSampleMaximum
 )
 {
     ++DensityEditRevision;
 
     /*
-     * Density edit dependencies are transactional.
+     * A changed density sample affects:
      *
-     * Do not send these through the ordinary dirty queue because that
-     * publishes chunks individually and can expose different density
-     * revisions on opposite sides of a shared boundary.
+     * 1. Marching Cubes cells that reference it as a corner.
+     * 2. Vertices whose central-difference gradient references it from one
+     *    additional sample away.
+     *
+     * Therefore the complete canonical dependency range in cell-origin space
+     * is changedMin - 2 through changedMax + 1.
      */
-    for (int32 Z = -1; Z <= 1; ++Z)
+    const FIntVector AffectedCellMinimum =
+        ChangedSampleMinimum -
+        FIntVector(2, 2, 2);
+
+    const FIntVector AffectedCellMaximum =
+        ChangedSampleMaximum +
+        FIntVector(1, 1, 1);
+
+    const FIntVector MinimumChunkCoordinate =
+        OrakaiPersistence::WorldVoxelToChunk(
+            AffectedCellMinimum
+        );
+
+    const FIntVector MaximumChunkCoordinate =
+        OrakaiPersistence::WorldVoxelToChunk(
+            AffectedCellMaximum
+        );
+
+    /*
+     * Keep the existing atomic transaction rule:
+     *
+     * every loaded chunk whose mesh can depend on the changed samples is
+     * staged first, and none of them publishes individually.
+     */
+    for (
+        int32 ChunkZ = MinimumChunkCoordinate.Z;
+        ChunkZ <= MaximumChunkCoordinate.Z;
+        ++ChunkZ
+    )
     {
-        for (int32 Y = -1; Y <= 1; ++Y)
+        for (
+            int32 ChunkY = MinimumChunkCoordinate.Y;
+            ChunkY <= MaximumChunkCoordinate.Y;
+            ++ChunkY
+        )
         {
-            for (int32 X = -1; X <= 1; ++X)
+            for (
+                int32 ChunkX = MinimumChunkCoordinate.X;
+                ChunkX <= MaximumChunkCoordinate.X;
+                ++ChunkX
+            )
             {
-                const FIntVector DependencyCoordinate =
-                    ChunkCoordinate +
-                    FIntVector(X, Y, Z);
+                const FIntVector DependencyCoordinate(
+                    ChunkX,
+                    ChunkY,
+                    ChunkZ
+                );
 
                 /*
                  * Unloaded chunks need no transaction. When streamed in later
-                 * they will build directly from the current authoritative
-                 * DensityEdits map.
+                 * they build directly from the authoritative DensityEdits map.
                  */
-                if (!IsValid(FindChunk(DependencyCoordinate)))
+                if (!IsValid(
+                    FindChunk(
+                        DependencyCoordinate
+                    )
+                ))
                 {
                     continue;
                 }
@@ -1068,7 +1164,18 @@ int32 ACubusBlockWorldActor::EditDensitySphereAtWorldSample(
 
     const int32 SafeRadius = FMath::Max(0, BrushRadius);
     const int32 RadiusSquared = SafeRadius * SafeRadius;
-    TSet<FIntVector> TouchedChunks;
+    FIntVector ChangedSampleMinimum(
+        MAX_int32,
+        MAX_int32,
+        MAX_int32
+    );
+
+    FIntVector ChangedSampleMaximum(
+        MIN_int32,
+        MIN_int32,
+        MIN_int32
+    );
+
     int32 ChangedSampleCount = 0;
 
     for (int32 Z = -SafeRadius; Z <= SafeRadius; ++Z)
@@ -1140,17 +1247,53 @@ int32 ACubusBlockWorldActor::EditDensitySphereAtWorldSample(
                     }
                 }
 
-                TouchedChunks.Add(
-                    OrakaiPersistence::WorldVoxelToChunk(WorldSample)
-                );
+                ChangedSampleMinimum.X =
+                    FMath::Min(
+                        ChangedSampleMinimum.X,
+                        WorldSample.X
+                    );
+
+                ChangedSampleMinimum.Y =
+                    FMath::Min(
+                        ChangedSampleMinimum.Y,
+                        WorldSample.Y
+                    );
+
+                ChangedSampleMinimum.Z =
+                    FMath::Min(
+                        ChangedSampleMinimum.Z,
+                        WorldSample.Z
+                    );
+
+                ChangedSampleMaximum.X =
+                    FMath::Max(
+                        ChangedSampleMaximum.X,
+                        WorldSample.X
+                    );
+
+                ChangedSampleMaximum.Y =
+                    FMath::Max(
+                        ChangedSampleMaximum.Y,
+                        WorldSample.Y
+                    );
+
+                ChangedSampleMaximum.Z =
+                    FMath::Max(
+                        ChangedSampleMaximum.Z,
+                        WorldSample.Z
+                    );
+
                 ++ChangedSampleCount;
             }
         }
     }
 
-    for (const FIntVector& ChunkCoordinate : TouchedChunks)
+    if (ChangedSampleCount > 0)
     {
-        QueueDensityEditDependenciesForRebuild(ChunkCoordinate);
+        QueueDensityEditDependenciesForRebuild(
+            ChangedSampleMinimum,
+            ChangedSampleMaximum
+        );
     }
 
     return ChangedSampleCount;
@@ -1363,9 +1506,11 @@ bool ACubusBlockWorldActor::HarvestTreeAlongRay(
     return true;
 }
 
-ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
+ACubusVoxelVolumeActor*
+ACubusBlockWorldActor::SpawnChunkAtCoordinate(
     const FIntVector& Coordinate,
-    const bool bGenerateVegetation
+    const bool bGenerateVegetation,
+    const bool bBuildImmediately
 )
 {
     if (ACubusVoxelVolumeActor* ExistingChunk = FindChunk(Coordinate))
@@ -1488,10 +1633,19 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(
     RegisterChunk(ChunkActor);
 
     ChunkActor->GenerateTerrainData();
-    ApplyPersistedEditsToChunk(*ChunkActor);
-    ChunkActor->RebuildVolume();
 
-    GeneratedChunkCount = GeneratedChunks.Num();
+    ApplyPersistedEditsToChunk(
+        *ChunkActor
+    );
+
+    if (bBuildImmediately)
+    {
+        ChunkActor->RebuildVolume();
+    }
+
+    GeneratedChunkCount =
+        GeneratedChunks.Num();
+
     return ChunkActor;
 }
 
@@ -1902,20 +2056,25 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 
     UpdateDensityLods();
 
-    BuildRequiredCoordinates(
-        CentreCoordinate,
-        HorizontalViewRadius,
-        VerticalViewRadius,
-        RequiredChunkCoordinates
-    );
-
     if (!bInitialSpawnAreaReady)
     {
         BuildRequiredCoordinates(
             CentreCoordinate,
             InitialLoadRadius,
-            VerticalViewRadius,
+            InitialVerticalLoadRadius,
             InitialRequiredCoordinates
+        );
+
+        RequiredChunkCoordinates =
+            InitialRequiredCoordinates;
+    }
+    else
+    {
+        BuildRequiredCoordinates(
+            CentreCoordinate,
+            HorizontalViewRadius,
+            VerticalViewRadius,
+            RequiredChunkCoordinates
         );
     }
 
@@ -2026,6 +2185,233 @@ void ACubusBlockWorldActor::UpdateDensityLods()
     }
 }
 
+void ACubusBlockWorldActor::QueueStreamingChunkBuilds()
+{
+    const int32 AvailableSlots =
+        MaxConcurrentStreamingChunkBuilds -
+        StreamingChunkBuilds.Num();
+
+    if (AvailableSlots <= 0)
+    {
+        return;
+    }
+
+    int32 QueuedCount = 0;
+
+    for (const FIntVector& Coordinate : RequiredChunkCoordinates)
+    {
+        if (QueuedCount >= AvailableSlots)
+        {
+            break;
+        }
+
+        if (
+            StreamingChunksReady.Contains(Coordinate) ||
+            StreamingChunksBuilding.Contains(Coordinate)
+        )
+        {
+            continue;
+        }
+
+        ACubusVoxelVolumeActor* Chunk =
+            FindChunk(Coordinate);
+
+        if (!IsValid(Chunk))
+        {
+            continue;
+        }
+
+        if (
+            Chunk->GetEffectiveRenderMode() !=
+            ECubusVoxelRenderMode::Density
+        )
+        {
+            Chunk->RebuildVolume();
+            StreamingChunksReady.Add(Coordinate);
+            continue;
+        }
+
+        const FCubusDensityMeshBuildInput BuildInput =
+            Chunk->CaptureDensityMeshBuildInput();
+
+        FCubusStreamingChunkBuild Build;
+
+        Build.Coordinate = Coordinate;
+        Build.Chunk = Chunk;
+
+        Build.Task =
+            UE::Tasks::Launch(
+                TEXT("CubusStreamingDensityMesh"),
+                [BuildInput]()
+                {
+                    return
+                        ACubusVoxelVolumeActor::
+                            BuildDensityMeshData(
+                                BuildInput
+                            );
+                }
+            );
+
+        StreamingChunksBuilding.Add(Coordinate);
+
+        StreamingChunkBuilds.Add(
+            MoveTemp(Build)
+        );
+
+        ++QueuedCount;
+    }
+}
+
+bool ACubusBlockWorldActor::IsInitialChunkReady(
+    const FIntVector& Coordinate
+) const
+{
+    ACubusVoxelVolumeActor* Chunk =
+        FindChunk(Coordinate);
+
+    if (!IsValid(Chunk))
+    {
+        return false;
+    }
+
+    if (
+        Chunk->GetEffectiveRenderMode() ==
+        ECubusVoxelRenderMode::Density
+    )
+    {
+        return StreamingChunksReady.Contains(
+            Coordinate
+        );
+    }
+
+    return true;
+}
+
+bool ACubusBlockWorldActor::AreInitialChunksReady() const
+{
+    if (InitialRequiredCoordinates.IsEmpty())
+    {
+        return false;
+    }
+
+    for (
+        const FIntVector& Coordinate :
+        InitialRequiredCoordinates
+    )
+    {
+        if (!IsInitialChunkReady(Coordinate))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void ACubusBlockWorldActor::ProcessInitialStreaming()
+{
+    if (bInitialSpawnAreaReady)
+    {
+        return;
+    }
+
+    if (!AreInitialChunksReady())
+    {
+        return;
+    }
+
+    bInitialSpawnAreaReady = true;
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT(
+            "Cubus initial spawn area ready: %d chunks"
+        ),
+        InitialRequiredCoordinates.Num()
+    );
+
+    UpdateRuntimeStreaming(true);
+}
+
+void ACubusBlockWorldActor::
+ProcessCompletedStreamingChunkBuilds()
+{
+    int32 UploadedCount = 0;
+
+    for (
+        int32 Index =
+            StreamingChunkBuilds.Num() - 1;
+        Index >= 0;
+        --Index
+    )
+    {
+        if (
+            UploadedCount >=
+            MaxStreamingChunkUploadsPerTick
+        )
+        {
+            break;
+        }
+
+        FCubusStreamingChunkBuild& Build =
+            StreamingChunkBuilds[Index];
+
+        if (!Build.Task.IsCompleted())
+        {
+            continue;
+        }
+
+        ACubusVoxelVolumeActor* Chunk =
+            Build.Chunk.Get();
+
+        FCubusDensityMeshBuildResult Result =
+            Build.Task.GetResult();
+
+        /*
+         * Player may have moved while this worker was running.
+         *
+         * Never publish obsolete terrain that has already fallen
+         * outside the current streaming set.
+         */
+        const bool bStillRequired =
+            RequiredChunkCoordinates.Contains(
+                Build.Coordinate
+            );
+
+        if (
+            IsValid(Chunk) &&
+            bStillRequired
+        )
+        {
+            if (
+                Chunk->BuildStagedVolumeFromDensityMesh(
+                    Result
+                )
+            )
+            {
+                Chunk->CommitStagedVolume();
+
+                StreamingChunksReady.Add(
+                    Build.Coordinate
+                );
+            }
+        }
+
+        StreamingChunksBuilding.Remove(
+            Build.Coordinate
+        );
+
+        StreamingChunkBuilds.RemoveAtSwap(
+            Index,
+            1,
+            EAllowShrinking::No
+        );
+
+        ++UploadedCount;
+    }
+}
+
 void ACubusBlockWorldActor::ProcessRuntimeQueues()
 {
     int32 RemovedCount = 0;
@@ -2042,31 +2428,45 @@ void ACubusBlockWorldActor::ProcessRuntimeQueues()
 
         if (IsValid(ChunkActor))
         {
+            StreamingChunksReady.Remove(
+                Coordinate
+            );
+
             UnregisterChunk(ChunkActor);
-            GeneratedChunks.Remove(ChunkActor);
+
+            GeneratedChunks.Remove(
+                ChunkActor
+            );
+
             ChunkActor->Destroy();
+
             ++RemovedCount;
         }
     }
 
+    const int32 GenerationLimit =
+        MaxChunksGeneratedPerTick;
+
     int32 GeneratedCount = 0;
 
     while (
-        GeneratedCount < MaxChunksGeneratedPerTick &&
+        GeneratedCount < GenerationLimit &&
         !PendingChunkGeneration.IsEmpty()
     )
     {
-        const FIntVector Coordinate = PendingChunkGeneration.Last();
-        PendingChunkGeneration.Pop(EAllowShrinking::No);
+        const FIntVector Coordinate =
+            PendingChunkGeneration.Last();
 
-        const bool bInitialTerrainStillLoading =
-            !bInitialSpawnAreaReady;
+        PendingChunkGeneration.Pop(
+            EAllowShrinking::No
+        );
 
         if (
             IsValid(
                 SpawnChunkAtCoordinate(
                     Coordinate,
-                    !bInitialTerrainStillLoading
+                    bInitialSpawnAreaReady,
+                    false
                 )
             )
         )
@@ -2077,34 +2477,6 @@ void ACubusBlockWorldActor::ProcessRuntimeQueues()
 
     PendingRuntimeChunkCount = PendingChunkGeneration.Num();
     GeneratedChunkCount = GeneratedChunks.Num();
-
-    if (!bInitialSpawnAreaReady && !InitialRequiredCoordinates.IsEmpty())
-    {
-        bool bAllInitialChunksPresent = true;
-
-        for (const FIntVector& Coordinate : InitialRequiredCoordinates)
-        {
-            if (!IsValid(FindChunk(Coordinate)))
-            {
-                bAllInitialChunksPresent = false;
-                break;
-            }
-        }
-
-        if (bAllInitialChunksPresent)
-        {
-            bInitialSpawnAreaReady = true;
-
-            UE_LOG(
-                LogTemp,
-                Display,
-                TEXT("Cubus runtime initial spawn area is ready around chunk (%d, %d, %d)"),
-                LastTrackedChunk.X,
-                LastTrackedChunk.Y,
-                LastTrackedChunk.Z
-            );
-        }
-    }
 }
 
 void ACubusBlockWorldActor::DiscardActiveAtomicDensityBuilds()
@@ -2419,7 +2791,7 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
                 break;
             }
         }       
-        
+
         TUniquePtr<FAtomicDensityPendingUpload>
             PendingUpload =
                 MoveTemp(
@@ -2868,11 +3240,7 @@ void ACubusBlockWorldActor::HoldPawnForInitialStreaming()
 
 void ACubusBlockWorldActor::TryReleasePawnToTerrain()
 {
-    const bool bSpawnHoldTimedOut =
-        SpawnHoldTimeoutSeconds > 0.0f &&
-        HeldPawnElapsedSeconds >= SpawnHoldTimeoutSeconds;
-
-    if (!bPawnHeldForStreaming || (!bInitialSpawnAreaReady && !bSpawnHoldTimedOut))
+    if (!bPawnHeldForStreaming || (!bInitialSpawnAreaReady))
     {
         return;
     }
@@ -3158,7 +3526,7 @@ void ACubusBlockWorldActor::TryReleasePawnToTerrain()
             return;
         }
 
-        if (bSpawnHoldTimedOut && !bSpawnTimeoutReported)
+        if (!bSpawnTimeoutReported)
         {
             bSpawnTimeoutReported = true;
             UE_LOG(

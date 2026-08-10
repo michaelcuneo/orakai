@@ -112,7 +112,18 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
     }
 
     FCubusDensityEditMap PendingEdits;
-    TSet<FIntVector> TouchedChunks;
+
+    FIntVector ChangedSampleMinimum(
+        MAX_int32,
+        MAX_int32,
+        MAX_int32
+    );
+
+    FIntVector ChangedSampleMaximum(
+        MIN_int32,
+        MIN_int32,
+        MIN_int32
+    );
 
     static const FIntVector Neighbours[] =
     {
@@ -202,14 +213,53 @@ int32 ACubusBlockWorldActor::SmoothDensityEditsAtWorldSample(
             );
         }
 
-        TouchedChunks.Add(OrakaiPersistence::WorldVoxelToChunk(Pair.Key));
+        ChangedSampleMinimum.X =
+            FMath::Min(
+                ChangedSampleMinimum.X,
+                Pair.Key.X
+            );
+
+        ChangedSampleMinimum.Y =
+            FMath::Min(
+                ChangedSampleMinimum.Y,
+                Pair.Key.Y
+            );
+
+        ChangedSampleMinimum.Z =
+            FMath::Min(
+                ChangedSampleMinimum.Z,
+                Pair.Key.Z
+            );
+
+        ChangedSampleMaximum.X =
+            FMath::Max(
+                ChangedSampleMaximum.X,
+                Pair.Key.X
+            );
+
+        ChangedSampleMaximum.Y =
+            FMath::Max(
+                ChangedSampleMaximum.Y,
+                Pair.Key.Y
+            );
+
+        ChangedSampleMaximum.Z =
+            FMath::Max(
+                ChangedSampleMaximum.Z,
+                Pair.Key.Z
+            );
+
         ++ChangedCount;
     }
 
-    for (const FIntVector& Chunk : TouchedChunks)
+    if (ChangedCount > 0)
     {
-        QueueDensityEditDependenciesForRebuild(Chunk);
+        QueueDensityEditDependenciesForRebuild(
+            ChangedSampleMinimum,
+            ChangedSampleMaximum
+        );
     }
+
     return ChangedCount;
 }
 
@@ -227,7 +277,18 @@ int32 ACubusBlockWorldActor::LevelDensityEditsAtWorldSample(
         return 0;
     }
 
-    TSet<FIntVector> TouchedChunks;
+    FIntVector ChangedSampleMinimum(
+        MAX_int32,
+        MAX_int32,
+        MAX_int32
+    );
+
+    FIntVector ChangedSampleMaximum(
+        MIN_int32,
+        MIN_int32,
+        MIN_int32
+    );
+
     int32 ChangedCount = 0;
 
     for (int32 Z = -SafeRadius; Z <= SafeRadius; ++Z)
@@ -290,16 +351,55 @@ int32 ACubusBlockWorldActor::LevelDensityEditsAtWorldSample(
                     );
                 }
 
-                TouchedChunks.Add(OrakaiPersistence::WorldVoxelToChunk(Sample));
+                ChangedSampleMinimum.X =
+                    FMath::Min(
+                        ChangedSampleMinimum.X,
+                        Sample.X
+                    );
+
+                ChangedSampleMinimum.Y =
+                    FMath::Min(
+                        ChangedSampleMinimum.Y,
+                        Sample.Y
+                    );
+
+                ChangedSampleMinimum.Z =
+                    FMath::Min(
+                        ChangedSampleMinimum.Z,
+                        Sample.Z
+                    );
+
+                ChangedSampleMaximum.X =
+                    FMath::Max(
+                        ChangedSampleMaximum.X,
+                        Sample.X
+                    );
+
+                ChangedSampleMaximum.Y =
+                    FMath::Max(
+                        ChangedSampleMaximum.Y,
+                        Sample.Y
+                    );
+
+                ChangedSampleMaximum.Z =
+                    FMath::Max(
+                        ChangedSampleMaximum.Z,
+                        Sample.Z
+                    );
+
                 ++ChangedCount;
             }
         }
     }
 
-    for (const FIntVector& Chunk : TouchedChunks)
+    if (ChangedCount > 0)
     {
-        QueueDensityEditDependenciesForRebuild(Chunk);
+        QueueDensityEditDependenciesForRebuild(
+            ChangedSampleMinimum,
+            ChangedSampleMaximum
+        );
     }
+
     return ChangedCount;
 }
 
@@ -316,7 +416,18 @@ int32 ACubusBlockWorldActor::RestoreDensityEditsAtWorldSample(
         return 0;
     }
 
-    TSet<FIntVector> TouchedChunks;
+    FIntVector ChangedSampleMinimum(
+        MAX_int32,
+        MAX_int32,
+        MAX_int32
+    );
+
+    FIntVector ChangedSampleMaximum(
+        MIN_int32,
+        MIN_int32,
+        MIN_int32
+    );
+
     int32 ChangedCount = 0;
 
     for (int32 Z = -SafeRadius; Z <= SafeRadius; ++Z)
@@ -378,16 +489,55 @@ int32 ACubusBlockWorldActor::RestoreDensityEditsAtWorldSample(
                         Existing
                     );
                 }
+                
+                ChangedSampleMinimum.X =
+                    FMath::Min(
+                        ChangedSampleMinimum.X,
+                        Sample.X
+                    );
 
-                TouchedChunks.Add(OrakaiPersistence::WorldVoxelToChunk(Sample));
+                ChangedSampleMinimum.Y =
+                    FMath::Min(
+                        ChangedSampleMinimum.Y,
+                        Sample.Y
+                    );
+
+                ChangedSampleMinimum.Z =
+                    FMath::Min(
+                        ChangedSampleMinimum.Z,
+                        Sample.Z
+                    );
+
+                ChangedSampleMaximum.X =
+                    FMath::Max(
+                        ChangedSampleMaximum.X,
+                        Sample.X
+                    );
+
+                ChangedSampleMaximum.Y =
+                    FMath::Max(
+                        ChangedSampleMaximum.Y,
+                        Sample.Y
+                    );
+
+                ChangedSampleMaximum.Z =
+                    FMath::Max(
+                        ChangedSampleMaximum.Z,
+                        Sample.Z
+                    );
+
                 ++ChangedCount;
             }
         }
     }
 
-    for (const FIntVector& Chunk : TouchedChunks)
+    if (ChangedCount > 0)
     {
-        QueueDensityEditDependenciesForRebuild(Chunk);
+        QueueDensityEditDependenciesForRebuild(
+            ChangedSampleMinimum,
+            ChangedSampleMaximum
+        );
     }
+
     return ChangedCount;
 }

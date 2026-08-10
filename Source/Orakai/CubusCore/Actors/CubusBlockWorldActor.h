@@ -18,6 +18,18 @@ class UCubusMaterialRegistry;
 class UCubusGeologyProfile;
 class FCubusBlockChunkData;
 
+struct FCubusStreamingChunkBuild
+{
+    FIntVector Coordinate =
+        FIntVector::ZeroValue;
+
+    TWeakObjectPtr<ACubusVoxelVolumeActor> Chunk;
+
+    UE::Tasks::TTask<
+        FCubusDensityMeshBuildResult
+    > Task;
+};
+
 UCLASS(
     BlueprintType,
     Blueprintable,
@@ -50,8 +62,10 @@ public:
     void RebuildChunkAndNeighbours(const FIntVector& ChunkCoordinate);
     void QueueChunkForRebuild(const FIntVector& ChunkCoordinate);
     void QueueChunkAndFaceNeighboursForRebuild(const FIntVector& ChunkCoordinate);
-    void QueueDensityEditDependenciesForRebuild(const FIntVector& ChunkCoordinate);
-
+    void QueueDensityEditDependenciesForRebuild(
+        const FIntVector& ChangedSampleMinimum,
+        const FIntVector& ChangedSampleMaximum
+    );
     FCubusDensityEditMap BuildDensityEditSnapshot(const FIntVector& ChunkCoordinate) const;
     bool BuildBlockEditOverlayChunk(const FIntVector& ChunkCoordinate, FCubusBlockChunkData& OutChunk) const;
 
@@ -199,7 +213,7 @@ protected:
     int32 VerticalViewRadius = 3;
 
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
-    int32 MaxChunksGeneratedPerTick = 1;
+    int32 MaxChunksGeneratedPerTick = 8;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
     int32 MaxChunksRemovedPerTick = 2;
@@ -270,8 +284,41 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn", meta = (ClampMin = "0.0", Units = "cm"))
     float SpawnHeightOffset = 200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn", meta = (ClampMin = "0.0", Units = "s"))
-    float SpawnHoldTimeoutSeconds = 3.0f;
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Runtime Streaming|Spawn",
+        meta = (
+            ClampMin = "1",
+            ClampMax = "16",
+            UIMax = "8"
+        )
+    )
+    int32 MaxConcurrentStreamingChunkBuilds = 4;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Runtime Streaming|Spawn",
+        meta = (
+            ClampMin = "1",
+            ClampMax = "16",
+            UIMax = "8"
+        )
+    )
+    int32 MaxStreamingChunkUploadsPerTick = 4;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Runtime Streaming|Spawn",
+        meta = (
+            ClampMin = "0",
+            ClampMax = "4",
+            UIMax = "2"
+        )
+    )
+    int32 InitialVerticalLoadRadius = 1;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
     bool bUseHeightTerrain = true;
@@ -404,6 +451,12 @@ private:
     */
     TSet<FIntVector> AtomicDensityDirtyChunkCoordinates;
 
+    TArray<FCubusStreamingChunkBuild> StreamingChunkBuilds;
+
+    TSet<FIntVector> StreamingChunksBuilding;
+
+    TSet<FIntVector> StreamingChunksReady;
+
     /*
     * Current hidden density rebuild transaction.
     *
@@ -502,7 +555,12 @@ private:
     );
     void ApplyPersistedEditsToChunk(ACubusVoxelVolumeActor& ChunkActor);
     void RecordTrackedPawnCoordinate();
-    ACubusVoxelVolumeActor* SpawnChunkAtCoordinate(const FIntVector& Coordinate, bool bGenerateVegetation);
+    ACubusVoxelVolumeActor*
+    SpawnChunkAtCoordinate(
+        const FIntVector& Coordinate,
+        bool bGenerateVegetation,
+        bool bBuildImmediately = true
+    );
     void UpdateRuntimeStreaming(bool bForce);
     void ProcessRuntimeQueues();
     void ProcessAtomicDensityEditBatch();
@@ -513,6 +571,17 @@ private:
 
     int32 ActiveAtomicDensityCompletedBuildCount = 0;
     int32 ActiveAtomicDensityUploadTickCount = 0;
+
+    void ProcessInitialStreaming();
+
+    void QueueStreamingChunkBuilds();
+    void ProcessCompletedStreamingChunkBuilds();
+
+    bool IsInitialChunkReady(
+        const FIntVector& Coordinate
+    ) const;
+
+    bool AreInitialChunksReady() const;
     void ProcessDirtyChunkQueue();
     void BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius, TSet<FIntVector>& OutCoordinates) const;
     FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;
