@@ -1,0 +1,71 @@
+name: Fix far HISM bounds
+
+on:
+  push:
+    branches:
+      - agent/density-meshing
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+
+      - name: Repair far HISM bounds
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''        Component->BuildTreeIfOutdated(\n            false,\n            false\n        );\n    }'''
+          new = '''        // HISM instance storage can be populated while the component's cached\n        // scene bounds remain stale. A zero-sized Bounds causes primitive\n        // frustum/distance culling to reject the entire far forest before\n        // per-instance HISM culling is even considered. Force the cluster tree\n        // and primitive bounds to match the newly published instances.\n        Component->BuildTreeIfOutdated(\n            false,\n            true\n        );\n        Component->UpdateBounds();\n        Component->MarkRenderTransformDirty();\n        Component->MarkRenderStateDirty();\n    }'''
+
+          if s.count(old) != 1:
+              raise RuntimeError(f'publish bounds anchor expected once, found {s.count(old)}')
+          s = s.replace(old, new, 1)
+
+          # The temporary probe should inspect bounds after explicitly refreshing them.
+          old_probe = '''                Component->BuildTreeIfOutdated(\n                    false,\n                    true\n                );\n\n                const FBoxSphereBounds MeshBounds ='''
+          new_probe = '''                Component->BuildTreeIfOutdated(\n                    false,\n                    true\n                );\n                Component->UpdateBounds();\n                Component->MarkRenderTransformDirty();\n                Component->MarkRenderStateDirty();\n\n                const FBoxSphereBounds MeshBounds ='''
+          if s.count(old_probe) != 1:
+              raise RuntimeError(f'probe bounds anchor expected once, found {s.count(old_probe)}')
+          s = s.replace(old_probe, new_probe, 1)
+
+          # Include first instance scale in the probe output; this lets us distinguish
+          # a genuinely tiny fallback mesh from an intentionally large instance scale.
+          old_fmt = '''                        "firstWorld=(%.0f,%.0f,%.0f) firstDistance=%.0fcm "\n                        "probeWorld=(%.0f,%.0f,%.0f) materials=[%s]"'''
+          new_fmt = '''                        "firstWorld=(%.0f,%.0f,%.0f) firstScale=(%.2f,%.2f,%.2f) "\n                        "firstDistance=%.0fcm probeWorld=(%.0f,%.0f,%.0f) materials=[%s]"'''
+          if s.count(old_fmt) != 1:
+              raise RuntimeError(f'probe format anchor expected once, found {s.count(old_fmt)}')
+          s = s.replace(old_fmt, new_fmt, 1)
+
+          old_args = '''                    bGotFirstInstance\n                        ? FirstWorldTransform.GetLocation().Z\n                        : 0.0,\n                    FirstDistance,\n                    ProbeLocation.X,'''
+          new_args = '''                    bGotFirstInstance\n                        ? FirstWorldTransform.GetLocation().Z\n                        : 0.0,\n                    bGotFirstInstance\n                        ? FirstWorldTransform.GetScale3D().X\n                        : 0.0,\n                    bGotFirstInstance\n                        ? FirstWorldTransform.GetScale3D().Y\n                        : 0.0,\n                    bGotFirstInstance\n                        ? FirstWorldTransform.GetScale3D().Z\n                        : 0.0,\n                    FirstDistance,\n                    ProbeLocation.X,'''
+          if s.count(old_args) != 1:
+              raise RuntimeError(f'probe args anchor expected once, found {s.count(old_args)}')
+          s = s.replace(old_args, new_args, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Validate and commit
+        shell: bash
+        run: |
+          git diff --check
+          grep -n "Component->UpdateBounds" Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          grep -n "firstScale=" Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          git commit -m "Repair far vegetation HISM bounds"
+          git push origin HEAD:agent/density-meshing
