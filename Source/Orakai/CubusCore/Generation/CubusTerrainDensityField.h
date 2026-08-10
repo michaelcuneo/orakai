@@ -196,7 +196,8 @@ private:
 
     float SampleCaveDensity(
         const FVector& GlobalSampleCoordinate,
-        float SurfaceVoxelHeight
+        float SurfaceVoxelHeight,
+        float SurfaceSlope
     ) const;
 
     static float SmoothStep(

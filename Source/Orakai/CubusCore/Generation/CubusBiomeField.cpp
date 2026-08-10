@@ -22,7 +22,18 @@ FCubusBiomeFieldSettings FCubusBiomeField::MakeSettings(
 
     Settings.bEnabled = GeologyProfile->bGenerateBiomes;
     Settings.Frequency = GeologyProfile->BiomeFrequency;
-    Settings.ForestThreshold = GeologyProfile->ForestThreshold;
+    // The legacy 0.15 threshold made forest dominance depend on a
+    // relatively rare positive canopy-noise lobe, producing isolated pockets
+    // even when the forest density itself looked correct. Preserve explicitly
+    // authored values, but migrate the exact old default to a balanced split.
+    Settings.ForestThreshold =
+        FMath::IsNearlyEqual(
+            GeologyProfile->ForestThreshold,
+            0.15f,
+            0.0001f
+        )
+            ? 0.0f
+            : GeologyProfile->ForestThreshold;
     Settings.WetlandRiverDistance = GeologyProfile->WetlandRiverDistance;
     // RockySlopeThreshold is a height-gradient magnitude, not degrees.
     // The legacy default of 4.0 corresponds to ~76 degrees and allowed grass

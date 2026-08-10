@@ -97,7 +97,7 @@ public:
     float BiomeFrequency = 0.004f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
-    float ForestThreshold = 0.15f;
+    float ForestThreshold = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "16.0"))
     float WetlandRiverDistance = 0.10f;

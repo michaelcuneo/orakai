@@ -173,7 +173,8 @@ FCubusDensitySample FCubusTerrainDensityField::SampleContinuous(
                 CompositeDensity,
                 SampleCaveDensity(
                     GlobalSampleCoordinate,
-                    Column.SurfaceVoxelHeight
+                    Column.SurfaceVoxelHeight,
+                    Column.Slope
                 )
             );
     }
@@ -653,17 +654,34 @@ float FCubusTerrainDensityField::ApplyRiverLowering(
 
 float FCubusTerrainDensityField::SampleCaveDensity(
     const FVector& GlobalSampleCoordinate,
-    const float SurfaceVoxelHeight
+    const float SurfaceVoxelHeight,
+    const float SurfaceSlope
 ) const
 {
     const float WorldZ =
         static_cast<float>(GlobalSampleCoordinate.Z);
 
+    const float VerticalDepth =
+        SurfaceVoxelHeight - WorldZ;
+
+    // Cave clearance must be measured approximately normal to the terrain
+    // shell, not purely vertically. On a steep hillside a point can be many
+    // voxels below the column height while still sitting immediately beside
+    // exterior air. Dividing by sqrt(1 + slope^2) converts vertical depth into
+    // the local planar normal distance and keeps caves contained inside the
+    // mountain shell instead of punching exposed/inverted-looking cavities
+    // through cliffs.
+    const float ApproximateShellDepth =
+        VerticalDepth /
+        FMath::Sqrt(
+            1.0f +
+            SurfaceSlope * SurfaceSlope
+        );
+
     if (
         WorldZ < Settings.CaveMinimumWorldZ ||
         WorldZ > Settings.CaveMaximumWorldZ ||
-        WorldZ >
-            SurfaceVoxelHeight -
+        ApproximateShellDepth <
             static_cast<float>(Settings.CaveSurfaceClearance)
     )
     {
