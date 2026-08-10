@@ -63,6 +63,40 @@ namespace CubusDensityMesher
         { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }
     };
 
+    constexpr int32 DensitySampleRowStride =
+    FCubusDensitySamplingBuffer::SampleDimension;
+
+    constexpr int32 DensitySampleSliceStride =
+        FCubusDensitySamplingBuffer::SampleDimension *
+        FCubusDensitySamplingBuffer::SampleDimension;
+
+    /*
+    * Flat offsets matching CornerOffsets exactly:
+    *
+    * 0 = (0,0,0)
+    * 1 = (1,0,0)
+    * 2 = (1,1,0)
+    * 3 = (0,1,0)
+    * 4 = (0,0,1)
+    * 5 = (1,0,1)
+    * 6 = (1,1,1)
+    * 7 = (0,1,1)
+    */
+    constexpr int32 CornerFlatOffsets[8] =
+    {
+        0,
+        1,
+        1 + DensitySampleRowStride,
+        DensitySampleRowStride,
+        DensitySampleSliceStride,
+        DensitySampleSliceStride + 1,
+        DensitySampleSliceStride +
+            DensitySampleRowStride +
+            1,
+        DensitySampleSliceStride +
+            DensitySampleRowStride
+    };
+
     FVector ToVector(const FIntVector& Value)
     {
         return FVector(Value.X, Value.Y, Value.Z);
@@ -502,6 +536,10 @@ namespace CubusDensityMesher
 
     FInterpolatedVertex InterpolateEdge(
         const FCubusDensitySamplingBuffer& DensityBuffer,
+        const FCubusDensitySample& SampleA,
+        const FCubusDensitySample& SampleB,
+        const FVector& GradientA,
+        const FVector& GradientB,
         const FIntVector& LocalSampleA,
         const FIntVector& LocalSampleB,
         const FVector& ChunkMinimum,
@@ -509,61 +547,104 @@ namespace CubusDensityMesher
         const float IsoLevel
     )
     {
-        const FCubusDensitySample& SampleA =
-            DensityBuffer.GetSampleChecked(LocalSampleA);
-        const FCubusDensitySample& SampleB =
-            DensityBuffer.GetSampleChecked(LocalSampleB);
+        const float DensityDelta =
+            SampleB.Density -
+            SampleA.Density;
 
-        const float DensityDelta = SampleB.Density - SampleA.Density;
-        const float Alpha = FMath::IsNearlyZero(DensityDelta)
-            ? 0.5f
-            : FMath::Clamp(
-                (IsoLevel - SampleA.Density) / DensityDelta,
-                0.0f,
-                1.0f
-            );
+        const float Alpha =
+            FMath::IsNearlyZero(
+                DensityDelta
+            )
+                ? 0.5f
+                : FMath::Clamp(
+                    (
+                        IsoLevel -
+                        SampleA.Density
+                    ) /
+                    DensityDelta,
+                    0.0f,
+                    1.0f
+                );
 
         const FVector LocalSamplePosition =
             FMath::Lerp(
-                ToVector(LocalSampleA),
-                ToVector(LocalSampleB),
+                ToVector(
+                    LocalSampleA
+                ),
+                ToVector(
+                    LocalSampleB
+                ),
                 Alpha
-            ) + DensityBuffer.GetSampleOffsetInVoxels();
+            ) +
+            DensityBuffer.GetSampleOffsetInVoxels();
 
-        const FVector GlobalSampleOrigin = ToVector(
-            DensityBuffer.GetChunkCoordinate() * Cubus::ChunkSize
-        );
+        const FVector GlobalSampleOrigin =
+            ToVector(
+                DensityBuffer.GetChunkCoordinate() *
+                Cubus::ChunkSize
+            );
 
-        const FVector InterpolatedGradient = FMath::Lerp(
-            DensityBuffer.GetGradientChecked(LocalSampleA),
-            DensityBuffer.GetGradientChecked(LocalSampleB),
-            Alpha
-        );
+        const FVector InterpolatedGradient =
+            FMath::Lerp(
+                GradientA,
+                GradientB,
+                Alpha
+            );
 
-        const bool bSampleAIsSolid = SampleA.IsSolid(IsoLevel);
+        const bool bSampleAIsSolid =
+            SampleA.IsSolid(
+                IsoLevel
+            );
 
         FInterpolatedVertex Result;
+
         Result.LocalPosition =
-            ChunkMinimum + LocalSamplePosition * VoxelSize;
+            ChunkMinimum +
+            LocalSamplePosition *
+            VoxelSize;
+
         Result.GlobalSamplePosition =
-            GlobalSampleOrigin + LocalSamplePosition;
-        Result.Normal = (-InterpolatedGradient).GetSafeNormal();
-        Result.MaterialId = ClampDensityMaterialId(
-            bSampleAIsSolid ? SampleA.MaterialId : SampleB.MaterialId
+            GlobalSampleOrigin +
+            LocalSamplePosition;
+
+        Result.Normal =
+            (
+                -InterpolatedGradient
+            ).GetSafeNormal();
+
+        Result.MaterialId =
+            ClampDensityMaterialId(
+                bSampleAIsSolid
+                    ? SampleA.MaterialId
+                    : SampleB.MaterialId
+            );
+
+        SetSingleMaterialBlend(
+            Result.MaterialBlend,
+            Result.MaterialId
         );
-        SetSingleMaterialBlend(Result.MaterialBlend, Result.MaterialId);
 
         if (Result.Normal.IsNearlyZero())
         {
-            const FVector SolidToEmpty = bSampleAIsSolid
-                ? ToVector(LocalSampleB - LocalSampleA)
-                : ToVector(LocalSampleA - LocalSampleB);
-            Result.Normal = SolidToEmpty.GetSafeNormal();
+            const FVector SolidToEmpty =
+                bSampleAIsSolid
+                    ? ToVector(
+                        LocalSampleB -
+                        LocalSampleA
+                    )
+                    : ToVector(
+                        LocalSampleA -
+                        LocalSampleB
+                    );
+
+            Result.Normal =
+                SolidToEmpty.GetSafeNormal();
         }
 
         if (Result.Normal.IsNearlyZero())
         {
-            Result.Normal = FVector::UpVector;
+            Result.Normal =
+                FVector::UpVector;
         }
 
         return Result;
@@ -579,21 +660,87 @@ namespace CubusDensityMesher
         )
             : DensityField(InDensityField)
             , GlobalSampleOrigin(
-                ToVector(InChunkCoordinate * Cubus::ChunkSize)
+                ToVector(
+                    InChunkCoordinate *
+                    Cubus::ChunkSize
+                )
             )
             , SampleSpacing(
-                1.0f / static_cast<float>(InSubdivisions)
+                1.0f /
+                static_cast<float>(
+                    InSubdivisions
+                )
             )
-            , FineChunkSize(Cubus::ChunkSize * InSubdivisions)
+            , FineChunkSize(
+                Cubus::ChunkSize *
+                InSubdivisions
+            )
+            , PackedCoordinateExtent(
+                FineChunkSize + 3
+            )
         {
+            /*
+            * Only a fraction of the full fine lattice is sampled because coarse
+            * cells are rejected before fine marching cubes runs.
+            *
+            * Reserve enough for the common surface band so the maps avoid repeated
+            * allocation/rehash without allocating a dense 3D volume.
+            */
+            Samples.Reserve(
+                8192
+            );
+
+            Gradients.Reserve(
+                4096
+            );
+        }
+
+        int32 PackCoordinate(
+            const FIntVector& FineCoordinate
+        ) const
+        {
+            /*
+            * Gradient evaluation can request one fine sample beyond the nominal
+            * chunk range, so shift by +1 before packing:
+            *
+            *     -1 .. FineChunkSize + 1
+            *
+            * becomes:
+            *
+            *      0 .. FineChunkSize + 2
+            */
+            const int32 X =
+                FineCoordinate.X + 1;
+
+            const int32 Y =
+                FineCoordinate.Y + 1;
+
+            const int32 Z =
+                FineCoordinate.Z + 1;
+
+            return
+                X +
+                Y * PackedCoordinateExtent +
+                Z *
+                    PackedCoordinateExtent *
+                    PackedCoordinateExtent;
         }
 
         const FCubusDensitySample& GetSample(
             const FIntVector& FineCoordinate
         )
         {
-            if (const FCubusDensitySample* Existing =
-                Samples.Find(FineCoordinate))
+            const int32 PackedCoordinate =
+                PackCoordinate(
+                    FineCoordinate
+                );
+
+            if (
+                const FCubusDensitySample* Existing =
+                    Samples.Find(
+                        PackedCoordinate
+                    )
+            )
             {
                 return *Existing;
             }
@@ -611,7 +758,7 @@ namespace CubusDensityMesher
 
             FCubusDensitySample& AddedSample =
                 Samples.Add(
-                    FineCoordinate,
+                    PackedCoordinate,
                     bOnChunkBoundary
                         ? SampleCanonicalBoundary(
                             GlobalCoordinate
@@ -624,9 +771,21 @@ namespace CubusDensityMesher
             return AddedSample;
         }
 
-        FVector GetGradient(const FIntVector& FineCoordinate)
+        FVector GetGradient(
+            const FIntVector& FineCoordinate
+        )
         {
-            if (const FVector* Existing = Gradients.Find(FineCoordinate))
+            const int32 PackedCoordinate =
+                PackCoordinate(
+                    FineCoordinate
+                );
+
+            if (
+                const FVector* Existing =
+                    Gradients.Find(
+                        PackedCoordinate
+                    )
+            )
             {
                 return *Existing;
             }
@@ -658,7 +817,7 @@ namespace CubusDensityMesher
 
             FVector& AddedGradient =
                 Gradients.Add(
-                    FineCoordinate,
+                    PackedCoordinate,
                     Gradient / FMath::Max(
                         2.0f * SampleSpacing,
                         UE_SMALL_NUMBER
@@ -769,11 +928,28 @@ namespace CubusDensityMesher
         }
 
         const ICubusDensityField& DensityField;
-        FVector GlobalSampleOrigin = FVector::ZeroVector;
-        float SampleSpacing = 1.0f;
-        int32 FineChunkSize = Cubus::ChunkSize;
-        TMap<FIntVector, FCubusDensitySample> Samples;
-        TMap<FIntVector, FVector> Gradients;
+
+        FVector GlobalSampleOrigin =
+            FVector::ZeroVector;
+
+        float SampleSpacing =
+            1.0f;
+
+        int32 FineChunkSize =
+            Cubus::ChunkSize;
+
+        int32 PackedCoordinateExtent =
+            Cubus::ChunkSize + 3;
+
+        TMap<
+            int32,
+            FCubusDensitySample
+        > Samples;
+
+        TMap<
+            int32,
+            FVector
+        > Gradients;
     };
 
     bool CellMayContainFineSurface(
@@ -1070,54 +1246,147 @@ void FCubusDensityMesher::BuildChunk(
     OutMaterialMeshes.Reset();
     OutGeneratedTriangleCount = 0;
 
-    if (!DensityBuffer.IsBuilt() || VoxelSize <= 0.0f)
+    if (
+        !DensityBuffer.IsBuilt() ||
+        VoxelSize <= 0.0f
+    )
     {
         return;
     }
 
     FCubusMeshData& UnifiedMesh =
-        OutMaterialMeshes.FindOrAdd(UnifiedDensityMaterialKey);
+        OutMaterialMeshes.FindOrAdd(
+            UnifiedDensityMaterialKey
+        );
 
     const float ChunkWorldSize =
-        static_cast<float>(Cubus::ChunkSize) * VoxelSize;
+        static_cast<float>(
+            Cubus::ChunkSize
+        ) *
+        VoxelSize;
+
     const FVector ChunkMinimum(
         ChunkWorldSize * -0.5f,
         ChunkWorldSize * -0.5f,
         ChunkWorldSize * -0.5f
     );
-    const FIntVector GlobalChunkOrigin =
-        DensityBuffer.GetChunkCoordinate() * Cubus::ChunkSize;
 
-    for (int32 LocalZ = 0; LocalZ < Cubus::ChunkSize; ++LocalZ)
+    const FIntVector GlobalChunkOrigin =
+        DensityBuffer.GetChunkCoordinate() *
+        Cubus::ChunkSize;
+
+    for (
+        int32 LocalZ = 0;
+        LocalZ < Cubus::ChunkSize;
+        ++LocalZ
+    )
     {
-        for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
+        for (
+            int32 LocalY = 0;
+            LocalY < Cubus::ChunkSize;
+            ++LocalY
+        )
         {
-            for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
+            for (
+                int32 LocalX = 0;
+                LocalX < Cubus::ChunkSize;
+                ++LocalX
+            )
             {
-                const FIntVector CellOrigin(LocalX, LocalY, LocalZ);
+                const FIntVector CellOrigin(
+                    LocalX,
+                    LocalY,
+                    LocalZ
+                );
+
+                /*
+                 * Buffered local coordinates begin at -1.
+                 *
+                 * Canonical local sample (0,0,0) therefore occupies buffered
+                 * coordinate (1,1,1).
+                 */
+                const int32 BufferedX =
+                    LocalX -
+                    FCubusDensitySamplingBuffer::
+                        MinimumLocalSample;
+
+                const int32 BufferedY =
+                    LocalY -
+                    FCubusDensitySamplingBuffer::
+                        MinimumLocalSample;
+
+                const int32 BufferedZ =
+                    LocalZ -
+                    FCubusDensitySamplingBuffer::
+                        MinimumLocalSample;
+
+                const int32 BaseSampleIndex =
+                    BufferedX +
+                    DensitySampleRowStride *
+                    (
+                        BufferedY +
+                        DensitySampleRowStride *
+                        BufferedZ
+                    );
+
                 FCubusDensitySample CornerSamples[8];
                 FIntVector CornerCoordinates[8];
+                int32 CornerFlatIndices[8];
+
                 int32 CaseIndex = 0;
 
-                for (int32 CornerIndex = 0; CornerIndex < 8; ++CornerIndex)
+                for (
+                    int32 CornerIndex = 0;
+                    CornerIndex < 8;
+                    ++CornerIndex
+                )
                 {
-                    CornerCoordinates[CornerIndex] =
-                        CellOrigin + CornerOffsets[CornerIndex];
-                    CornerSamples[CornerIndex] =
-                        DensityBuffer.GetSampleChecked(
-                            CornerCoordinates[CornerIndex]
-                        );
+                    CornerCoordinates[
+                        CornerIndex
+                    ] =
+                        CellOrigin +
+                        CornerOffsets[
+                            CornerIndex
+                        ];
 
-                    if (CornerSamples[CornerIndex].IsSolid(IsoLevel))
+                    CornerFlatIndices[
+                        CornerIndex
+                    ] =
+                        BaseSampleIndex +
+                        CornerFlatOffsets[
+                            CornerIndex
+                        ];
+
+                    CornerSamples[
+                        CornerIndex
+                    ] =
+                        DensityBuffer
+                            .GetSampleByFlatIndexChecked(
+                                CornerFlatIndices[
+                                    CornerIndex
+                                ]
+                            );
+
+                    if (
+                        CornerSamples[
+                            CornerIndex
+                        ].IsSolid(
+                            IsoLevel
+                        )
+                    )
                     {
-                        CaseIndex |= 1 << CornerIndex;
+                        CaseIndex |=
+                            1 << CornerIndex;
                     }
                 }
 
-                if (CubusMarchingCubesTables::GetTriangleEdge(
-                    CaseIndex,
-                    0
-                ) < 0)
+                if (
+                    CubusMarchingCubesTables::
+                        GetTriangleEdge(
+                            CaseIndex,
+                            0
+                        ) < 0
+                )
                 {
                     continue;
                 }
@@ -1131,79 +1400,179 @@ void FCubusDensityMesher::BuildChunk(
                 FInterpolatedVertex EdgeVertices[12];
                 bool bEdgeVertexBuilt[12] = {};
 
+                FVector CornerGradients[8];
+                bool bCornerGradientBuilt[8] = {};
+
                 for (
                     int32 TriangleEdgeIndex = 0;
                     TriangleEdgeIndex < 16;
                     TriangleEdgeIndex += 3
                 )
                 {
-                    if (CubusMarchingCubesTables::GetTriangleEdge(
-                        CaseIndex,
-                        TriangleEdgeIndex
-                    ) < 0)
+                    if (
+                        CubusMarchingCubesTables::
+                            GetTriangleEdge(
+                                CaseIndex,
+                                TriangleEdgeIndex
+                            ) < 0
+                    )
                     {
                         break;
                     }
 
-                    FInterpolatedVertex TriangleVertices[3];
+                    FInterpolatedVertex
+                        TriangleVertices[3];
+
                     bool bTriangleIsValid = true;
 
-                    for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
+                    for (
+                        int32 VertexIndex = 0;
+                        VertexIndex < 3;
+                        ++VertexIndex
+                    )
                     {
                         const int32 EdgeIndex =
-                            CubusMarchingCubesTables::GetTriangleEdge(
-                                CaseIndex,
-                                TriangleEdgeIndex + VertexIndex
-                            );
+                            CubusMarchingCubesTables::
+                                GetTriangleEdge(
+                                    CaseIndex,
+                                    TriangleEdgeIndex +
+                                        VertexIndex
+                                );
 
-                        if (EdgeIndex < 0 || EdgeIndex >= 12)
+                        if (
+                            EdgeIndex < 0 ||
+                            EdgeIndex >= 12
+                        )
                         {
                             ensureMsgf(
                                 false,
-                                TEXT("Invalid Marching Cubes edge %d for case %d at table index %d."),
+                                TEXT(
+                                    "Invalid Marching Cubes edge %d "
+                                    "for case %d at table index %d."
+                                ),
                                 EdgeIndex,
                                 CaseIndex,
-                                TriangleEdgeIndex + VertexIndex
+                                TriangleEdgeIndex +
+                                    VertexIndex
                             );
+
                             bTriangleIsValid = false;
                             break;
                         }
 
-                        if (!bEdgeVertexBuilt[EdgeIndex])
+                        if (
+                            !bEdgeVertexBuilt[
+                                EdgeIndex
+                            ]
+                        )
                         {
                             const int32 CornerIndexA =
-                                EdgeCornerIndices[EdgeIndex][0];
-                            const int32 CornerIndexB =
-                                EdgeCornerIndices[EdgeIndex][1];
+                                EdgeCornerIndices[
+                                    EdgeIndex
+                                ][0];
 
-                            EdgeVertices[EdgeIndex] =
+                            const int32 CornerIndexB =
+                                EdgeCornerIndices[
+                                    EdgeIndex
+                                ][1];
+
+                            if (
+                                !bCornerGradientBuilt[
+                                    CornerIndexA
+                                ]
+                            )
+                            {
+                                CornerGradients[
+                                    CornerIndexA
+                                ] =
+                                    DensityBuffer
+                                        .GetGradientByFlatIndexChecked(
+                                            CornerFlatIndices[
+                                                CornerIndexA
+                                            ]
+                                        );
+
+                                bCornerGradientBuilt[
+                                    CornerIndexA
+                                ] = true;
+                            }
+
+                            if (
+                                !bCornerGradientBuilt[
+                                    CornerIndexB
+                                ]
+                            )
+                            {
+                                CornerGradients[
+                                    CornerIndexB
+                                ] =
+                                    DensityBuffer
+                                        .GetGradientByFlatIndexChecked(
+                                            CornerFlatIndices[
+                                                CornerIndexB
+                                            ]
+                                        );
+
+                                bCornerGradientBuilt[
+                                    CornerIndexB
+                                ] = true;
+                            }
+
+                            EdgeVertices[
+                                EdgeIndex
+                            ] =
                                 InterpolateEdge(
                                     DensityBuffer,
-                                    CornerCoordinates[CornerIndexA],
-                                    CornerCoordinates[CornerIndexB],
+                                    CornerSamples[
+                                        CornerIndexA
+                                    ],
+                                    CornerSamples[
+                                        CornerIndexB
+                                    ],
+                                    CornerGradients[
+                                        CornerIndexA
+                                    ],
+                                    CornerGradients[
+                                        CornerIndexB
+                                    ],
+                                    CornerCoordinates[
+                                        CornerIndexA
+                                    ],
+                                    CornerCoordinates[
+                                        CornerIndexB
+                                    ],
                                     ChunkMinimum,
                                     VoxelSize,
                                     IsoLevel
                                 );
 
-                            EdgeVertices[EdgeIndex]
-                                .MaterialBlend =
-                                    BuildCellMaterialBlend(
-                                        CornerSamples,
-                                        EdgeVertices[EdgeIndex]
-                                            .GlobalSamplePosition,
-                                        GlobalCellOrigin,
-                                        1.0f,
-                                        IsoLevel,
-                                        EdgeVertices[EdgeIndex]
-                                            .MaterialId
-                                    );
+                            EdgeVertices[
+                                EdgeIndex
+                            ].MaterialBlend =
+                                BuildCellMaterialBlend(
+                                    CornerSamples,
+                                    EdgeVertices[
+                                        EdgeIndex
+                                    ].GlobalSamplePosition,
+                                    GlobalCellOrigin,
+                                    1.0f,
+                                    IsoLevel,
+                                    EdgeVertices[
+                                        EdgeIndex
+                                    ].MaterialId
+                                );
 
-                            bEdgeVertexBuilt[EdgeIndex] = true;
+                            bEdgeVertexBuilt[
+                                EdgeIndex
+                            ] = true;
                         }
 
-                        TriangleVertices[VertexIndex] =
-                            EdgeVertices[EdgeIndex];
+                        TriangleVertices[
+                            VertexIndex
+                        ] =
+                            EdgeVertices[
+                                EdgeIndex
+                            ];
                     }
 
                     if (!bTriangleIsValid)
@@ -1211,12 +1580,14 @@ void FCubusDensityMesher::BuildChunk(
                         continue;
                     }
 
-                    if (AddTriangle(
-                        UnifiedMesh,
-                        TriangleVertices[0],
-                        TriangleVertices[1],
-                        TriangleVertices[2]
-                    ))
+                    if (
+                        AddTriangle(
+                            UnifiedMesh,
+                            TriangleVertices[0],
+                            TriangleVertices[1],
+                            TriangleVertices[2]
+                        )
+                    )
                     {
                         ++OutGeneratedTriangleCount;
                     }
@@ -1227,7 +1598,9 @@ void FCubusDensityMesher::BuildChunk(
 
     if (UnifiedMesh.IsEmpty())
     {
-        OutMaterialMeshes.Remove(UnifiedDensityMaterialKey);
+        OutMaterialMeshes.Remove(
+            UnifiedDensityMaterialKey
+        );
     }
 }
 

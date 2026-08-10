@@ -311,6 +311,23 @@ bool ACubusVoxelVolumeActor::BuildStagedVolumeFromDensityMesh(
     TargetMesh.SetCollisionEnabled(
         ECollisionEnabled::NoCollision
     );
+    
+    if (
+        BuildResult.bHasGeneratedDensityBuffer &&
+        BuildResult.GeneratedDensityBuffer.IsBuilt()
+    )
+    {
+        CachedGeneratedDensityBuffer =
+            MoveTemp(
+                BuildResult.GeneratedDensityBuffer
+            );
+
+        bHasCachedGeneratedDensityBuffer =
+            true;
+
+        BuildResult.bHasGeneratedDensityBuffer =
+            false;
+    }
 
     ResetDiagnostics();
 
@@ -962,6 +979,18 @@ ACubusVoxelVolumeActor::CaptureDensityMeshBuildInput() const
     Input.IsoLevel =
         0.0f;
 
+    if (
+        bHasCachedGeneratedDensityBuffer &&
+        CachedGeneratedDensityBuffer.IsBuilt()
+    )
+    {
+        Input.GeneratedDensityBuffer =
+            CachedGeneratedDensityBuffer;
+
+        Input.bHasGeneratedDensityBuffer =
+            true;
+    }
+
     return Input;
 }
 
@@ -979,20 +1008,89 @@ ACubusVoxelVolumeActor::BuildDensityMeshData(
         Input.DensitySettings
     );
 
-    const FCubusDensityEditField EditedDensityField(
-        DensityField,
-        Input.DensityEdits
-    );
+    const int32 Subdivisions =
+        FCubusDensityLod::NormalizeSubdivisions(
+            Input.SubdivisionsPerVoxel
+        );
 
-    FCubusDensityMesher::BuildAdaptiveChunk(
-        EditedDensityField,
-        Input.ChunkCoordinate,
-        Input.VoxelSize,
-        Input.SubdivisionsPerVoxel,
-        Input.IsoLevel,
-        Result.MaterialMeshes,
-        Result.GeneratedTriangleCount
-    );
+    if (Subdivisions <= 1)
+    {
+        FCubusDensitySamplingBuffer DensityBuffer;
+
+        if (
+            Input.bHasGeneratedDensityBuffer &&
+            Input.GeneratedDensityBuffer.IsBuilt()
+        )
+        {
+            /*
+            * Fast edit path:
+            *
+            * Copy the immutable generated baseline instead of reevaluating
+            * ~42,875 procedural density samples.
+            */
+            DensityBuffer =
+                Input.GeneratedDensityBuffer;
+        }
+        else
+        {
+            /*
+            * First build for this chunk/configuration.
+            *
+            * Generate the canonical baseline once and return it to the actor so
+            * subsequent edit transactions can reuse it.
+            */
+            DensityBuffer.Build(
+                Input.ChunkCoordinate,
+                DensityField
+            );
+
+            Result.GeneratedDensityBuffer =
+                DensityBuffer;
+
+            Result.bHasGeneratedDensityBuffer =
+                true;
+        }
+
+        /*
+        * Mutate only this worker-local copy.
+        *
+        * The actor's generated baseline always remains edit-free.
+        */
+        DensityBuffer.ApplyEdits(
+            Input.DensityEdits
+        );
+
+        FCubusDensityMesher::BuildChunk(
+            DensityBuffer,
+            Input.VoxelSize,
+            Input.IsoLevel,
+            Result.MaterialMeshes,
+            Result.GeneratedTriangleCount
+        );
+    }
+    else
+    {
+        /*
+        * Fine adaptive density still needs continuous edit interpolation.
+        *
+        * Keep the existing path intact for when density subdivision is
+        * re-enabled later.
+        */
+        const FCubusDensityEditField EditedDensityField(
+            DensityField,
+            Input.DensityEdits
+        );
+
+        FCubusDensityMesher::BuildAdaptiveChunk(
+            EditedDensityField,
+            Input.ChunkCoordinate,
+            Input.VoxelSize,
+            Subdivisions,
+            Input.IsoLevel,
+            Result.MaterialMeshes,
+            Result.GeneratedTriangleCount
+        );
+    }
 
     Result.BuildTimeMilliseconds =
         (
@@ -1054,6 +1152,18 @@ void ACubusVoxelVolumeActor::RebuildDensityMesh(
             BuildInput
         );
 
+    if (
+        BuildResult.bHasGeneratedDensityBuffer &&
+        BuildResult.GeneratedDensityBuffer.IsBuilt()
+    )
+    {
+        CachedGeneratedDensityBuffer =
+            BuildResult.GeneratedDensityBuffer;
+
+        bHasCachedGeneratedDensityBuffer =
+            true;
+    }
+
     UploadDensityMesh(
         TargetMesh,
         BuildResult,
@@ -1108,6 +1218,8 @@ void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(
     ACubusBlockWorldActor* InBlockWorld
 )
 {
+    InvalidateGeneratedDensityCache();
+
     ChunkCoordinate = InChunkCoordinate;
     VoxelSize = FMath::Max(1.0f, InVoxelSize);
     OwningBlockWorld = InBlockWorld;
@@ -1144,7 +1256,15 @@ void ACubusVoxelVolumeActor::ConfigureGeology(
     UCubusGeologyProfile* InGeologyProfile
 )
 {
-    GeologyProfile = InGeologyProfile;
+    if (GeologyProfile == InGeologyProfile)
+    {
+        return;
+    }
+
+    GeologyProfile =
+        InGeologyProfile;
+
+    InvalidateGeneratedDensityCache();
 }
 
 void ACubusVoxelVolumeActor::ConfigureTerrain(
@@ -1181,6 +1301,8 @@ void ACubusVoxelVolumeActor::ConfigureTerrain(
     const int32 InTerrainWaterMaterialId
 )
 {
+    InvalidateGeneratedDensityCache();
+    
     bUseHeightTerrain = bInUseHeightTerrain;
     TerrainSurfaceWorldZ = InTerrainSurfaceWorldZ;
     TerrainBaseHeight = InTerrainBaseHeight;

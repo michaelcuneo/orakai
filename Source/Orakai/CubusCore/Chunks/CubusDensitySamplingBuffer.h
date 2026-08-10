@@ -4,6 +4,7 @@
 
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Data/CubusDensitySample.h"
+#include "CubusCore/Generation/CubusDensityEditField.h"
 
 class ICubusDensityField;
 
@@ -34,6 +35,18 @@ public:
 
     void Reset();
 
+    /*
+    * Applies sparse integer-sample density edits to an already generated
+    * canonical sampling buffer.
+    *
+    * This is exactly equivalent to FCubusDensityEditField::Sample() for the
+    * subdivision-1 path, but avoids resampling the expensive generated terrain
+    * field for every edit transaction.
+    */
+    void ApplyEdits(
+        const FCubusDensityEditMap& DensityEdits
+    );
+
     bool IsBuilt() const
     {
         return Samples.Num() == SampleCount;
@@ -57,8 +70,24 @@ public:
         const FIntVector& LocalSampleCoordinate
     ) const;
 
+    /*
+    * Fast canonical-meshing accessors.
+    *
+    * BuildChunk() already knows that its corner samples lie inside the buffered
+    * -1..33 lattice, so it can calculate one flat cell index and use constant
+    * corner offsets rather than repeatedly constructing coordinates, validating
+    * them and flattening them.
+    */
+    const FCubusDensitySample& GetSampleByFlatIndexChecked(
+        int32 FlatIndex
+    ) const;
+
     FVector GetGradientChecked(
         const FIntVector& LocalSampleCoordinate
+    ) const;
+
+    FVector GetGradientByFlatIndexChecked(
+        int32 FlatIndex
     ) const;
 
     static bool IsBufferedCoordinate(

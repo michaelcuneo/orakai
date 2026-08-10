@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
+#include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"
 #include "CubusCore/Generation/CubusDensityEditField.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
@@ -24,26 +25,50 @@ struct FCubusDensityMeshBuildInput
     FCubusTerrainDensitySettings DensitySettings;
     FCubusDensityEditMap DensityEdits;
 
-    FIntVector ChunkCoordinate = FIntVector::ZeroValue;
+    /*
+     * Immutable generated subdivision-1 baseline captured on the game thread.
+     *
+     * Density edits are applied to a worker-local copy, so this cached
+     * baseline is never mutated by an async build.
+     */
+    FCubusDensitySamplingBuffer GeneratedDensityBuffer;
+
+    FIntVector ChunkCoordinate =
+        FIntVector::ZeroValue;
 
     float VoxelSize = 100.0f;
     int32 SubdivisionsPerVoxel = 1;
     float IsoLevel = 0.0f;
+
+    bool bHasGeneratedDensityBuffer = false;
 };
 
 struct FCubusDensityMeshBuildResult
 {
     TMap<int32, FCubusMeshData> MaterialMeshes;
 
+    /*
+     * When a worker had to generate the canonical terrain baseline for the
+     * first time, return it so the chunk actor can retain it for subsequent
+     * edits.
+     */
+    FCubusDensitySamplingBuffer GeneratedDensityBuffer;
+
     int32 GeneratedTriangleCount = 0;
 
     double BuildTimeMilliseconds = 0.0;
 
+    bool bHasGeneratedDensityBuffer = false;
+
     void Reset()
     {
         MaterialMeshes.Reset();
+        GeneratedDensityBuffer.Reset();
+
         GeneratedTriangleCount = 0;
         BuildTimeMilliseconds = 0.0;
+
+        bHasGeneratedDensityBuffer = false;
     }
 };
 
@@ -169,10 +194,17 @@ public:
         bGenerateCollision = bEnabled;
     }
 
-    void ConfigureGenerationSeeds(const FCubusGenerationSeeds& InGenerationSeeds)
+    void ConfigureGenerationSeeds(
+        const FCubusGenerationSeeds& InGenerationSeeds
+    )
     {
         EnsureChunkData();
-        ChunkData->SetGenerationSeeds(InGenerationSeeds);
+
+        ChunkData->SetGenerationSeeds(
+            InGenerationSeeds
+        );
+
+        InvalidateGeneratedDensityCache();
     }
 
     void ConfigureGeneratedChunk(
@@ -279,6 +311,16 @@ protected:
         meta = (AllowPrivateAccess = "true")
     )
     int32 DensitySubdivisionsPerVoxel = 1;
+
+    /*
+    * Generated canonical density is immutable until terrain configuration,
+    * generation seeds, geology, or chunk identity changes.
+    *
+    * Player density edits are never written into this buffer.
+    */
+    FCubusDensitySamplingBuffer CachedGeneratedDensityBuffer;
+
+    bool bHasCachedGeneratedDensityBuffer = false;
 
     UPROPERTY(
         EditAnywhere,
@@ -480,6 +522,12 @@ private:
         bool bGenerateBlockCollision,
         int32& InOutMeshSectionIndex
     );
+
+    void InvalidateGeneratedDensityCache()
+    {
+        CachedGeneratedDensityBuffer.Reset();
+        bHasCachedGeneratedDensityBuffer = false;
+    }
 
     const FCubusBlockChunkData* FindNeighbourChunkData(
         const FIntVector& CoordinateOffset

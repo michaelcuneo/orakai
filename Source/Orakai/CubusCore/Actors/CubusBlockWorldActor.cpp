@@ -2377,6 +2377,15 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
             16
         );
 
+    const double SafeUploadMillisecondsPerTick =
+        static_cast<double>(
+            FMath::Clamp(
+                MaxAtomicDensityUploadMillisecondsPerTick,
+                0.25f,
+                16.0f
+            )
+        );
+
     const double UploadTickStartTime =
         FPlatformTime::Seconds();
 
@@ -2387,6 +2396,30 @@ void ACubusBlockWorldActor::ProcessAtomicDensityEditBatch()
         !ActiveAtomicDensityPendingUploads.IsEmpty()
     )
     {
+        /*
+        * The upload time limit is deliberately soft.
+        *
+        * Always allow the first upload of a tick. After that, do not begin
+        * another non-preemptible procedural-mesh upload once this tick has
+        * already consumed its game-thread budget.
+        */
+        if (UploadedThisTick > 0)
+        {
+            const double ElapsedUploadMilliseconds =
+                (
+                    FPlatformTime::Seconds() -
+                    UploadTickStartTime
+                ) * 1000.0;
+
+            if (
+                ElapsedUploadMilliseconds >=
+                SafeUploadMillisecondsPerTick
+            )
+            {
+                break;
+            }
+        }       
+        
         TUniquePtr<FAtomicDensityPendingUpload>
             PendingUpload =
                 MoveTemp(

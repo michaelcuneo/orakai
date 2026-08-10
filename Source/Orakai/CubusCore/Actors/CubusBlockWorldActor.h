@@ -240,6 +240,27 @@ protected:
     )
     int32 MaxAtomicDensityUploadsPerTick = 4;
 
+    /*
+    * Soft game-thread time budget for hidden density mesh uploads.
+    *
+    * At least one pending upload is allowed each tick so an individually
+    * expensive chunk can never permanently stall the transaction.
+    *
+    * The hard MaxAtomicDensityUploadsPerTick limit still applies as well.
+    */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Density Editing",
+        meta = (
+            ClampMin = "0.25",
+            ClampMax = "16.0",
+            UIMax = "8.0",
+            Units = "ms"
+        )
+    )
+    float MaxAtomicDensityUploadMillisecondsPerTick = 3.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0.05", Units = "s"))
     float StreamingUpdateInterval = 0.25f;
 
