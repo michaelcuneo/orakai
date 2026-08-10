@@ -1,0 +1,34 @@
+name: Fix mesh merge header
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp')
+          s = p.read_text(encoding='utf-8')
+          old = '#include "Engine/MeshMerging.h"'
+          new = '#include "MeshMerge/MeshMergingSettings.h"'
+          if s.count(old) != 1:
+              raise RuntimeError(f'expected one old mesh merging include, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+          git diff --check
+          grep -n 'MeshMerge/MeshMergingSettings.h' Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Source/Orakai/CubusCore/Actors/CubusWorldVegetationActor.cpp
+          git commit -m 'Fix Unreal mesh merging settings include'
+          git push origin HEAD:agent/density-meshing
