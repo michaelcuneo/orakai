@@ -115,6 +115,20 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "0", ClampMax = "4"))
     int32 Lod2VerticalRadiusTiles = 0;
 
+    /** LOD3 samples one point every sixty-four canonical voxels. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "16", ClampMax = "256"))
+    int32 Lod3CanonicalVoxelStride = 64;
+
+    /** Number of LOD3 tiles allowed to overlap the outer edge of LOD2. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "0", ClampMax = "2"))
+    int32 Lod3OverlapTiles = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "1", ClampMax = "32"))
+    int32 Lod3OuterRadiusTiles = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "0", ClampMax = "4"))
+    int32 Lod3VerticalRadiusTiles = 0;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|Streaming", meta = (ClampMin = "1", ClampMax = "16"))
     int32 MaxConcurrentLodBuilds = 4;
 
@@ -181,6 +195,7 @@ private:
 
     FCubusTerrainLodTierRuntime Lod1Runtime;
     FCubusTerrainLodTierRuntime Lod2Runtime;
+    FCubusTerrainLodTierRuntime Lod3Runtime;
 
     float TimeUntilStreamingUpdate = 0.0f;
 };
