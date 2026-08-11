@@ -1,6 +1,46 @@
 #include "CubusCore/Vegetation/CubusVegetationPlacement.h"
 
 #include "CubusCore/Data/CubusVegetationInstance.h"
+#include "CubusCore/Vegetation/CubusVegetationTypes.h"
+
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "HAL/IConsoleManager.h"
+#include "Kismet/GameplayStatics.h"
+
+namespace
+{
+bool IsGroundDetailType(const int32 TypeId)
+{
+    return
+        TypeId == CubusVegetationType::Grass ||
+        TypeId == CubusVegetationType::StoneClutter ||
+        TypeId == CubusVegetationType::OrganicClutter;
+}
+
+float ResolveGroundDetailEndDistance()
+{
+    constexpr float DefaultGroundDetailEndDistance = 16000.0f;
+
+    IConsoleVariable* Variable =
+        IConsoleManager::Get().FindConsoleVariable(
+            TEXT("cubus.Vegetation.GroundDetailEndDistance")
+        );
+
+    if (Variable == nullptr)
+    {
+        return DefaultGroundDetailEndDistance;
+    }
+
+    const int32 ConfiguredDistance =
+        Variable->GetInt();
+
+    return
+        ConfiguredDistance > 0
+            ? static_cast<float>(ConfiguredDistance)
+            : 0.0f;
+}
+}
 
 void FCubusVegetationPlacement::Reset()
 {
@@ -107,6 +147,69 @@ FCubusVegetationPlacement::Resolve(
     Result.Location = BaseWorldLocation;
     Result.Scale = FMath::Max(0.01f, BaseScale);
     Result.Yaw = Instance.RotationYaw;
+
+    /*
+     * Grass and terrain scatter are local ground detail, not world-scale
+     * vegetation. Keep them out of the tree/shrub residency path entirely.
+     *
+     * The world vegetation actor may retain placement records for every
+     * streamed terrain chunk, but ground-detail transforms are rejected here
+     * before they reach an ISM batch when they lie outside the dedicated local
+     * range. This remains active even when runtime randomization is disabled.
+     *
+     * Decals can use this same ground-detail range when a decal placement type
+     * is introduced; the current generated vegetation type set contains no
+     * decal type yet.
+     */
+    if (IsGroundDetailType(Instance.TypeId))
+    {
+        const float GroundDetailEndDistance =
+            ResolveGroundDetailEndDistance();
+
+        if (GroundDetailEndDistance > 0.0f)
+        {
+            UWorld* World = GWorld;
+
+            if (IsValid(World))
+            {
+                const APawn* PlayerPawn =
+                    UGameplayStatics::GetPlayerPawn(
+                        World,
+                        0
+                    );
+
+                if (IsValid(PlayerPawn))
+                {
+                    const FVector PlayerLocation =
+                        PlayerPawn->GetActorLocation();
+
+                    const FVector2D DetailLocation(
+                        BaseWorldLocation.X,
+                        BaseWorldLocation.Y
+                    );
+
+                    const FVector2D PlayerLocation2D(
+                        PlayerLocation.X,
+                        PlayerLocation.Y
+                    );
+
+                    if (
+                        FVector2D::DistSquared(
+                            DetailLocation,
+                            PlayerLocation2D
+                        ) >
+                        FMath::Square(
+                            GroundDetailEndDistance
+                        )
+                    )
+                    {
+                        Result.bPruned = true;
+                        return Result;
+                    }
+                }
+            }
+        }
+    }
 
     if (!Settings.bEnabled)
     {
