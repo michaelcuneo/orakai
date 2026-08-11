@@ -11,7 +11,6 @@
 #include "Engine/StaticMesh.h"
 #include "UObject/SoftObjectPtr.h"
 #include "Animation/TransformProviderData.h"
-#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/InstancedSkinnedMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -59,7 +58,7 @@ int64 FCubusVegetationRenderer::MakeStaticFallbackBatchKey(
     );
 }
 
-UHierarchicalInstancedStaticMeshComponent*
+UInstancedStaticMeshComponent*
 FCubusVegetationRenderer::CreateStaticBatch(
     AActor* Owner,
     USceneComponent* Root,
@@ -74,8 +73,8 @@ FCubusVegetationRenderer::CreateStaticBatch(
         return nullptr;
     }
 
-    UHierarchicalInstancedStaticMeshComponent* Component =
-        NewObject<UHierarchicalInstancedStaticMeshComponent>(
+    UInstancedStaticMeshComponent* Component =
+        NewObject<UInstancedStaticMeshComponent>(
             Owner,
             ComponentName,
             RF_Transient
@@ -267,7 +266,7 @@ void FCubusVegetationRenderer::ClearBatches(
     >& GrassBatchComponents,
     const TMap<
         int64,
-        TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+        TObjectPtr<UInstancedStaticMeshComponent>
     >& StaticBatchComponents,
     const TMap<
         int64,
@@ -291,7 +290,7 @@ void FCubusVegetationRenderer::ClearBatches(
     for (
         const TPair<
             int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+            TObjectPtr<UInstancedStaticMeshComponent>
         >& Pair : StaticBatchComponents
     )
     {
@@ -330,7 +329,7 @@ void FCubusVegetationRenderer::EnsureBatches(
     >& GrassBatchComponents,
     TMap<
         int64,
-        TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
+        TObjectPtr<UInstancedStaticMeshComponent>
     >& StaticBatchComponents,
     TMap<
         int64,
@@ -339,7 +338,7 @@ void FCubusVegetationRenderer::EnsureBatches(
 ) const
 {
     TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>> NewGrassBatches;
-    TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> NewStaticBatches;
+    TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>> NewStaticBatches;
     TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>> NewSkeletalBatches;
 
     for (int32 SpeciesIndex = 0; SpeciesIndex < SpeciesCatalog.Num(); ++SpeciesIndex)
@@ -398,11 +397,11 @@ void FCubusVegetationRenderer::EnsureBatches(
 
                 if (bGrass)
                 {
-                    if (UHierarchicalInstancedStaticMeshComponent* OldHism =
+                    if (UInstancedStaticMeshComponent* OldStatic =
                             StaticBatchComponents.FindRef(BatchKey))
                     {
-                        OldHism->ClearInstances();
-                        OldHism->DestroyComponent();
+                        OldStatic->ClearInstances();
+                        OldStatic->DestroyComponent();
                         StaticBatchComponents.Remove(BatchKey);
                     }
 
@@ -453,7 +452,7 @@ void FCubusVegetationRenderer::EnsureBatches(
                     GrassBatchComponents.Remove(BatchKey);
                 }
 
-                UHierarchicalInstancedStaticMeshComponent* Component =
+                UInstancedStaticMeshComponent* Component =
                     StaticBatchComponents.FindRef(BatchKey);
 
                 if (!IsValid(Component))
@@ -491,7 +490,7 @@ void FCubusVegetationRenderer::EnsureBatches(
                 NewStaticBatches.Add(BatchKey, Component);
                 continue;
             }
-            
+
             if (USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(MeshAsset))
             {
                 if (UInstancedStaticMeshComponent* OldGrass =
@@ -502,7 +501,7 @@ void FCubusVegetationRenderer::EnsureBatches(
                     GrassBatchComponents.Remove(BatchKey);
                 }
 
-                if (UHierarchicalInstancedStaticMeshComponent* OldStatic =
+                if (UInstancedStaticMeshComponent* OldStatic =
                         StaticBatchComponents.FindRef(BatchKey))
                 {
                     OldStatic->ClearInstances();
@@ -591,147 +590,6 @@ void FCubusVegetationRenderer::EnsureBatches(
         }
     }
 
-    /*
-    * Build authored static fallback batches into the new batch map so they
-    * participate in the same reuse and cleanup lifecycle as primary batches.
-    */
-    for (
-        int32 SpeciesIndex = 0;
-        SpeciesIndex < SpeciesCatalog.Num();
-        ++SpeciesIndex
-    )
-    {
-        const FCubusVegetationSpeciesCatalogEntry& Entry =
-            SpeciesCatalog[SpeciesIndex];
-
-        const FString SpeciesToken = Entry.SpeciesId.IsNone()
-            ? FString::Printf(
-                TEXT("Species%d"),
-                SpeciesIndex
-            )
-            : Entry.SpeciesId.ToString();
-
-    for (
-        int32 GrowthStageIndex = 0;
-        GrowthStageIndex < Entry.StaticGrowthStageAssets.Num();
-        ++GrowthStageIndex
-    )
-    {
-    const TSoftObjectPtr<UObject>& AssetReference =
-        Entry.StaticGrowthStageAssets[
-            GrowthStageIndex
-        ];
-
-    if (AssetReference.IsNull())
-    {
-        continue;
-    }
-
-    UObject* LoadedAsset =
-        AssetReference.LoadSynchronous();
-
-    if (!IsValid(LoadedAsset))
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT(
-                "Cubus vegetation failed to load far/static "
-                "representation for species '%s', stage %d."
-            ),
-            *Entry.SpeciesId.ToString(),
-            GrowthStageIndex
-        );
-
-        continue;
-    }
-
-    UStaticMesh* StaticFallbackMesh =
-        Cast<UStaticMesh>(
-            LoadedAsset
-        );
-
-    if (!IsValid(StaticFallbackMesh))
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT(
-                "Cubus vegetation far representation '%s' "
-                "is class '%s', not a directly renderable "
-                "UStaticMesh yet."
-            ),
-            *LoadedAsset->GetName(),
-            *LoadedAsset->GetClass()->GetName()
-        );
-
-        continue;
-    }
-
-    const int64 StaticFallbackBatchKey =
-        MakeStaticFallbackBatchKey(
-            SpeciesIndex,
-            GrowthStageIndex
-        );
-
-    UHierarchicalInstancedStaticMeshComponent* Component =
-        StaticBatchComponents.FindRef(
-            StaticFallbackBatchKey
-        );
-
-    if (!IsValid(Component))
-    {
-        const FName ComponentName(
-            *FString::Printf(
-                TEXT(
-                    "CubusWorldCatalogFallback_%s_%d"
-                ),
-                *SpeciesToken,
-                GrowthStageIndex
-            )
-        );
-
-        Component =
-            CreateStaticBatch(
-                Owner,
-                Root,
-                ComponentName,
-                bCastShadow,
-                StartCullDistance,
-                EndCullDistance
-            );
-    }
-
-    if (!IsValid(Component))
-    {
-        continue;
-    }
-
-    Component->SetStaticMesh(
-        StaticFallbackMesh
-    );
-
-    Component->SetCastShadow(
-        bCastShadow
-    );
-
-    Component->SetCullDistances(
-        FMath::Max(
-            0,
-            StartCullDistance
-        ),
-        FMath::Max(
-            StartCullDistance,
-            EndCullDistance
-        )
-    );
-
-    NewStaticBatches.Add(
-        StaticFallbackBatchKey,
-        Component
-    );
-}
-}
     for (
         const TPair<
             int64,
@@ -751,9 +609,12 @@ void FCubusVegetationRenderer::EnsureBatches(
         Pair.Value->DestroyComponent();
     }
 
-
-    for (const TPair<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& Pair
-         : StaticBatchComponents)
+    for (
+        const TPair<
+            int64,
+            TObjectPtr<UInstancedStaticMeshComponent>
+        >& Pair : StaticBatchComponents
+    )
     {
         if (NewStaticBatches.Contains(Pair.Key) || !IsValid(Pair.Value))
         {
@@ -1131,7 +992,7 @@ FCubusVegetationRenderer::RenderSkeletalBatch(
                     FoliageOverrideMaterial
                 );
             }
-            
+
             HeroComponent->SetRelativeTransform(
                 LocalTransform
             );
@@ -1150,7 +1011,6 @@ FCubusVegetationRenderer::RenderSkeletalBatch(
             ++Result.ActiveHeroComponentCount;
             continue;
         }
-    
 
         if (
             Settings.bUseInstancedSkeletalFallback &&
