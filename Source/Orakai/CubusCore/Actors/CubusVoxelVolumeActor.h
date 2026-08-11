@@ -166,11 +166,15 @@ public:
 
     const FCubusBlockChunkData* GetChunkData() const
     {
+        const_cast<ACubusVoxelVolumeActor*>(this)
+            ->EnsureVegetationDataInitialized();
+
         return ChunkData.Get();
     }
 
     FCubusBlockChunkData* GetMutableChunkData()
     {
+        EnsureVegetationDataInitialized();
         return ChunkData.Get();
     }
 
@@ -510,6 +514,20 @@ private:
     bool bStagedBuildHadCollision = false;
 
     void EnsureChunkData();
+
+    void EnsureVegetationDataInitialized()
+    {
+        EnsureChunkData();
+
+        if (
+            ChunkData.IsValid() &&
+            ChunkData->GetVegetationRevision() == 0
+        )
+        {
+            RegenerateVegetationData();
+        }
+    }
+
     void SynchronizeChunkState();
 
     bool BuildVolumeInto(
