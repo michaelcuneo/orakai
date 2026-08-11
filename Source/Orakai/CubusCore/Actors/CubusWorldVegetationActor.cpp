@@ -1616,8 +1616,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
 
             FVector FinalLocation = ResolvedPlacement.Location;
             FVector SurfaceNormal = FVector::UpVector;
-            bool bFoundTerrainSurface = false;
-
             const float FinalScale = ResolvedPlacement.Scale;
             const float FinalYaw = ResolvedPlacement.Yaw;
 
@@ -1640,7 +1638,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 {
                     FinalLocation = SurfaceHit.ImpactPoint;
                     SurfaceNormal = SurfaceHit.ImpactNormal.GetSafeNormal();
-                    bFoundTerrainSurface = true;
                 }
             }
 
@@ -1659,11 +1656,6 @@ void ACubusWorldVegetationActor::RebuildWorldVegetation()
                 Instance.TypeId == CubusVegetationType::ConiferTree;
 
             const bool bGrassType = Instance.TypeId == CubusVegetationType::Grass;
-
-            if ((bGrassType || bTreeType) && !bFoundTerrainSurface)
-            {
-                continue;
-            }
 
             if (bTreeType && SurfaceSlopeDegrees > MaximumTreeSlopeDegrees)
             {
