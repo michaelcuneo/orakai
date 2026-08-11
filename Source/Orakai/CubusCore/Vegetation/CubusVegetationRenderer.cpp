@@ -16,6 +16,28 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "DynamicWindData.h"
 #include "GameFramework/Actor.h"
+#include "HAL/IConsoleManager.h"
+
+namespace
+{
+TAutoConsoleVariable<int32> CVarCubusGroundDetailEndCullDistance(
+    TEXT("cubus.Vegetation.GroundDetailEndDistance"),
+    16000,
+    TEXT(
+        "Local render radius in centimetres for Cubus ground-detail ISMs "
+        "(grass, stone scatter and organic scatter). Set 0 for unlimited."
+    ),
+    ECVF_Default
+);
+
+bool IsGroundDetailType(const int32 TypeId)
+{
+    return
+        TypeId == CubusVegetationType::Grass ||
+        TypeId == CubusVegetationType::StoneClutter ||
+        TypeId == CubusVegetationType::OrganicClutter;
+}
+}
 
 int64 FCubusVegetationRenderer::MakePrimaryBatchKey(
     const int32 SpeciesIndex,
@@ -341,6 +363,12 @@ void FCubusVegetationRenderer::EnsureBatches(
     TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>> NewStaticBatches;
     TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>> NewSkeletalBatches;
 
+    const int32 GroundDetailEndCullDistance =
+        FMath::Max(
+            0,
+            CVarCubusGroundDetailEndCullDistance.GetValueOnGameThread()
+        );
+
     for (int32 SpeciesIndex = 0; SpeciesIndex < SpeciesCatalog.Num(); ++SpeciesIndex)
     {
         const FCubusVegetationSpeciesCatalogEntry& Entry = SpeciesCatalog[SpeciesIndex];
@@ -393,9 +421,7 @@ void FCubusVegetationRenderer::EnsureBatches(
                 }
 
                 const bool bGroundDetail =
-                    Entry.TypeId == CubusVegetationType::Grass ||
-                    Entry.TypeId == CubusVegetationType::StoneClutter ||
-                    Entry.TypeId == CubusVegetationType::OrganicClutter;
+                    IsGroundDetailType(Entry.TypeId);
 
                 if (bGroundDetail)
                 {
@@ -425,8 +451,8 @@ void FCubusVegetationRenderer::EnsureBatches(
                             Root,
                             ComponentName,
                             bCastShadow,
-                            StartCullDistance,
-                            EndCullDistance
+                            0,
+                            GroundDetailEndCullDistance
                         );
                     }
 
@@ -438,9 +464,11 @@ void FCubusVegetationRenderer::EnsureBatches(
                     Component->SetStaticMesh(StaticMesh);
                     Component->SetCastShadow(bCastShadow);
                     Component->SetCullDistances(
-                        FMath::Max(0, StartCullDistance),
-                        FMath::Max(StartCullDistance, EndCullDistance)
+                        0,
+                        GroundDetailEndCullDistance
                     );
+                    Component->bAllowCullDistanceVolume = false;
+                    Component->SetCullDistance(0.0f);
 
                     NewGrassBatches.Add(BatchKey, Component);
                     continue;
@@ -647,11 +675,12 @@ void FCubusVegetationRenderer::EnsureBatches(
         LogTemp,
         Display,
         TEXT(
-            "Cubus vegetation catalog batches: ground-detail=%d static=%d skeletal=%d"
+            "Cubus vegetation catalog batches: ground-detail=%d static=%d skeletal=%d groundDetailEnd=%dcm"
         ),
         GrassBatchComponents.Num(),
         StaticBatchComponents.Num(),
-        SkeletalBatchComponents.Num()
+        SkeletalBatchComponents.Num(),
+        GroundDetailEndCullDistance
     );
 }
 
