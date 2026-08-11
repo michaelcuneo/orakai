@@ -392,10 +392,12 @@ void FCubusVegetationRenderer::EnsureBatches(
                     SkeletalBatchComponents.Remove(BatchKey);
                 }
 
-                const bool bGrass =
-                    Entry.TypeId == CubusVegetationType::Grass;
+                const bool bGroundDetail =
+                    Entry.TypeId == CubusVegetationType::Grass ||
+                    Entry.TypeId == CubusVegetationType::StoneClutter ||
+                    Entry.TypeId == CubusVegetationType::OrganicClutter;
 
-                if (bGrass)
+                if (bGroundDetail)
                 {
                     if (UInstancedStaticMeshComponent* OldStatic =
                             StaticBatchComponents.FindRef(BatchKey))
@@ -412,7 +414,7 @@ void FCubusVegetationRenderer::EnsureBatches(
                     {
                         const FName ComponentName(
                             *FString::Printf(
-                                TEXT("CubusWorldGrassISM_%s_%d"),
+                                TEXT("CubusWorldGroundDetailISM_%s_%d"),
                                 *SpeciesToken,
                                 StageIndex
                             )
@@ -645,8 +647,9 @@ void FCubusVegetationRenderer::EnsureBatches(
         LogTemp,
         Display,
         TEXT(
-            "Cubus vegetation catalog batches: static=%d skeletal=%d"
+            "Cubus vegetation catalog batches: ground-detail=%d static=%d skeletal=%d"
         ),
+        GrassBatchComponents.Num(),
         StaticBatchComponents.Num(),
         SkeletalBatchComponents.Num()
     );
