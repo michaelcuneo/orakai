@@ -46,23 +46,25 @@ struct FCubusVegetationSpeciesCatalogEntry
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (ClampMin = "0.001"))
     float Weight = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (Bitmask, BitmaskEnum = "/Script/Orakai.ECubusVegetationBiome"))
-    int32 BiomeMask = static_cast<int32>(ECubusVegetationBiome::Forest);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (AllowedClasses = "/Script/Engine.StaticMesh,/Script/Engine.SkeletalMesh"))
-    TArray<TSoftObjectPtr<UObject>> GrowthStageMeshes;
-
-    /** Static representations used outside the interactive hero radius. */
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
         Category = "Cubus|Vegetation|Catalog",
-        meta = (AllowedClasses = "/Script/Engine.StaticMesh,/Script/Engine.SkeletalMesh,/Script/Engine.Blueprint"))
-    TArray<TSoftObjectPtr<UObject>> StaticGrowthStageAssets;
+        meta = (Bitmask, BitmaskEnum = "/Script/Orakai.ECubusVegetationBiome")
+    )
+    int32 BiomeMask = static_cast<int32>(ECubusVegetationBiome::Forest);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog", meta = (AllowedClasses = "/Script/Engine.Actor"))
-    TSoftClassPtr<AActor> HeroPveActorClassOverride;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Catalog")
-    TSoftObjectPtr<UObject> HeroPveActorAssetOverride;
+    /**
+     * The authoritative growth-stage assets.
+     *
+     * Static stages render directly. Skeletal stages render in the near world
+     * and use deterministic generated _FarProxy meshes in the far-tree path.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Cubus|Vegetation|Catalog",
+        meta = (AllowedClasses = "/Script/Engine.StaticMesh,/Script/Engine.SkeletalMesh")
+    )
+    TArray<TSoftObjectPtr<UObject>> GrowthStageMeshes;
 };
