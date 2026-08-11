@@ -32,7 +32,6 @@ struct FCubusFarVegetationCellBuild
 
 class ACubusBlockWorldActor;
 class UInstancedStaticMeshComponent;
-class UHierarchicalInstancedStaticMeshComponent;
 class UInstancedSkinnedMeshComponent;
 class UMaterialParameterCollection;
 class USkeletalMeshComponent;
@@ -147,8 +146,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Wind", meta = (EditCondition = "bEnableHeroSkeletalWindMode"))
 	bool bUseHeroPveActorWindMode = true;
 
-	// DynamicWind foliage should participate in the world's dynamic shadows.
-	// Disable only as an explicit performance tradeoff.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering")
 	bool bCastWorldPlantShadows = true;
 
@@ -291,24 +288,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Streaming")
 	bool bEnableFarVegetation = true;
 
-	/*
-	 * One far cell spans this many ordinary terrain chunks per axis.
-	 *
-	 * Default 12 chunks keeps cell count manageable while reaching the horizon tier.
-	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Streaming", meta = (ClampMin = "1", ClampMax = "32"))
 	int32 FarVegetationCellSizeChunks = 12;
 
-	/*
-	 * With the current 80cm canonical voxel, 24.5 * 12 * 32 * 0.8m ~= 7.5km.
-	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Streaming", meta = (ClampMin = "1", ClampMax = "32"))
 	int32 FarVegetationRadiusCells = 24;
 
-	/*
-	 * Far representatives begin outside the dense gameplay vegetation core,
-	 * with a broad overlap so the forest does not disappear at the handoff.
-	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Streaming", meta = (ClampMin = "0.0", Units = "cm"))
 	float FarVegetationInnerRadius = 16000.0f;
 
@@ -372,10 +357,10 @@ private:
 	TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>> CatalogGrassBatchComponents;
 
 	UPROPERTY(Transient)
-	TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> CatalogStaticBatchComponents;
+	TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>> CatalogStaticBatchComponents;
 
 	UPROPERTY(Transient)
-	TMap<int64, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> FarCatalogStaticBatchComponents;
+	TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>> FarCatalogStaticBatchComponents;
 
 	UPROPERTY(Transient)
 	TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>> CatalogSkeletalBatchComponents;
@@ -396,10 +381,10 @@ private:
 	TObjectPtr<UMaterialParameterCollection> CachedDynamicWindCollection = nullptr;
 
 	FVector LastBridgedWindDirection = FVector::ZeroVector;
-	float	LastBridgedWindIntensity = -1.0f;
+	float LastBridgedWindIntensity = -1.0f;
 
 	TMap<FIntVector, uint32> PublishedChunkVegetationSignatures;
-	uint32					 PublishedVegetationSettingsHash = 0;
+	uint32 PublishedVegetationSettingsHash = 0;
 
 	FVector LastFullVegetationBuildCameraLocation = FVector::ZeroVector;
 
@@ -421,9 +406,6 @@ private:
 
 	TMap<FIntPoint, TArray<FCubusVegetationInstance>> FarVegetationCellCache;
 
-	// Highest completed refinement pass for each cached cell. Pass 0 is a
-	// sparse horizon representation, pass 1 is medium density and pass 2 is
-	// the configured full far-tree density.
 	TMap<FIntPoint, int32> FarVegetationCellRefinementPasses;
 
 	int32 FarVegetationRefinementPass = 0;
@@ -432,16 +414,16 @@ private:
 
 	bool bFarVegetationRenderDirty = false;
 
-	FCubusVegetationCatalog	  VegetationCatalog;
-	FCubusVegetationRenderer  VegetationRenderer;
+	FCubusVegetationCatalog VegetationCatalog;
+	FCubusVegetationRenderer VegetationRenderer;
 	FCubusVegetationPlacement VegetationPlacement;
 
 	struct FCubusVegetationDistancePolicy
 	{
 		int32 NearStartCullDistance = 0;
-		int32 NearEndCullDistance	= 0;
-		float FarInnerRadius		= 0.0f;
-		float NearResidentRadius	= 0.0f;
+		int32 NearEndCullDistance = 0;
+		float FarInnerRadius = 0.0f;
+		float NearResidentRadius = 0.0f;
 	};
 
 	FCubusVegetationDistancePolicy ResolveVegetationDistancePolicy(float VoxelSize) const;
