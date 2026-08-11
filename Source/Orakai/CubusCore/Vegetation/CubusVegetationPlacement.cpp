@@ -10,7 +10,7 @@
 
 namespace
 {
-bool IsGroundDetailType(const int32 TypeId)
+bool IsGroundDetailPlacementType(const int32 TypeId)
 {
     return
         TypeId == CubusVegetationType::Grass ||
@@ -148,20 +148,7 @@ FCubusVegetationPlacement::Resolve(
     Result.Scale = FMath::Max(0.01f, BaseScale);
     Result.Yaw = Instance.RotationYaw;
 
-    /*
-     * Grass and terrain scatter are local ground detail, not world-scale
-     * vegetation. Keep them out of the tree/shrub residency path entirely.
-     *
-     * The world vegetation actor may retain placement records for every
-     * streamed terrain chunk, but ground-detail transforms are rejected here
-     * before they reach an ISM batch when they lie outside the dedicated local
-     * range. This remains active even when runtime randomization is disabled.
-     *
-     * Decals can use this same ground-detail range when a decal placement type
-     * is introduced; the current generated vegetation type set contains no
-     * decal type yet.
-     */
-    if (IsGroundDetailType(Instance.TypeId))
+    if (IsGroundDetailPlacementType(Instance.TypeId))
     {
         const float GroundDetailEndDistance =
             ResolveGroundDetailEndDistance();
