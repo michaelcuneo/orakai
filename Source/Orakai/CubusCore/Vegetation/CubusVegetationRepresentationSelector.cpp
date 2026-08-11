@@ -1,64 +1,36 @@
 #include "CubusCore/Vegetation/CubusVegetationRepresentationSelector.h"
 
-void FCubusVegetationRepresentationSelector::RouteCandidates(
-    TArray<FCubusVegetationRepresentationCandidate>& Candidates,
-    const int32 HeroLimit,
-    const float HeroMaxDistance,
-    TMap<int64, TArray<FTransform>>& RegularTransformsByBatchKey,
-    TMap<int64, TArray<FTransform>>& HeroTransformsByBatchKey
-)
+void FCubusVegetationRepresentationSelector::RouteCandidates(TArray<FCubusVegetationRepresentationCandidate>& Candidates,
+															 const int32 HeroLimit, const float HeroMaxDistance,
+															 TMap<int64, TArray<FTransform>>& RegularTransformsByBatchKey,
+															 TMap<int64, TArray<FTransform>>& HeroTransformsByBatchKey)
 {
-    Candidates.Sort(
-        [](
-            const FCubusVegetationRepresentationCandidate& A,
-            const FCubusVegetationRepresentationCandidate& B
-        )
-        {
-            return A.DistanceSquared < B.DistanceSquared;
-        }
-    );
+	Candidates.Sort([](const FCubusVegetationRepresentationCandidate& A, const FCubusVegetationRepresentationCandidate& B)
+					{ return A.DistanceSquared < B.DistanceSquared; });
 
-    const int32 SafeHeroLimit =
-        FMath::Clamp(HeroLimit, 0, 64);
+	const int32 SafeHeroLimit = FMath::Clamp(HeroLimit, 0, 64);
 
-    const float SafeHeroDistance =
-        FMath::Max(0.0f, HeroMaxDistance);
+	const float SafeHeroDistance = FMath::Max(0.0f, HeroMaxDistance);
 
-    const float HeroDistanceSquared =
-        SafeHeroDistance * SafeHeroDistance;
+	const float HeroDistanceSquared = SafeHeroDistance * SafeHeroDistance;
 
-    int32 SelectedHeroCount = 0;
+	int32 SelectedHeroCount = 0;
 
-    for (
-        const FCubusVegetationRepresentationCandidate& Candidate :
-        Candidates
-    )
-    {
-        const bool bUseHero =
-            SelectedHeroCount < SafeHeroLimit &&
-            Candidate.DistanceSquared <= HeroDistanceSquared;
+	for (const FCubusVegetationRepresentationCandidate& Candidate : Candidates)
+	{
+		const bool bUseHero = SelectedHeroCount < SafeHeroLimit && Candidate.DistanceSquared <= HeroDistanceSquared;
 
-        if (bUseHero)
-        {
-            HeroTransformsByBatchKey
-                .FindOrAdd(Candidate.PrimaryBatchKey)
-                .Add(Candidate.LocalTransform);
+		if (bUseHero)
+		{
+			HeroTransformsByBatchKey.FindOrAdd(Candidate.PrimaryBatchKey).Add(Candidate.LocalTransform);
 
-            ++SelectedHeroCount;
-            continue;
-        }
+			++SelectedHeroCount;
+			continue;
+		}
 
-        if (Candidate.bHasStaticFallback)
-        {
-            RegularTransformsByBatchKey
-                .FindOrAdd(Candidate.StaticFallbackBatchKey)
-                .Add(Candidate.LocalTransform);
-
-            continue;
-        }
-
-        RegularTransformsByBatchKey
-            .FindOrAdd(Candidate.PrimaryBatchKey)
-            .Add(Candidate.LocalTransform);
-    }
+		// Keep the full forest on the primary vegetation batches so
+		// removing chunk-based culling does not surface the older static
+		// fallback representations for distant trees.
+		RegularTransformsByBatchKey.FindOrAdd(Candidate.PrimaryBatchKey).Add(Candidate.LocalTransform);
+	}
 }

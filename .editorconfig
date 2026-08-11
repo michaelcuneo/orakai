@@ -1,3 +1,20 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{cpp,h,hpp,cc,cxx,ipp,ixx}]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+[*.{cs,py,js,ts,tsx,jsx,json,md,yml,yaml}]
+indent_style = space
+indent_size = 2
+
 [*.{cpp,h}]
 
 # Naming convention rules (note: currently need to be ordered from more to less specific)
@@ -26,7 +43,7 @@ cpp_naming_rule.templates_prefixed.style                   = unreal_engine_templ
 cpp_naming_rule.general_names.symbols                      = all_symbols
 cpp_naming_rule.general_names.style                        = unreal_engine_default
 
-# Naming convention symbols         
+# Naming convention symbols
 
 cpp_naming_symbols.aactor_class.applicable_kinds           = class
 cpp_naming_symbols.aactor_class.applicable_type            = AActor
