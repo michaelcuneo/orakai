@@ -264,9 +264,14 @@ protected:
 					  Units = "deg"))
 	float RandomYawJitterDegrees = 35.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Rendering",
-			  meta = (ClampMin = "0", ClampMax = "500000", UIMax = "500000"))
-	int32 MaximumRenderedPlants = 500000;
+	/*
+	 * No global near-vegetation render cap.
+	 *
+	 * The world streamer owns residency. A value of zero makes the existing
+	 * RebuildWorldVegetation() limit logic resolve to MAX_int32, so old
+	 * Blueprint-authored cap values can no longer reintroduce a streaming wall.
+	 */
+	int32 MaximumRenderedPlants = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Streaming", meta = (ClampMin = "0.1", Units = "s"))
 	float RefreshInterval = 1.0f;
@@ -316,9 +321,11 @@ protected:
 			  meta = (ClampMin = "0.1", ClampMax = "5.0", Units = "s"))
 	float FarVegetationPublishInterval = 1.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Streaming",
-			  meta = (ClampMin = "1000", ClampMax = "2000000"))
-	int32 MaximumFarRenderedTrees = 750000;
+	/*
+	 * No global far-tree render cap. Spatial residency is already bounded by
+	 * FarVegetationRadiusCells and FarVegetationEndCullDistance.
+	 */
+	int32 MaximumFarRenderedTrees = MAX_int32;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Far Streaming")
 	bool bCastFarVegetationShadows = false;
