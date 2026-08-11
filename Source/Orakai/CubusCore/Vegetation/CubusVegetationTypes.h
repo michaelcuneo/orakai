@@ -67,4 +67,13 @@ struct FCubusVegetationSpeciesCatalogEntry
         meta = (AllowedClasses = "/Script/Engine.StaticMesh,/Script/Engine.SkeletalMesh")
     )
     TArray<TSoftObjectPtr<UObject>> GrowthStageMeshes;
+
+    /*
+     * Temporary source-compatibility members for the retired PVE resolver.
+     * They are deliberately not UPROPERTY fields, so they are no longer
+     * serialized, editable, or visible anywhere in the vegetation data asset.
+     * The resolver itself is removed in the next cleanup pass.
+     */
+    TSoftClassPtr<AActor> HeroPveActorClassOverride;
+    TSoftObjectPtr<UObject> HeroPveActorAssetOverride;
 };
