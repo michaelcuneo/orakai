@@ -15,6 +15,7 @@
 #include "CubusCore/Meshing/CubusDensityMesher.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
 
+#include "HAL/IConsoleManager.h"
 #include "HAL/PlatformTime.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
@@ -22,1589 +23,982 @@
 
 namespace CubusVoxelVolumeActor
 {
-    int32 WholeChunkOffset(const int32 VoxelOffset)
-    {
-        return
-            (VoxelOffset / Cubus::ChunkSize) *
-            Cubus::ChunkSize;
-    }
+TAutoConsoleVariable<float> CVarCubusLod0ChunkBoundsScale(
+	TEXT("cubus.Terrain.Lod0ChunkBoundsScale"), 1.5f,
+	TEXT("Bounds scale multiplier for LOD0 chunk procedural meshes. Increase if chunk terrain culls too early."), ECVF_Default);
 
-    int32 AppendMaterialMeshes(
-        UProceduralMeshComponent& TargetMesh,
-        const UCubusMaterialRegistry* MaterialRegistry,
-        FCubusMaterialMeshMap& MaterialMeshes,
-        const bool bGenerateCollision,
-        int32& InOutMeshSectionIndex,
-        int32& InOutVertexCount,
-        int32& InOutTriangleCount
-    )
-    {
-        TArray<int32> MaterialIds;
-        MaterialMeshes.GetKeys(MaterialIds);
-        MaterialIds.Sort();
-
-        const int32 FirstSectionIndex =
-            InOutMeshSectionIndex;
-
-        for (const int32 MaterialId : MaterialIds)
-        {
-            FCubusMeshData* MeshData =
-                MaterialMeshes.Find(MaterialId);
-
-            if (
-                MeshData == nullptr ||
-                !MeshData->IsValid()
-            )
-            {
-                continue;
-            }
-
-            TargetMesh.CreateMeshSection_LinearColor(
-                InOutMeshSectionIndex,
-                MeshData->Vertices,
-                MeshData->Triangles,
-                MeshData->Normals,
-                MeshData->UV0,
-                MeshData->VertexColors,
-                MeshData->Tangents,
-                bGenerateCollision
-            );
-
-            UMaterialInterface* ResolvedMaterial = nullptr;
-
-            if (IsValid(MaterialRegistry))
-            {
-                ResolvedMaterial =
-                    MaterialRegistry->ResolveRuntimeMaterial(
-                        MaterialId
-                    );
-            }
-
-            if (!IsValid(ResolvedMaterial))
-            {
-                ResolvedMaterial =
-                    UMaterial::GetDefaultMaterial(MD_Surface);
-            }
-
-            TargetMesh.SetMaterial(
-                InOutMeshSectionIndex,
-                ResolvedMaterial
-            );
-
-            InOutVertexCount +=
-                MeshData->GetVertexCount();
-
-            InOutTriangleCount +=
-                MeshData->GetTriangleCount();
-
-            ++InOutMeshSectionIndex;
-        }
-
-        return
-            InOutMeshSectionIndex -
-            FirstSectionIndex;
-    }
+int32 WholeChunkOffset(const int32 VoxelOffset)
+{
+	return (VoxelOffset / Cubus::ChunkSize) * Cubus::ChunkSize;
 }
+
+int32 AppendMaterialMeshes(UProceduralMeshComponent& TargetMesh, const UCubusMaterialRegistry* MaterialRegistry,
+						   FCubusMaterialMeshMap& MaterialMeshes, const bool bGenerateCollision, int32& InOutMeshSectionIndex,
+						   int32& InOutVertexCount, int32& InOutTriangleCount)
+{
+	TArray<int32> MaterialIds;
+	MaterialMeshes.GetKeys(MaterialIds);
+	MaterialIds.Sort();
+
+	const int32 FirstSectionIndex = InOutMeshSectionIndex;
+
+	for (const int32 MaterialId : MaterialIds)
+	{
+		FCubusMeshData* MeshData = MaterialMeshes.Find(MaterialId);
+
+		if (MeshData == nullptr || !MeshData->IsValid())
+		{
+			continue;
+		}
+
+		TargetMesh.CreateMeshSection_LinearColor(InOutMeshSectionIndex, MeshData->Vertices, MeshData->Triangles, MeshData->Normals,
+												 MeshData->UV0, MeshData->VertexColors, MeshData->Tangents, bGenerateCollision);
+
+		UMaterialInterface* ResolvedMaterial = nullptr;
+
+		if (IsValid(MaterialRegistry))
+		{
+			ResolvedMaterial = MaterialRegistry->ResolveRuntimeMaterial(MaterialId);
+		}
+
+		if (!IsValid(ResolvedMaterial))
+		{
+			ResolvedMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
+		}
+
+		TargetMesh.SetMaterial(InOutMeshSectionIndex, ResolvedMaterial);
+
+		InOutVertexCount += MeshData->GetVertexCount();
+
+		InOutTriangleCount += MeshData->GetTriangleCount();
+
+		++InOutMeshSectionIndex;
+	}
+
+	return InOutMeshSectionIndex - FirstSectionIndex;
+}
+} // namespace CubusVoxelVolumeActor
 
 ACubusVoxelVolumeActor::ACubusVoxelVolumeActor()
 {
-    PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = false;
 
-    ProceduralMesh =
-        CreateDefaultSubobject<UProceduralMeshComponent>(
-            TEXT("ProceduralMesh")
-        );
+	ProceduralMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("ProceduralMesh"));
 
-    SetRootComponent(ProceduralMesh);
-    
-    ProceduralMesh->bUseAsyncCooking = true;
-    ProceduralMesh->bVisibleInRayTracing = false;
-    ProceduralMesh->SetComponentTickEnabled(false);
+	SetRootComponent(ProceduralMesh);
 
-    ProceduralMesh->SetCastShadow(true);
-    ProceduralMesh->SetMobility(EComponentMobility::Static);
+	ProceduralMesh->bUseAsyncCooking	 = true;
+	ProceduralMesh->bVisibleInRayTracing = false;
+	ProceduralMesh->SetComponentTickEnabled(false);
 
-    ProceduralMesh->SetCollisionEnabled(
-        ECollisionEnabled::NoCollision
-    );
+	ProceduralMesh->SetCastShadow(true);
+	ProceduralMesh->SetMobility(EComponentMobility::Static);
 
-    StagingProceduralMesh =
-    CreateDefaultSubobject<UProceduralMeshComponent>(
-        TEXT("StagingProceduralMesh")
-    );
+	ProceduralMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    StagingProceduralMesh->SetupAttachment(
-        ProceduralMesh
-    );
+	StagingProceduralMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("StagingProceduralMesh"));
 
-    StagingProceduralMesh->SetRelativeTransform(
-        FTransform::Identity
-    );
+	StagingProceduralMesh->SetupAttachment(ProceduralMesh);
 
-    StagingProceduralMesh->bUseAsyncCooking = true;
-    StagingProceduralMesh->bVisibleInRayTracing = false;
-    StagingProceduralMesh->SetComponentTickEnabled(false);
+	StagingProceduralMesh->SetRelativeTransform(FTransform::Identity);
 
-    StagingProceduralMesh->SetCastShadow(true);
-    StagingProceduralMesh->SetMobility(
-        EComponentMobility::Static
-    );
+	StagingProceduralMesh->bUseAsyncCooking		= true;
+	StagingProceduralMesh->bVisibleInRayTracing = false;
+	StagingProceduralMesh->SetComponentTickEnabled(false);
 
-    StagingProceduralMesh->SetCollisionEnabled(
-        ECollisionEnabled::NoCollision
-    );
+	StagingProceduralMesh->SetCastShadow(true);
+	StagingProceduralMesh->SetMobility(EComponentMobility::Static);
 
-    StagingProceduralMesh->SetVisibility(false);
-    StagingProceduralMesh->SetHiddenInGame(true);
-    StagingProceduralMesh->SetRenderInMainPass(false);
-    StagingProceduralMesh->SetRenderInDepthPass(false);
+	StagingProceduralMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    ActiveProceduralMesh = ProceduralMesh;
-    InactiveProceduralMesh = StagingProceduralMesh;
+	StagingProceduralMesh->SetVisibility(false);
+	StagingProceduralMesh->SetHiddenInGame(true);
+	StagingProceduralMesh->SetRenderInMainPass(false);
+	StagingProceduralMesh->SetRenderInDepthPass(false);
+
+	ActiveProceduralMesh   = ProceduralMesh;
+	InactiveProceduralMesh = StagingProceduralMesh;
 }
 
 void ACubusVoxelVolumeActor::GenerateTerrainData()
 {
-    EnsureChunkData();
-    ChunkData->Clear();
+	EnsureChunkData();
+	ChunkData->Clear();
 
-    if (
-        GetEffectiveRenderMode() ==
-        ECubusVoxelRenderMode::Density
-    )
-    {
-        bChunkCacheDirty = false;
-        return;
-    }
+	if (GetEffectiveRenderMode() == ECubusVoxelRenderMode::Density)
+	{
+		bChunkCacheDirty = false;
+		return;
+	}
 
-    bChunkCacheDirty = true;
+	bChunkCacheDirty = true;
 
-    if (bUseHeightTerrain)
-    {
-        GenerateHeightTerrain();
-    }
-    else
-    {
-        GenerateFlatTerrain();
-    }
+	if (bUseHeightTerrain)
+	{
+		GenerateHeightTerrain();
+	}
+	else
+	{
+		GenerateFlatTerrain();
+	}
 }
 
 void ACubusVoxelVolumeActor::RebuildVolume()
 {
-    ++RebuildCount;
-    EnsureChunkData();
+	++RebuildCount;
+	EnsureChunkData();
 
-    if (!IsValid(ActiveProceduralMesh))
-    {
-        ActiveProceduralMesh = ProceduralMesh;
-    }
+	if (!IsValid(ActiveProceduralMesh))
+	{
+		ActiveProceduralMesh = ProceduralMesh;
+	}
 
-    if (!IsValid(ActiveProceduralMesh))
-    {
-        return;
-    }
+	if (!IsValid(ActiveProceduralMesh))
+	{
+		return;
+	}
 
-    bHasStagedVolume = false;
-    bStagedBuildHadCollision = false;
+	bHasStagedVolume		 = false;
+	bStagedBuildHadCollision = false;
 
-    if (IsValid(InactiveProceduralMesh))
-    {
-        InactiveProceduralMesh->ClearAllMeshSections();
-        InactiveProceduralMesh->SetCollisionEnabled(
-            ECollisionEnabled::NoCollision
-        );
-    }
+	if (IsValid(InactiveProceduralMesh))
+	{
+		InactiveProceduralMesh->ClearAllMeshSections();
+		InactiveProceduralMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
 
-    bLastBuildHadCollision =
-        BuildVolumeInto(
-            *ActiveProceduralMesh,
-            true
-        );
+	bLastBuildHadCollision = BuildVolumeInto(*ActiveProceduralMesh, true);
 }
 
 bool ACubusVoxelVolumeActor::BuildStagedVolume()
 {
-    EnsureChunkData();
+	EnsureChunkData();
 
-    if (!IsValid(InactiveProceduralMesh))
-    {
-        return false;
-    }
+	if (!IsValid(InactiveProceduralMesh))
+	{
+		return false;
+	}
 
-    bHasStagedVolume = false;
-    bStagedBuildHadCollision = false;
+	bHasStagedVolume		 = false;
+	bStagedBuildHadCollision = false;
 
-    InactiveProceduralMesh->SetVisibility(false);
-    InactiveProceduralMesh->SetHiddenInGame(true);
+	InactiveProceduralMesh->SetVisibility(false);
+	InactiveProceduralMesh->SetHiddenInGame(true);
 
-    InactiveProceduralMesh->SetRenderInMainPass(false);
-    InactiveProceduralMesh->SetRenderInDepthPass(false);
+	InactiveProceduralMesh->SetRenderInMainPass(false);
+	InactiveProceduralMesh->SetRenderInDepthPass(false);
 
-    InactiveProceduralMesh->SetComponentTickEnabled(false);
+	InactiveProceduralMesh->SetComponentTickEnabled(false);
 
-    InactiveProceduralMesh->SetCollisionEnabled(
-        ECollisionEnabled::NoCollision
-    );
+	InactiveProceduralMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    bStagedBuildHadCollision =
-        BuildVolumeInto(
-            *InactiveProceduralMesh,
-            false
-        );
+	bStagedBuildHadCollision = BuildVolumeInto(*InactiveProceduralMesh, false);
 
-    bHasStagedVolume = true;
-    return true;
+	bHasStagedVolume = true;
+	return true;
 }
 
-bool ACubusVoxelVolumeActor::BuildStagedVolumeFromDensityMesh(
-    FCubusDensityMeshBuildResult& BuildResult
-)
+bool ACubusVoxelVolumeActor::BuildStagedVolumeFromDensityMesh(FCubusDensityMeshBuildResult& BuildResult)
 {
-    EnsureChunkData();
+	EnsureChunkData();
 
-    if (!IsValid(InactiveProceduralMesh))
-    {
-        return false;
-    }
+	if (!IsValid(InactiveProceduralMesh))
+	{
+		return false;
+	}
 
-    bHasStagedVolume = false;
-    bStagedBuildHadCollision = false;
+	bHasStagedVolume		 = false;
+	bStagedBuildHadCollision = false;
 
-    InactiveProceduralMesh->SetVisibility(false);
-    InactiveProceduralMesh->SetHiddenInGame(true);
+	InactiveProceduralMesh->SetVisibility(false);
+	InactiveProceduralMesh->SetHiddenInGame(true);
 
-    InactiveProceduralMesh->SetRenderInMainPass(false);
-    InactiveProceduralMesh->SetRenderInDepthPass(false);
+	InactiveProceduralMesh->SetRenderInMainPass(false);
+	InactiveProceduralMesh->SetRenderInDepthPass(false);
 
-    InactiveProceduralMesh->SetComponentTickEnabled(false);
+	InactiveProceduralMesh->SetComponentTickEnabled(false);
 
-    InactiveProceduralMesh->SetCollisionEnabled(
-        ECollisionEnabled::NoCollision
-    );
+	InactiveProceduralMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    /*
-     * The async path currently applies only to native Density mode.
-     *
-     * Blocks and Hybrid continue through the normal synchronous build path.
-     */
-    if (
-        GetEffectiveRenderMode() !=
-        ECubusVoxelRenderMode::Density
-    )
-    {
-        return BuildStagedVolume();
-    }
+	/*
+	 * The async path currently applies only to native Density mode.
+	 *
+	 * Blocks and Hybrid continue through the normal synchronous build path.
+	 */
+	if (GetEffectiveRenderMode() != ECubusVoxelRenderMode::Density)
+	{
+		return BuildStagedVolume();
+	}
 
-    bHasStagedVolume = false;
-    bStagedBuildHadCollision = false;
+	bHasStagedVolume		 = false;
+	bStagedBuildHadCollision = false;
 
-    UProceduralMeshComponent& TargetMesh =
-        *InactiveProceduralMesh;
+	UProceduralMeshComponent& TargetMesh = *InactiveProceduralMesh;
 
-    TargetMesh.ClearAllMeshSections();
+	TargetMesh.ClearAllMeshSections();
 
-    TargetMesh.SetVisibility(false);
-    TargetMesh.SetHiddenInGame(true);
-    TargetMesh.SetRenderInMainPass(false);
-    TargetMesh.SetRenderInDepthPass(false);
+	TargetMesh.SetVisibility(false);
+	TargetMesh.SetHiddenInGame(true);
+	TargetMesh.SetRenderInMainPass(false);
+	TargetMesh.SetRenderInDepthPass(false);
 
-    TargetMesh.SetCollisionEnabled(
-        ECollisionEnabled::NoCollision
-    );
-    
-    if (
-        BuildResult.bHasGeneratedDensityBuffer &&
-        BuildResult.GeneratedDensityBuffer.IsBuilt()
-    )
-    {
-        CachedGeneratedDensityBuffer =
-            MakeShared<
-                FCubusDensitySamplingBuffer,
-                ESPMode::ThreadSafe
-            >(
-                MoveTemp(
-                    BuildResult.GeneratedDensityBuffer
-                )
-            );
+	TargetMesh.SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-        bHasCachedGeneratedDensityBuffer =
-            true;
+	if (BuildResult.bHasGeneratedDensityBuffer && BuildResult.GeneratedDensityBuffer.IsBuilt())
+	{
+		CachedGeneratedDensityBuffer =
+			MakeShared<FCubusDensitySamplingBuffer, ESPMode::ThreadSafe>(MoveTemp(BuildResult.GeneratedDensityBuffer));
 
-        BuildResult.bHasGeneratedDensityBuffer =
-            false;
-    }
+		bHasCachedGeneratedDensityBuffer = true;
 
-    ResetDiagnostics();
+		BuildResult.bHasGeneratedDensityBuffer = false;
+	}
 
-    TotalVoxelCount =
-        ChunkData->GetVoxelCount();
+	ResetDiagnostics();
 
-    SolidVoxelCount =
-        ChunkData->GetOccupiedVoxelCount();
+	TotalVoxelCount = ChunkData->GetVoxelCount();
 
-    LastBuiltRenderMode =
-        ECubusVoxelRenderMode::Density;
+	SolidVoxelCount = ChunkData->GetOccupiedVoxelCount();
 
-    int32 MeshSectionIndex = 0;
+	LastBuiltRenderMode = ECubusVoxelRenderMode::Density;
 
-    /*
-     * The expensive density geometry has already been produced on a worker.
-     *
-     * This function performs only the UObject/procedural-mesh upload and the
-     * block-edit overlay on the game thread.
-     */
-    UploadDensityMesh(
-        TargetMesh,
-        BuildResult,
-        bGenerateCollision,
-        MeshSectionIndex
-    );
+	int32 MeshSectionIndex = 0;
 
-    RebuildBlockEditOverlay(
-        TargetMesh,
-        bGenerateCollision,
-        MeshSectionIndex
-    );
+	/*
+	 * The expensive density geometry has already been produced on a worker.
+	 *
+	 * This function performs only the UObject/procedural-mesh upload and the
+	 * block-edit overlay on the game thread.
+	 */
+	UploadDensityMesh(TargetMesh, BuildResult, bGenerateCollision, MeshSectionIndex);
 
-    GeneratedMaterialSectionCount =
-        MeshSectionIndex;
+	RebuildBlockEditOverlay(TargetMesh, bGenerateCollision, MeshSectionIndex);
 
-    bStagedBuildHadCollision =
-        bGenerateCollision &&
-        (
-            GeneratedDensitySectionCount > 0 ||
-            GeneratedBlockSectionCount > 0
-        );
+	GeneratedMaterialSectionCount = MeshSectionIndex;
 
-    /*
-     * Collision stays disabled until the atomic commit.
-     */
-    TargetMesh.SetCollisionEnabled(
-        ECollisionEnabled::NoCollision
-    );
+	bStagedBuildHadCollision = bGenerateCollision && (GeneratedDensitySectionCount > 0 || GeneratedBlockSectionCount > 0);
 
-    TargetMesh.MarkRenderStateDirty();
+	/*
+	 * Collision stays disabled until the atomic commit.
+	 */
+	TargetMesh.SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    bHasStagedVolume = true;
-    return true;
+	TargetMesh.MarkRenderStateDirty();
+
+	bHasStagedVolume = true;
+	return true;
 }
 
 void ACubusVoxelVolumeActor::CommitStagedVolume()
 {
-    if (
-        !bHasStagedVolume ||
-        !IsValid(ActiveProceduralMesh) ||
-        !IsValid(InactiveProceduralMesh)
-    )
-    {
-        return;
-    }
+	if (!bHasStagedVolume || !IsValid(ActiveProceduralMesh) || !IsValid(InactiveProceduralMesh))
+	{
+		return;
+	}
 
-    UProceduralMeshComponent* PreviousActive =
-        ActiveProceduralMesh;
+	UProceduralMeshComponent* PreviousActive = ActiveProceduralMesh;
 
-    UProceduralMeshComponent* NewActive =
-        InactiveProceduralMesh;
+	UProceduralMeshComponent* NewActive = InactiveProceduralMesh;
 
-    /*
-     * Publish the complete replacement first.
-     */
-    NewActive->SetCollisionEnabled(
-        bStagedBuildHadCollision
-            ? ECollisionEnabled::QueryAndPhysics
-            : ECollisionEnabled::NoCollision
-    );
+	/*
+	 * Publish the complete replacement first.
+	 */
+	NewActive->SetCollisionEnabled(bStagedBuildHadCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 
-    NewActive->SetRenderInMainPass(true);
-    NewActive->SetRenderInDepthPass(true);
-    NewActive->SetHiddenInGame(false);
-    NewActive->SetVisibility(true);
+	NewActive->SetRenderInMainPass(true);
+	NewActive->SetRenderInDepthPass(true);
+	NewActive->SetHiddenInGame(false);
+	NewActive->SetVisibility(true);
 
-    /*
-     * Retire the previous revision.
-     */
-    PreviousActive->SetCollisionEnabled(
-        ECollisionEnabled::NoCollision
-    );
+	/*
+	 * Retire the previous revision.
+	 */
+	PreviousActive->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    PreviousActive->SetVisibility(false);
-    PreviousActive->SetHiddenInGame(true);
-    PreviousActive->SetRenderInMainPass(false);
-    PreviousActive->SetRenderInDepthPass(false);
+	PreviousActive->SetVisibility(false);
+	PreviousActive->SetHiddenInGame(true);
+	PreviousActive->SetRenderInMainPass(false);
+	PreviousActive->SetRenderInDepthPass(false);
 
-    /*
-     * Swap front/back buffers.
-     */
-    ActiveProceduralMesh =
-        NewActive;
+	/*
+	 * Swap front/back buffers.
+	 */
+	ActiveProceduralMesh = NewActive;
 
-    InactiveProceduralMesh =
-        PreviousActive;
+	InactiveProceduralMesh = PreviousActive;
 
-    bLastBuildHadCollision =
-        bStagedBuildHadCollision;
+	bLastBuildHadCollision = bStagedBuildHadCollision;
 
-    bStagedBuildHadCollision = false;
-    bHasStagedVolume = false;
+	bStagedBuildHadCollision = false;
+	bHasStagedVolume		 = false;
 }
 
 void ACubusVoxelVolumeActor::DiscardStagedVolume()
 {
-    if (IsValid(InactiveProceduralMesh))
-    {
-        InactiveProceduralMesh->ClearAllMeshSections();
+	if (IsValid(InactiveProceduralMesh))
+	{
+		InactiveProceduralMesh->ClearAllMeshSections();
 
-        InactiveProceduralMesh->SetCollisionEnabled(
-            ECollisionEnabled::NoCollision
-        );
+		InactiveProceduralMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-        InactiveProceduralMesh->SetVisibility(false);
-        InactiveProceduralMesh->SetHiddenInGame(true);
-        InactiveProceduralMesh->SetRenderInMainPass(false);
-        InactiveProceduralMesh->SetRenderInDepthPass(false);
-    }
+		InactiveProceduralMesh->SetVisibility(false);
+		InactiveProceduralMesh->SetHiddenInGame(true);
+		InactiveProceduralMesh->SetRenderInMainPass(false);
+		InactiveProceduralMesh->SetRenderInDepthPass(false);
+	}
 
-    bStagedBuildHadCollision = false;
-    bHasStagedVolume = false;
+	bStagedBuildHadCollision = false;
+	bHasStagedVolume		 = false;
 }
 
-bool ACubusVoxelVolumeActor::BuildVolumeInto(
-    UProceduralMeshComponent& TargetMesh,
-    const bool bPublishDiagnostics
-)
+bool ACubusVoxelVolumeActor::BuildVolumeInto(UProceduralMeshComponent& TargetMesh, const bool bPublishDiagnostics)
 {
-    const double BuildStartTime =
-        FPlatformTime::Seconds();
+	const double BuildStartTime = FPlatformTime::Seconds();
 
-    TargetMesh.ClearAllMeshSections();
+	TargetMesh.BoundsScale = FMath::Max(1.0f, CubusVoxelVolumeActor::CVarCubusLod0ChunkBoundsScale.GetValueOnGameThread());
 
-    TargetMesh.SetCollisionEnabled(
-        ECollisionEnabled::NoCollision
-    );
+	TargetMesh.ClearAllMeshSections();
 
-    ResetDiagnostics();
+	TargetMesh.SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    TotalVoxelCount =
-        ChunkData->GetVoxelCount();
+	ResetDiagnostics();
 
-    SolidVoxelCount =
-        ChunkData->GetOccupiedVoxelCount();
+	TotalVoxelCount = ChunkData->GetVoxelCount();
 
-    LastBuiltRenderMode =
-        GetEffectiveRenderMode();
+	SolidVoxelCount = ChunkData->GetOccupiedVoxelCount();
 
-    int32 MeshSectionIndex = 0;
-    bool bBuiltCollision = false;
+	LastBuiltRenderMode = GetEffectiveRenderMode();
 
-    switch (LastBuiltRenderMode)
-    {
-        case ECubusVoxelRenderMode::Blocks:
-        {
-            RebuildBlockMesh(
-                TargetMesh,
-                bGenerateCollision,
-                MeshSectionIndex
-            );
+	int32 MeshSectionIndex = 0;
+	bool  bBuiltCollision  = false;
 
-            bBuiltCollision =
-                bGenerateCollision &&
-                GeneratedBlockSectionCount > 0;
+	switch (LastBuiltRenderMode)
+	{
+	case ECubusVoxelRenderMode::Blocks:
+	{
+		RebuildBlockMesh(TargetMesh, bGenerateCollision, MeshSectionIndex);
 
-            break;
-        }
+		bBuiltCollision = bGenerateCollision && GeneratedBlockSectionCount > 0;
 
-        case ECubusVoxelRenderMode::Density:
-        {
-            RebuildDensityMesh(
-                TargetMesh,
-                bGenerateCollision,
-                MeshSectionIndex
-            );
+		break;
+	}
 
-            RebuildBlockEditOverlay(
-                TargetMesh,
-                bGenerateCollision,
-                MeshSectionIndex
-            );
+	case ECubusVoxelRenderMode::Density:
+	{
+		RebuildDensityMesh(TargetMesh, bGenerateCollision, MeshSectionIndex);
 
-            bBuiltCollision =
-                bGenerateCollision &&
-                (
-                    GeneratedDensitySectionCount > 0 ||
-                    GeneratedBlockSectionCount > 0
-                );
+		RebuildBlockEditOverlay(TargetMesh, bGenerateCollision, MeshSectionIndex);
 
-            break;
-        }
+		bBuiltCollision = bGenerateCollision && (GeneratedDensitySectionCount > 0 || GeneratedBlockSectionCount > 0);
 
-        case ECubusVoxelRenderMode::Hybrid:
-        {
-            RebuildBlockMesh(
-                TargetMesh,
-                bGenerateCollision,
-                MeshSectionIndex
-            );
+		break;
+	}
 
-            RebuildDensityMesh(
-                TargetMesh,
-                false,
-                MeshSectionIndex
-            );
+	case ECubusVoxelRenderMode::Hybrid:
+	{
+		RebuildBlockMesh(TargetMesh, bGenerateCollision, MeshSectionIndex);
 
-            bBuiltCollision =
-                bGenerateCollision &&
-                GeneratedBlockSectionCount > 0;
+		RebuildDensityMesh(TargetMesh, false, MeshSectionIndex);
 
-            break;
-        }
+		bBuiltCollision = bGenerateCollision && GeneratedBlockSectionCount > 0;
 
-        default:
-        {
-            checkNoEntry();
-            break;
-        }
-    }
+		break;
+	}
 
-    GeneratedMaterialSectionCount =
-        MeshSectionIndex;
+	default:
+	{
+		checkNoEntry();
+		break;
+	}
+	}
 
-    /*
-     * Visible builds may activate collision immediately.
-     * Staged builds remain collision-disabled until CommitStagedVolume().
-     */
-    if (bPublishDiagnostics)
-    {
-        TargetMesh.SetCollisionEnabled(
-            bBuiltCollision
-                ? ECollisionEnabled::QueryAndPhysics
-                : ECollisionEnabled::NoCollision
-        );
+	GeneratedMaterialSectionCount = MeshSectionIndex;
 
-        TargetMesh.SetVisibility(true);
-        TargetMesh.SetHiddenInGame(false);
-        TargetMesh.SetRenderInMainPass(true);
-        TargetMesh.SetRenderInDepthPass(true);
-    }
-    else
-    {
-        TargetMesh.SetCollisionEnabled(
-            ECollisionEnabled::NoCollision
-        );
+	/*
+	 * Visible builds may activate collision immediately.
+	 * Staged builds remain collision-disabled until CommitStagedVolume().
+	 */
+	if (bPublishDiagnostics)
+	{
+		TargetMesh.SetCollisionEnabled(bBuiltCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 
-        TargetMesh.SetVisibility(false);
-        TargetMesh.SetHiddenInGame(true);
-        TargetMesh.SetRenderInMainPass(false);
-        TargetMesh.SetRenderInDepthPass(false);
-    }
+		TargetMesh.SetVisibility(true);
+		TargetMesh.SetHiddenInGame(false);
+		TargetMesh.SetRenderInMainPass(true);
+		TargetMesh.SetRenderInDepthPass(true);
+	}
+	else
+	{
+		TargetMesh.SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    LastBuildTimeMilliseconds =
-        static_cast<float>(
-            (
-                FPlatformTime::Seconds() -
-                BuildStartTime
-            ) *
-            1000.0
-        );
+		TargetMesh.SetVisibility(false);
+		TargetMesh.SetHiddenInGame(true);
+		TargetMesh.SetRenderInMainPass(false);
+		TargetMesh.SetRenderInDepthPass(false);
+	}
 
-    TargetMesh.MarkRenderStateDirty();
+	LastBuildTimeMilliseconds = static_cast<float>((FPlatformTime::Seconds() - BuildStartTime) * 1000.0);
 
-    if (bPublishDiagnostics)
-    {
-        UE_LOG(
-            LogTemp,
-            Verbose,
-            TEXT(
-                "Cubus chunk (%d, %d, %d) built mode=%d "
-                "densityStep=%.1fcm rootSections=%d blockSections=%d "
-                "densitySections=%d vertices=%d triangles=%d "
-                "densityTriangles=%d collision=%s time=%.2fms"
-            ),
-            ChunkCoordinate.X,
-            ChunkCoordinate.Y,
-            ChunkCoordinate.Z,
-            static_cast<int32>(LastBuiltRenderMode),
-            GetDensitySampleSpacing(),
-            GeneratedMaterialSectionCount,
-            GeneratedBlockSectionCount,
-            GeneratedDensitySectionCount,
-            GeneratedVertexCount,
-            GeneratedTriangleCount,
-            GeneratedDensityTriangleCount,
-            bBuiltCollision ? TEXT("true") : TEXT("false"),
-            LastBuildTimeMilliseconds
-        );
-    }
+	TargetMesh.MarkRenderStateDirty();
 
-    return bBuiltCollision;
+	if (bPublishDiagnostics)
+	{
+		UE_LOG(LogTemp, Verbose,
+			   TEXT("Cubus chunk (%d, %d, %d) built mode=%d "
+					"densityStep=%.1fcm rootSections=%d blockSections=%d "
+					"densitySections=%d vertices=%d triangles=%d "
+					"densityTriangles=%d collision=%s time=%.2fms"),
+			   ChunkCoordinate.X, ChunkCoordinate.Y, ChunkCoordinate.Z, static_cast<int32>(LastBuiltRenderMode), GetDensitySampleSpacing(),
+			   GeneratedMaterialSectionCount, GeneratedBlockSectionCount, GeneratedDensitySectionCount, GeneratedVertexCount,
+			   GeneratedTriangleCount, GeneratedDensityTriangleCount, bBuiltCollision ? TEXT("true") : TEXT("false"),
+			   LastBuildTimeMilliseconds);
+	}
+
+	return bBuiltCollision;
 }
 
-ECubusVoxelRenderMode
-ACubusVoxelVolumeActor::GetEffectiveRenderMode() const
+ECubusVoxelRenderMode ACubusVoxelVolumeActor::GetEffectiveRenderMode() const
 {
-    if (IsValid(OwningBlockWorld.Get()))
-    {
-        return OwningBlockWorld->GetVoxelRenderMode();
-    }
+	if (IsValid(OwningBlockWorld.Get()))
+	{
+		return OwningBlockWorld->GetVoxelRenderMode();
+	}
 
-    return StandaloneRenderMode;
+	return StandaloneRenderMode;
 }
 
-void ACubusVoxelVolumeActor::RebuildBlockMesh(
-    UProceduralMeshComponent& TargetMesh,
-    const bool bGenerateBlockCollision,
-    int32& InOutMeshSectionIndex
-)
+void ACubusVoxelVolumeActor::RebuildBlockMesh(UProceduralMeshComponent& TargetMesh, const bool bGenerateBlockCollision,
+											  int32& InOutMeshSectionIndex)
 {
-    FCubusMaterialMeshMap MaterialMeshes;
-    const FCubusBlockChunkNeighborhood Neighborhood =
-        BuildNeighborhood();
+	FCubusMaterialMeshMap			   MaterialMeshes;
+	const FCubusBlockChunkNeighborhood Neighborhood = BuildNeighborhood();
 
-    FCubusBlockMesher::BuildChunk(
-        Neighborhood,
-        MaterialRegistry.Get(),
-        VoxelSize,
-        MaterialMeshes,
-        GeneratedFaceCount
-    );
+	FCubusBlockMesher::BuildChunk(Neighborhood, MaterialRegistry.Get(), VoxelSize, MaterialMeshes, GeneratedFaceCount);
 
-    GeneratedBlockSectionCount =
-        CubusVoxelVolumeActor::AppendMaterialMeshes(
-            TargetMesh,
-            MaterialRegistry.Get(),
-            MaterialMeshes,
-            bGenerateBlockCollision,
-            InOutMeshSectionIndex,
-            GeneratedVertexCount,
-            GeneratedTriangleCount
-        );
+	GeneratedBlockSectionCount =
+		CubusVoxelVolumeActor::AppendMaterialMeshes(TargetMesh, MaterialRegistry.Get(), MaterialMeshes, bGenerateBlockCollision,
+													InOutMeshSectionIndex, GeneratedVertexCount, GeneratedTriangleCount);
 }
 
-void ACubusVoxelVolumeActor::RebuildBlockEditOverlay(
-    UProceduralMeshComponent& TargetMesh,
-    const bool bGenerateBlockCollision,
-    int32& InOutMeshSectionIndex
-)
+void ACubusVoxelVolumeActor::RebuildBlockEditOverlay(UProceduralMeshComponent& TargetMesh, const bool bGenerateBlockCollision,
+													 int32& InOutMeshSectionIndex)
 {
-    ACubusBlockWorldActor* BlockWorld = OwningBlockWorld.Get();
-    if (!IsValid(BlockWorld))
-    {
-        return;
-    }
+	ACubusBlockWorldActor* BlockWorld = OwningBlockWorld.Get();
+	if (!IsValid(BlockWorld))
+	{
+		return;
+	}
 
-    TUniquePtr<FCubusBlockChunkData> Centre =
-        MakeUnique<FCubusBlockChunkData>(ChunkCoordinate);
+	TUniquePtr<FCubusBlockChunkData> Centre = MakeUnique<FCubusBlockChunkData>(ChunkCoordinate);
 
-    if (!BlockWorld->BuildBlockEditOverlayChunk(ChunkCoordinate, *Centre))
-    {
-        return;
-    }
+	if (!BlockWorld->BuildBlockEditOverlayChunk(ChunkCoordinate, *Centre))
+	{
+		return;
+	}
 
-    auto BuildNeighbour =
-        [BlockWorld, this](const FIntVector& Offset)
-        -> TUniquePtr<FCubusBlockChunkData>
-        {
-            const FIntVector Coordinate = ChunkCoordinate + Offset;
-            TUniquePtr<FCubusBlockChunkData> Result =
-                MakeUnique<FCubusBlockChunkData>(Coordinate);
+	auto BuildNeighbour = [BlockWorld, this](const FIntVector& Offset) -> TUniquePtr<FCubusBlockChunkData>
+	{
+		const FIntVector				 Coordinate = ChunkCoordinate + Offset;
+		TUniquePtr<FCubusBlockChunkData> Result		= MakeUnique<FCubusBlockChunkData>(Coordinate);
 
-            if (!BlockWorld->BuildBlockEditOverlayChunk(Coordinate, *Result))
-            {
-                return nullptr;
-            }
-            return Result;
-        };
+		if (!BlockWorld->BuildBlockEditOverlayChunk(Coordinate, *Result))
+		{
+			return nullptr;
+		}
+		return Result;
+	};
 
-    TUniquePtr<FCubusBlockChunkData> PositiveX = BuildNeighbour(FIntVector(1, 0, 0));
-    TUniquePtr<FCubusBlockChunkData> NegativeX = BuildNeighbour(FIntVector(-1, 0, 0));
-    TUniquePtr<FCubusBlockChunkData> PositiveY = BuildNeighbour(FIntVector(0, 1, 0));
-    TUniquePtr<FCubusBlockChunkData> NegativeY = BuildNeighbour(FIntVector(0, -1, 0));
-    TUniquePtr<FCubusBlockChunkData> PositiveZ = BuildNeighbour(FIntVector(0, 0, 1));
-    TUniquePtr<FCubusBlockChunkData> NegativeZ = BuildNeighbour(FIntVector(0, 0, -1));
+	TUniquePtr<FCubusBlockChunkData> PositiveX = BuildNeighbour(FIntVector(1, 0, 0));
+	TUniquePtr<FCubusBlockChunkData> NegativeX = BuildNeighbour(FIntVector(-1, 0, 0));
+	TUniquePtr<FCubusBlockChunkData> PositiveY = BuildNeighbour(FIntVector(0, 1, 0));
+	TUniquePtr<FCubusBlockChunkData> NegativeY = BuildNeighbour(FIntVector(0, -1, 0));
+	TUniquePtr<FCubusBlockChunkData> PositiveZ = BuildNeighbour(FIntVector(0, 0, 1));
+	TUniquePtr<FCubusBlockChunkData> NegativeZ = BuildNeighbour(FIntVector(0, 0, -1));
 
-    FCubusBlockChunkNeighborhood Neighborhood;
-    Neighborhood.Centre = Centre.Get();
-    Neighborhood.PositiveX = PositiveX.Get();
-    Neighborhood.NegativeX = NegativeX.Get();
-    Neighborhood.PositiveY = PositiveY.Get();
-    Neighborhood.NegativeY = NegativeY.Get();
-    Neighborhood.PositiveZ = PositiveZ.Get();
-    Neighborhood.NegativeZ = NegativeZ.Get();
+	FCubusBlockChunkNeighborhood Neighborhood;
+	Neighborhood.Centre	   = Centre.Get();
+	Neighborhood.PositiveX = PositiveX.Get();
+	Neighborhood.NegativeX = NegativeX.Get();
+	Neighborhood.PositiveY = PositiveY.Get();
+	Neighborhood.NegativeY = NegativeY.Get();
+	Neighborhood.PositiveZ = PositiveZ.Get();
+	Neighborhood.NegativeZ = NegativeZ.Get();
 
-    FCubusMaterialMeshMap MaterialMeshes;
-    int32 OverlayFaceCount = 0;
-    FCubusBlockMesher::BuildChunk(
-        Neighborhood,
-        MaterialRegistry.Get(),
-        VoxelSize,
-        MaterialMeshes,
-        OverlayFaceCount
-    );
+	FCubusMaterialMeshMap MaterialMeshes;
+	int32				  OverlayFaceCount = 0;
+	FCubusBlockMesher::BuildChunk(Neighborhood, MaterialRegistry.Get(), VoxelSize, MaterialMeshes, OverlayFaceCount);
 
-    GeneratedFaceCount += OverlayFaceCount;
-    GeneratedBlockSectionCount +=
-        CubusVoxelVolumeActor::AppendMaterialMeshes(
-            TargetMesh,
-            MaterialRegistry.Get(),
-            MaterialMeshes,
-            bGenerateBlockCollision,
-            InOutMeshSectionIndex,
-            GeneratedVertexCount,
-            GeneratedTriangleCount
-        );
+	GeneratedFaceCount += OverlayFaceCount;
+	GeneratedBlockSectionCount +=
+		CubusVoxelVolumeActor::AppendMaterialMeshes(TargetMesh, MaterialRegistry.Get(), MaterialMeshes, bGenerateBlockCollision,
+													InOutMeshSectionIndex, GeneratedVertexCount, GeneratedTriangleCount);
 }
 
-FCubusTerrainDensitySettings
-ACubusVoxelVolumeActor::BuildDensitySettings() const
+FCubusTerrainDensitySettings ACubusVoxelVolumeActor::BuildDensitySettings() const
 {
-    FCubusTerrainDensitySettings DensitySettings;
+	FCubusTerrainDensitySettings DensitySettings;
 
-    DensitySettings.bUseHeightTerrain =
-        bUseHeightTerrain;
+	DensitySettings.bUseHeightTerrain = bUseHeightTerrain;
 
-    DensitySettings.FlatSurfaceWorldZ =
-        static_cast<float>(
-            TerrainSurfaceWorldZ
-        );
+	DensitySettings.FlatSurfaceWorldZ = static_cast<float>(TerrainSurfaceWorldZ);
 
-    DensitySettings.BaseHeight =
-        static_cast<float>(
-            TerrainBaseHeight
-        );
+	DensitySettings.BaseHeight = static_cast<float>(TerrainBaseHeight);
 
-    DensitySettings.ContinentAmplitude =
-        TerrainContinentAmplitude;
+	DensitySettings.ContinentAmplitude = TerrainContinentAmplitude;
 
-    DensitySettings.ContinentFrequency =
-        TerrainContinentFrequency;
+	DensitySettings.ContinentFrequency = TerrainContinentFrequency;
 
-    DensitySettings.HillAmplitude =
-        TerrainHillAmplitude;
+	DensitySettings.HillAmplitude = TerrainHillAmplitude;
 
-    DensitySettings.HillFrequency =
-        TerrainHillFrequency;
+	DensitySettings.HillFrequency = TerrainHillFrequency;
 
-    DensitySettings.DetailAmplitude =
-        TerrainDetailAmplitude;
+	DensitySettings.DetailAmplitude = TerrainDetailAmplitude;
 
-    DensitySettings.DetailFrequency =
-        TerrainDetailFrequency;
+	DensitySettings.DetailFrequency = TerrainDetailFrequency;
 
-    DensitySettings.RidgeAmplitude =
-        TerrainRidgeAmplitude;
+	DensitySettings.RidgeAmplitude = TerrainRidgeAmplitude;
 
-    DensitySettings.RidgeFrequency =
-        TerrainRidgeFrequency;
+	DensitySettings.RidgeFrequency = TerrainRidgeFrequency;
 
-    DensitySettings.ValleyDepth =
-        TerrainValleyDepth;
+	DensitySettings.ValleyDepth = TerrainValleyDepth;
 
-    DensitySettings.ValleyFrequency =
-        TerrainValleyFrequency;
+	DensitySettings.ValleyFrequency = TerrainValleyFrequency;
 
-    DensitySettings.ValleyWidth =
-        TerrainValleyWidth;
+	DensitySettings.ValleyWidth = TerrainValleyWidth;
 
-    DensitySettings.ValleyFalloff =
-        TerrainValleyFalloff;
+	DensitySettings.ValleyFalloff = TerrainValleyFalloff;
 
-    DensitySettings.ValleyWarpAmplitude =
-        TerrainValleyWarpAmplitude;
+	DensitySettings.ValleyWarpAmplitude = TerrainValleyWarpAmplitude;
 
-    DensitySettings.ValleyWarpFrequency =
-        TerrainValleyWarpFrequency;
+	DensitySettings.ValleyWarpFrequency = TerrainValleyWarpFrequency;
 
-    DensitySettings.RegionFrequency =
-        TerrainRegionFrequency;
+	DensitySettings.RegionFrequency = TerrainRegionFrequency;
 
-    DensitySettings.PlainsThreshold =
-        TerrainPlainsThreshold;
+	DensitySettings.PlainsThreshold = TerrainPlainsThreshold;
 
-    DensitySettings.PlainsBlend =
-        TerrainPlainsBlend;
+	DensitySettings.PlainsBlend = TerrainPlainsBlend;
 
-    DensitySettings.MountainThreshold =
-        TerrainMountainThreshold;
+	DensitySettings.MountainThreshold = TerrainMountainThreshold;
 
-    DensitySettings.MountainBlend =
-        TerrainMountainBlend;
+	DensitySettings.MountainBlend = TerrainMountainBlend;
 
-    DensitySettings.SurfaceMaterialId =
-        TerrainSurfaceMaterialId;
+	DensitySettings.SurfaceMaterialId = TerrainSurfaceMaterialId;
 
-    DensitySettings.SubsurfaceMaterialId =
-        TerrainSubsurfaceMaterialId;
+	DensitySettings.SubsurfaceMaterialId = TerrainSubsurfaceMaterialId;
 
-    DensitySettings.RockMaterialId =
-        TerrainRockMaterialId;
+	DensitySettings.RockMaterialId = TerrainRockMaterialId;
 
-    DensitySettings.SnowMaterialId =
-        TerrainSnowMaterialId;
+	DensitySettings.SnowMaterialId = TerrainSnowMaterialId;
 
-    DensitySettings.RockSlopeThreshold =
-        TerrainRockSlopeThreshold;
+	DensitySettings.RockSlopeThreshold = TerrainRockSlopeThreshold;
 
-    DensitySettings.SnowMinimumHeight =
-        static_cast<float>(
-            TerrainSnowMinimumHeight
-        );
+	DensitySettings.SnowMinimumHeight = static_cast<float>(TerrainSnowMinimumHeight);
 
-    const FCubusGenerationSeeds& Seeds =
-        ChunkData->GetGenerationSeeds();
+	const FCubusGenerationSeeds& Seeds = ChunkData->GetGenerationSeeds();
 
-    DensitySettings.TerrainOffsetX =
-        CubusVoxelVolumeActor::WholeChunkOffset(
-            FCubusGenerationSeeds::DomainOffsetX(
-                Seeds.Terrain
-            )
-        );
+	DensitySettings.TerrainOffsetX = CubusVoxelVolumeActor::WholeChunkOffset(FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain));
 
-    DensitySettings.TerrainOffsetY =
-        CubusVoxelVolumeActor::WholeChunkOffset(
-            FCubusGenerationSeeds::DomainOffsetY(
-                Seeds.Terrain
-            )
-        );
+	DensitySettings.TerrainOffsetY = CubusVoxelVolumeActor::WholeChunkOffset(FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain));
 
-    DensitySettings.RiverOffsetX =
-        FCubusGenerationSeeds::DomainOffsetX(
-            Seeds.Rivers
-        );
+	DensitySettings.RiverOffsetX = FCubusGenerationSeeds::DomainOffsetX(Seeds.Rivers);
 
-    DensitySettings.RiverOffsetY =
-        FCubusGenerationSeeds::DomainOffsetY(
-            Seeds.Rivers
-        );
+	DensitySettings.RiverOffsetY = FCubusGenerationSeeds::DomainOffsetY(Seeds.Rivers);
 
-    DensitySettings.CaveOffsetX =
-        FCubusGenerationSeeds::DomainOffsetX(
-            Seeds.Caves
-        );
+	DensitySettings.CaveOffsetX = FCubusGenerationSeeds::DomainOffsetX(Seeds.Caves);
 
-    DensitySettings.CaveOffsetY =
-        FCubusGenerationSeeds::DomainOffsetY(
-            Seeds.Caves
-        );
+	DensitySettings.CaveOffsetY = FCubusGenerationSeeds::DomainOffsetY(Seeds.Caves);
 
-    DensitySettings.CaveOffsetZ =
-        FCubusGenerationSeeds::DomainOffsetZ(
-            Seeds.Caves
-        );
+	DensitySettings.CaveOffsetZ = FCubusGenerationSeeds::DomainOffsetZ(Seeds.Caves);
 
-    DensitySettings.BiomeSettings =
-        FCubusBiomeField::MakeSettings(
-            GeologyProfile.Get(),
-            Seeds.Biomes,
-            Seeds.Rivers
-        );
+	DensitySettings.BiomeSettings = FCubusBiomeField::MakeSettings(GeologyProfile.Get(), Seeds.Biomes, Seeds.Rivers);
 
-    DensitySettings.LandmarkSettings =
-        FCubusLandmarkField::MakeSettings(
-            GeologyProfile.Get(),
-            Seeds.Terrain
-        );
+	DensitySettings.LandmarkSettings = FCubusLandmarkField::MakeSettings(GeologyProfile.Get(), Seeds.Terrain);
 
-    if (IsValid(GeologyProfile.Get()))
-    {
-        DensitySettings.bGenerateRivers =
-            GeologyProfile->bGenerateRivers;
+	if (IsValid(GeologyProfile.Get()))
+	{
+		DensitySettings.bGenerateRivers = GeologyProfile->bGenerateRivers;
 
-        DensitySettings.RiverFrequency =
-            GeologyProfile->RiverFrequency;
+		DensitySettings.RiverFrequency = GeologyProfile->RiverFrequency;
 
-        DensitySettings.RiverChannelWidth =
-            GeologyProfile->RiverChannelWidth;
+		DensitySettings.RiverChannelWidth = GeologyProfile->RiverChannelWidth;
 
-        DensitySettings.RiverValleyWidth =
-            GeologyProfile->RiverValleyWidth;
+		DensitySettings.RiverValleyWidth = GeologyProfile->RiverValleyWidth;
 
-        DensitySettings.RiverValleyDepth =
-            GeologyProfile->RiverValleyDepth;
+		DensitySettings.RiverValleyDepth = GeologyProfile->RiverValleyDepth;
 
-        DensitySettings.RiverChannelDepth =
-            static_cast<float>(
-                GeologyProfile->RiverChannelDepth
-            );
+		DensitySettings.RiverChannelDepth = static_cast<float>(GeologyProfile->RiverChannelDepth);
 
-        DensitySettings.RiverWarpAmplitude =
-            GeologyProfile->RiverWarpAmplitude;
+		DensitySettings.RiverWarpAmplitude = GeologyProfile->RiverWarpAmplitude;
 
-        DensitySettings.RiverWarpFrequency =
-            GeologyProfile->RiverWarpFrequency;
+		DensitySettings.RiverWarpFrequency = GeologyProfile->RiverWarpFrequency;
 
-        DensitySettings.bGenerateCaves =
-            GeologyProfile->bGenerateCaves;
+		DensitySettings.bGenerateCaves = GeologyProfile->bGenerateCaves;
 
-        DensitySettings.CaveMinimumWorldZ =
-            GeologyProfile->CaveMinimumWorldZ;
+		DensitySettings.CaveMinimumWorldZ = GeologyProfile->CaveMinimumWorldZ;
 
-        DensitySettings.CaveMaximumWorldZ =
-            GeologyProfile->CaveMaximumWorldZ;
+		DensitySettings.CaveMaximumWorldZ = GeologyProfile->CaveMaximumWorldZ;
 
-        DensitySettings.CaveSurfaceClearance =
-            GeologyProfile->CaveSurfaceClearance;
+		DensitySettings.CaveSurfaceClearance = GeologyProfile->CaveSurfaceClearance;
 
-        DensitySettings.CavePrimaryFrequency =
-            GeologyProfile->CavePrimaryFrequency;
+		DensitySettings.CavePrimaryFrequency = GeologyProfile->CavePrimaryFrequency;
 
-        DensitySettings.CaveSecondaryFrequency =
-            GeologyProfile->CaveSecondaryFrequency;
+		DensitySettings.CaveSecondaryFrequency = GeologyProfile->CaveSecondaryFrequency;
 
-        DensitySettings.CaveThreshold =
-            GeologyProfile->CaveThreshold;
-    }
+		DensitySettings.CaveThreshold = GeologyProfile->CaveThreshold;
+	}
 
-    return DensitySettings;
+	return DensitySettings;
 }
 
-FCubusDensityMeshBuildInput
-ACubusVoxelVolumeActor::CaptureDensityMeshBuildInput() const
+FCubusDensityMeshBuildInput ACubusVoxelVolumeActor::CaptureDensityMeshBuildInput() const
 {
-    FCubusDensityMeshBuildInput Input;
+	FCubusDensityMeshBuildInput Input;
 
-    Input.DensitySettings =
-        BuildDensitySettings();
+	Input.DensitySettings = BuildDensitySettings();
 
-    if (IsValid(OwningBlockWorld.Get()))
-    {
-        Input.DensityEdits =
-            OwningBlockWorld->BuildDensityEditSnapshot(
-                ChunkCoordinate
-            );
-    }
+	if (IsValid(OwningBlockWorld.Get()))
+	{
+		Input.DensityEdits = OwningBlockWorld->BuildDensityEditSnapshot(ChunkCoordinate);
+	}
 
-    Input.ChunkCoordinate =
-        ChunkCoordinate;
+	Input.ChunkCoordinate = ChunkCoordinate;
 
-    Input.VoxelSize =
-        VoxelSize;
+	Input.VoxelSize = VoxelSize;
 
-    Input.SubdivisionsPerVoxel =
-        DensitySubdivisionsPerVoxel;
+	Input.SubdivisionsPerVoxel = DensitySubdivisionsPerVoxel;
 
-    Input.IsoLevel =
-        0.0f;
+	Input.IsoLevel = 0.0f;
 
-    if (
-        bHasCachedGeneratedDensityBuffer &&
-        CachedGeneratedDensityBuffer.IsValid() &&
-        CachedGeneratedDensityBuffer->IsBuilt()
-    )
-    {
-        /*
-        * Cheap thread-safe shared-pointer copy only.
-        *
-        * No FCubusDensitySamplingBuffer sample array is copied here.
-        */
-        Input.GeneratedDensityBuffer =
-            CachedGeneratedDensityBuffer;
+	if (bHasCachedGeneratedDensityBuffer && CachedGeneratedDensityBuffer.IsValid() && CachedGeneratedDensityBuffer->IsBuilt())
+	{
+		/*
+		 * Cheap thread-safe shared-pointer copy only.
+		 *
+		 * No FCubusDensitySamplingBuffer sample array is copied here.
+		 */
+		Input.GeneratedDensityBuffer = CachedGeneratedDensityBuffer;
 
-        Input.bHasGeneratedDensityBuffer =
-            true;
-    }
+		Input.bHasGeneratedDensityBuffer = true;
+	}
 
-    return Input;
+	return Input;
 }
 
-FCubusDensityMeshBuildResult
-ACubusVoxelVolumeActor::BuildDensityMeshData(
-    const FCubusDensityMeshBuildInput& Input
-)
+FCubusDensityMeshBuildResult ACubusVoxelVolumeActor::BuildDensityMeshData(const FCubusDensityMeshBuildInput& Input)
 {
-    const double BuildStartTime =
-        FPlatformTime::Seconds();
+	const double BuildStartTime = FPlatformTime::Seconds();
 
-    FCubusDensityMeshBuildResult Result;
+	FCubusDensityMeshBuildResult Result;
 
-    const FCubusTerrainDensityField DensityField(
-        Input.DensitySettings
-    );
+	const FCubusTerrainDensityField DensityField(Input.DensitySettings);
 
-    const int32 Subdivisions =
-        FCubusDensityLod::NormalizeSubdivisions(
-            Input.SubdivisionsPerVoxel
-        );
+	const int32 Subdivisions = FCubusDensityLod::NormalizeSubdivisions(Input.SubdivisionsPerVoxel);
 
-    if (Subdivisions <= 1)
-    {
-        FCubusDensitySamplingBuffer DensityBuffer;
+	if (Subdivisions <= 1)
+	{
+		FCubusDensitySamplingBuffer DensityBuffer;
 
-        if (
-            Input.bHasGeneratedDensityBuffer &&
-            Input.GeneratedDensityBuffer.IsValid() &&
-            Input.GeneratedDensityBuffer->IsBuilt()
-        )
-        {
-            /*
-            * One intentional copy remains here.
-            *
-            * This worker-local buffer is the only copy that receives player edits.
-            * The shared generated baseline stays permanently immutable.
-            */
-            DensityBuffer =
-                *Input.GeneratedDensityBuffer;
-        }
-        else
-        {
-            /*
-            * First build for this chunk/configuration.
-            *
-            * Generate the canonical baseline once and return it to the actor so
-            * subsequent edit transactions can reuse it.
-            */
-            DensityBuffer.Build(
-                Input.ChunkCoordinate,
-                DensityField
-            );
+		if (Input.bHasGeneratedDensityBuffer && Input.GeneratedDensityBuffer.IsValid() && Input.GeneratedDensityBuffer->IsBuilt())
+		{
+			/*
+			 * One intentional copy remains here.
+			 *
+			 * This worker-local buffer is the only copy that receives player edits.
+			 * The shared generated baseline stays permanently immutable.
+			 */
+			DensityBuffer = *Input.GeneratedDensityBuffer;
+		}
+		else
+		{
+			/*
+			 * First build for this chunk/configuration.
+			 *
+			 * Generate the canonical baseline once and return it to the actor so
+			 * subsequent edit transactions can reuse it.
+			 */
+			DensityBuffer.Build(Input.ChunkCoordinate, DensityField);
 
-            Result.GeneratedDensityBuffer =
-                DensityBuffer;
+			Result.GeneratedDensityBuffer = DensityBuffer;
 
-            Result.bHasGeneratedDensityBuffer =
-                true;
-        }
+			Result.bHasGeneratedDensityBuffer = true;
+		}
 
-        /*
-        * Mutate only this worker-local copy.
-        *
-        * The actor's generated baseline always remains edit-free.
-        */
-        DensityBuffer.ApplyEdits(
-            Input.DensityEdits
-        );
+		/*
+		 * Mutate only this worker-local copy.
+		 *
+		 * The actor's generated baseline always remains edit-free.
+		 */
+		DensityBuffer.ApplyEdits(Input.DensityEdits);
 
-        FCubusDensityMesher::BuildChunk(
-            DensityBuffer,
-            Input.VoxelSize,
-            Input.IsoLevel,
-            Result.MaterialMeshes,
-            Result.GeneratedTriangleCount
-        );
-    }
-    else
-    {
-        /*
-        * Fine adaptive density still needs continuous edit interpolation.
-        *
-        * Keep the existing path intact for when density subdivision is
-        * re-enabled later.
-        */
-        const FCubusDensityEditField EditedDensityField(
-            DensityField,
-            Input.DensityEdits
-        );
+		FCubusDensityMesher::BuildChunk(DensityBuffer, Input.VoxelSize, Input.IsoLevel, Result.MaterialMeshes,
+										Result.GeneratedTriangleCount);
+	}
+	else
+	{
+		/*
+		 * Fine adaptive density still needs continuous edit interpolation.
+		 *
+		 * Keep the existing path intact for when density subdivision is
+		 * re-enabled later.
+		 */
+		const FCubusDensityEditField EditedDensityField(DensityField, Input.DensityEdits);
 
-        FCubusDensityMesher::BuildAdaptiveChunk(
-            EditedDensityField,
-            Input.ChunkCoordinate,
-            Input.VoxelSize,
-            Subdivisions,
-            Input.IsoLevel,
-            Result.MaterialMeshes,
-            Result.GeneratedTriangleCount
-        );
-    }
+		FCubusDensityMesher::BuildAdaptiveChunk(EditedDensityField, Input.ChunkCoordinate, Input.VoxelSize, Subdivisions, Input.IsoLevel,
+												Result.MaterialMeshes, Result.GeneratedTriangleCount);
+	}
 
-    Result.BuildTimeMilliseconds =
-        (
-            FPlatformTime::Seconds() -
-            BuildStartTime
-        ) * 1000.0;
+	Result.BuildTimeMilliseconds = (FPlatformTime::Seconds() - BuildStartTime) * 1000.0;
 
-    return Result;
+	return Result;
 }
 
-void ACubusVoxelVolumeActor::UploadDensityMesh(
-    UProceduralMeshComponent& TargetMesh,
-    FCubusDensityMeshBuildResult& BuildResult,
-    const bool bGenerateDensityCollision,
-    int32& InOutMeshSectionIndex
-)
+void ACubusVoxelVolumeActor::UploadDensityMesh(UProceduralMeshComponent& TargetMesh, FCubusDensityMeshBuildResult& BuildResult,
+											   const bool bGenerateDensityCollision, int32& InOutMeshSectionIndex)
 {
-    GeneratedDensityTriangleCount =
-        BuildResult.GeneratedTriangleCount;
+	GeneratedDensityTriangleCount = BuildResult.GeneratedTriangleCount;
 
-    GeneratedDensitySectionCount =
-        CubusVoxelVolumeActor::AppendMaterialMeshes(
-            TargetMesh,
-            MaterialRegistry.Get(),
-            BuildResult.MaterialMeshes,
-            bGenerateDensityCollision,
-            InOutMeshSectionIndex,
-            GeneratedVertexCount,
-            GeneratedTriangleCount
-        );
+	GeneratedDensitySectionCount = CubusVoxelVolumeActor::AppendMaterialMeshes(
+		TargetMesh, MaterialRegistry.Get(), BuildResult.MaterialMeshes, bGenerateDensityCollision, InOutMeshSectionIndex,
+		GeneratedVertexCount, GeneratedTriangleCount);
 
-    if (GeneratedDensitySectionCount <= 0)
-    {
-        UE_LOG(
-            LogTemp,
-            Verbose,
-            TEXT(
-                "Cubus native density chunk (%d, %d, %d) "
-                "contains no isosurface."
-            ),
-            ChunkCoordinate.X,
-            ChunkCoordinate.Y,
-            ChunkCoordinate.Z
-        );
-    }
+	if (GeneratedDensitySectionCount <= 0)
+	{
+		UE_LOG(LogTemp, Verbose,
+			   TEXT("Cubus native density chunk (%d, %d, %d) "
+					"contains no isosurface."),
+			   ChunkCoordinate.X, ChunkCoordinate.Y, ChunkCoordinate.Z);
+	}
 }
 
-void ACubusVoxelVolumeActor::RebuildDensityMesh(
-    UProceduralMeshComponent& TargetMesh,
-    const bool bGenerateDensityCollision,
-    int32& InOutMeshSectionIndex
-)
+void ACubusVoxelVolumeActor::RebuildDensityMesh(UProceduralMeshComponent& TargetMesh, const bool bGenerateDensityCollision,
+												int32& InOutMeshSectionIndex)
 {
-    const FCubusDensityMeshBuildInput BuildInput =
-        CaptureDensityMeshBuildInput();
+	const FCubusDensityMeshBuildInput BuildInput = CaptureDensityMeshBuildInput();
 
-    FCubusDensityMeshBuildResult BuildResult =
-        BuildDensityMeshData(
-            BuildInput
-        );
+	FCubusDensityMeshBuildResult BuildResult = BuildDensityMeshData(BuildInput);
 
-    if (
-        BuildResult.bHasGeneratedDensityBuffer &&
-        BuildResult.GeneratedDensityBuffer.IsBuilt()
-    )
-    {
-        CachedGeneratedDensityBuffer =
-            MakeShared<
-                FCubusDensitySamplingBuffer,
-                ESPMode::ThreadSafe
-            >(
-                MoveTemp(
-                    BuildResult.GeneratedDensityBuffer
-                )
-            );
+	if (BuildResult.bHasGeneratedDensityBuffer && BuildResult.GeneratedDensityBuffer.IsBuilt())
+	{
+		CachedGeneratedDensityBuffer =
+			MakeShared<FCubusDensitySamplingBuffer, ESPMode::ThreadSafe>(MoveTemp(BuildResult.GeneratedDensityBuffer));
 
-        bHasCachedGeneratedDensityBuffer =
-            true;
+		bHasCachedGeneratedDensityBuffer = true;
 
-        BuildResult.bHasGeneratedDensityBuffer =
-            false;
-    }
-    
-    UploadDensityMesh(
-        TargetMesh,
-        BuildResult,
-        bGenerateDensityCollision,
-        InOutMeshSectionIndex
-    );
+		BuildResult.bHasGeneratedDensityBuffer = false;
+	}
+
+	UploadDensityMesh(TargetMesh, BuildResult, bGenerateDensityCollision, InOutMeshSectionIndex);
 }
 
 void ACubusVoxelVolumeActor::EnsureChunkData()
 {
-    if (!ChunkData.IsValid())
-    {
-        ChunkData =
-            MakeUnique<FCubusBlockChunkData>(
-                ChunkCoordinate
-            );
-    }
-    else
-    {
-        ChunkData->SetChunkCoordinate(
-            ChunkCoordinate
-        );
-    }
+	if (!ChunkData.IsValid())
+	{
+		ChunkData = MakeUnique<FCubusBlockChunkData>(ChunkCoordinate);
+	}
+	else
+	{
+		ChunkData->SetChunkCoordinate(ChunkCoordinate);
+	}
 }
 
 void ACubusVoxelVolumeActor::SynchronizeChunkState()
 {
-    EnsureChunkData();
-    ChunkData->SetChunkCoordinate(
-        ChunkCoordinate
-    );
+	EnsureChunkData();
+	ChunkData->SetChunkCoordinate(ChunkCoordinate);
 
-    const double ChunkWorldSize =
-        static_cast<double>(Cubus::ChunkSize) *
-        static_cast<double>(VoxelSize);
+	const double ChunkWorldSize = static_cast<double>(Cubus::ChunkSize) * static_cast<double>(VoxelSize);
 
-    SetActorLocation(
-        FVector(
-            static_cast<double>(ChunkCoordinate.X) *
-                ChunkWorldSize,
-            static_cast<double>(ChunkCoordinate.Y) *
-                ChunkWorldSize,
-            static_cast<double>(ChunkCoordinate.Z) *
-                ChunkWorldSize
-        )
-    );
+	SetActorLocation(FVector(static_cast<double>(ChunkCoordinate.X) * ChunkWorldSize,
+							 static_cast<double>(ChunkCoordinate.Y) * ChunkWorldSize,
+							 static_cast<double>(ChunkCoordinate.Z) * ChunkWorldSize));
 }
 
-void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(
-    const FIntVector& InChunkCoordinate,
-    const float InVoxelSize,
-    ACubusBlockWorldActor* InBlockWorld
-)
+void ACubusVoxelVolumeActor::ConfigureGeneratedChunk(const FIntVector& InChunkCoordinate, const float InVoxelSize,
+													 ACubusBlockWorldActor* InBlockWorld)
 {
-    InvalidateGeneratedDensityCache();
+	InvalidateGeneratedDensityCache();
 
-    ChunkCoordinate = InChunkCoordinate;
-    VoxelSize = FMath::Max(1.0f, InVoxelSize);
-    OwningBlockWorld = InBlockWorld;
+	ChunkCoordinate	 = InChunkCoordinate;
+	VoxelSize		 = FMath::Max(1.0f, InVoxelSize);
+	OwningBlockWorld = InBlockWorld;
 
-    SynchronizeChunkState();
+	SynchronizeChunkState();
 }
 
-bool ACubusVoxelVolumeActor::ConfigureDensityResolution(
-    const int32 InSubdivisionsPerVoxel
-)
+bool ACubusVoxelVolumeActor::ConfigureDensityResolution(const int32 InSubdivisionsPerVoxel)
 {
-    const int32 ResolvedSubdivisions =
-        FCubusDensityLod::NormalizeSubdivisions(
-            InSubdivisionsPerVoxel
-        );
+	const int32 ResolvedSubdivisions = FCubusDensityLod::NormalizeSubdivisions(InSubdivisionsPerVoxel);
 
-    if (DensitySubdivisionsPerVoxel == ResolvedSubdivisions)
-    {
-        return false;
-    }
+	if (DensitySubdivisionsPerVoxel == ResolvedSubdivisions)
+	{
+		return false;
+	}
 
-    DensitySubdivisionsPerVoxel = ResolvedSubdivisions;
-    return true;
+	DensitySubdivisionsPerVoxel = ResolvedSubdivisions;
+	return true;
 }
 
-void ACubusVoxelVolumeActor::ConfigureRendering(
-    UCubusMaterialRegistry* InMaterialRegistry
-)
+void ACubusVoxelVolumeActor::ConfigureRendering(UCubusMaterialRegistry* InMaterialRegistry)
 {
-    MaterialRegistry = InMaterialRegistry;
+	MaterialRegistry = InMaterialRegistry;
 }
 
-void ACubusVoxelVolumeActor::ConfigureGeology(
-    UCubusGeologyProfile* InGeologyProfile
-)
+void ACubusVoxelVolumeActor::ConfigureGeology(UCubusGeologyProfile* InGeologyProfile)
 {
-    if (GeologyProfile == InGeologyProfile)
-    {
-        return;
-    }
+	if (GeologyProfile == InGeologyProfile)
+	{
+		return;
+	}
 
-    GeologyProfile =
-        InGeologyProfile;
+	GeologyProfile = InGeologyProfile;
 
-    InvalidateGeneratedDensityCache();
+	InvalidateGeneratedDensityCache();
 }
 
 void ACubusVoxelVolumeActor::ConfigureTerrain(
-    const bool bInUseHeightTerrain,
-    const int32 InTerrainSurfaceWorldZ,
-    const int32 InTerrainBaseHeight,
-    const float InTerrainContinentAmplitude,
-    const float InTerrainContinentFrequency,
-    const float InTerrainHillAmplitude,
-    const float InTerrainHillFrequency,
-    const float InTerrainDetailAmplitude,
-    const float InTerrainDetailFrequency,
-    const float InTerrainRidgeAmplitude,
-    const float InTerrainRidgeFrequency,
-    const float InTerrainValleyDepth,
-    const float InTerrainValleyFrequency,
-    const float InTerrainValleyWidth,
-    const float InTerrainValleyFalloff,
-    const float InTerrainValleyWarpAmplitude,
-    const float InTerrainValleyWarpFrequency,
-    const float InTerrainRegionFrequency,
-    const float InTerrainPlainsThreshold,
-    const float InTerrainPlainsBlend,
-    const float InTerrainMountainThreshold,
-    const float InTerrainMountainBlend,
-    const int32 InTerrainSurfaceMaterialId,
-    const int32 InTerrainSubsurfaceMaterialId,
-    const int32 InTerrainRockMaterialId,
-    const int32 InTerrainSnowMaterialId,
-    const float InTerrainRockSlopeThreshold,
-    const int32 InTerrainSnowMinimumHeight,
-    const bool bInGenerateWater,
-    const int32 InTerrainWaterLevel,
-    const int32 InTerrainWaterMaterialId
-)
+	const bool bInUseHeightTerrain, const int32 InTerrainSurfaceWorldZ, const int32 InTerrainBaseHeight,
+	const float InTerrainContinentAmplitude, const float InTerrainContinentFrequency, const float InTerrainHillAmplitude,
+	const float InTerrainHillFrequency, const float InTerrainDetailAmplitude, const float InTerrainDetailFrequency,
+	const float InTerrainRidgeAmplitude, const float InTerrainRidgeFrequency, const float InTerrainValleyDepth,
+	const float InTerrainValleyFrequency, const float InTerrainValleyWidth, const float InTerrainValleyFalloff,
+	const float InTerrainValleyWarpAmplitude, const float InTerrainValleyWarpFrequency, const float InTerrainRegionFrequency,
+	const float InTerrainPlainsThreshold, const float InTerrainPlainsBlend, const float InTerrainMountainThreshold,
+	const float InTerrainMountainBlend, const int32 InTerrainSurfaceMaterialId, const int32 InTerrainSubsurfaceMaterialId,
+	const int32 InTerrainRockMaterialId, const int32 InTerrainSnowMaterialId, const float InTerrainRockSlopeThreshold,
+	const int32 InTerrainSnowMinimumHeight, const bool bInGenerateWater, const int32 InTerrainWaterLevel,
+	const int32 InTerrainWaterMaterialId)
 {
-    InvalidateGeneratedDensityCache();
+	InvalidateGeneratedDensityCache();
 
-    bUseHeightTerrain = bInUseHeightTerrain;
-    TerrainSurfaceWorldZ = InTerrainSurfaceWorldZ;
-    TerrainBaseHeight = InTerrainBaseHeight;
+	bUseHeightTerrain	 = bInUseHeightTerrain;
+	TerrainSurfaceWorldZ = InTerrainSurfaceWorldZ;
+	TerrainBaseHeight	 = InTerrainBaseHeight;
 
-    TerrainContinentAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainContinentAmplitude
-        );
+	TerrainContinentAmplitude = FMath::Max(0.0f, InTerrainContinentAmplitude);
 
-    TerrainContinentFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainContinentFrequency
-        );
+	TerrainContinentFrequency = FMath::Max(0.000001f, InTerrainContinentFrequency);
 
-    TerrainHillAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainHillAmplitude
-        );
+	TerrainHillAmplitude = FMath::Max(0.0f, InTerrainHillAmplitude);
 
-    TerrainHillFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainHillFrequency
-        );
+	TerrainHillFrequency = FMath::Max(0.000001f, InTerrainHillFrequency);
 
-    TerrainDetailAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainDetailAmplitude
-        );
+	TerrainDetailAmplitude = FMath::Max(0.0f, InTerrainDetailAmplitude);
 
-    TerrainDetailFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainDetailFrequency
-        );
+	TerrainDetailFrequency = FMath::Max(0.000001f, InTerrainDetailFrequency);
 
-    TerrainRidgeAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainRidgeAmplitude
-        );
+	TerrainRidgeAmplitude = FMath::Max(0.0f, InTerrainRidgeAmplitude);
 
-    TerrainRidgeFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainRidgeFrequency
-        );
+	TerrainRidgeFrequency = FMath::Max(0.000001f, InTerrainRidgeFrequency);
 
-    TerrainValleyDepth =
-        FMath::Max(
-            0.0f,
-            InTerrainValleyDepth
-        );
+	TerrainValleyDepth = FMath::Max(0.0f, InTerrainValleyDepth);
 
-    TerrainValleyFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainValleyFrequency
-        );
+	TerrainValleyFrequency = FMath::Max(0.000001f, InTerrainValleyFrequency);
 
-    TerrainValleyWidth =
-        FMath::Clamp(
-            InTerrainValleyWidth,
-            0.0f,
-            1.0f
-        );
+	TerrainValleyWidth = FMath::Clamp(InTerrainValleyWidth, 0.0f, 1.0f);
 
-    TerrainValleyFalloff =
-        FMath::Clamp(
-            InTerrainValleyFalloff,
-            0.001f,
-            1.0f
-        );
+	TerrainValleyFalloff = FMath::Clamp(InTerrainValleyFalloff, 0.001f, 1.0f);
 
-    TerrainValleyWarpAmplitude =
-        FMath::Max(
-            0.0f,
-            InTerrainValleyWarpAmplitude
-        );
+	TerrainValleyWarpAmplitude = FMath::Max(0.0f, InTerrainValleyWarpAmplitude);
 
-    TerrainValleyWarpFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainValleyWarpFrequency
-        );
+	TerrainValleyWarpFrequency = FMath::Max(0.000001f, InTerrainValleyWarpFrequency);
 
-    TerrainRegionFrequency =
-        FMath::Max(
-            0.000001f,
-            InTerrainRegionFrequency
-        );
+	TerrainRegionFrequency = FMath::Max(0.000001f, InTerrainRegionFrequency);
 
-    TerrainPlainsThreshold =
-        FMath::Clamp(
-            InTerrainPlainsThreshold,
-            -1.0f,
-            1.0f
-        );
+	TerrainPlainsThreshold = FMath::Clamp(InTerrainPlainsThreshold, -1.0f, 1.0f);
 
-    TerrainPlainsBlend =
-        FMath::Clamp(
-            InTerrainPlainsBlend,
-            0.001f,
-            1.0f
-        );
+	TerrainPlainsBlend = FMath::Clamp(InTerrainPlainsBlend, 0.001f, 1.0f);
 
-    TerrainMountainThreshold =
-        FMath::Clamp(
-            InTerrainMountainThreshold,
-            TerrainPlainsThreshold,
-            1.0f
-        );
+	TerrainMountainThreshold = FMath::Clamp(InTerrainMountainThreshold, TerrainPlainsThreshold, 1.0f);
 
-    TerrainMountainBlend =
-        FMath::Clamp(
-            InTerrainMountainBlend,
-            0.001f,
-            1.0f
-        );
+	TerrainMountainBlend = FMath::Clamp(InTerrainMountainBlend, 0.001f, 1.0f);
 
-    TerrainSurfaceMaterialId =
-        FMath::Max(
-            1,
-            InTerrainSurfaceMaterialId
-        );
+	TerrainSurfaceMaterialId = FMath::Max(1, InTerrainSurfaceMaterialId);
 
-    TerrainSubsurfaceMaterialId =
-        FMath::Max(
-            1,
-            InTerrainSubsurfaceMaterialId
-        );
+	TerrainSubsurfaceMaterialId = FMath::Max(1, InTerrainSubsurfaceMaterialId);
 
-    TerrainRockMaterialId =
-        FMath::Max(
-            1,
-            InTerrainRockMaterialId
-        );
+	TerrainRockMaterialId = FMath::Max(1, InTerrainRockMaterialId);
 
-    TerrainSnowMaterialId =
-        FMath::Max(
-            1,
-            InTerrainSnowMaterialId
-        );
+	TerrainSnowMaterialId = FMath::Max(1, InTerrainSnowMaterialId);
 
-    TerrainRockSlopeThreshold =
-        FMath::Max(
-            0.0f,
-            InTerrainRockSlopeThreshold
-        );
+	TerrainRockSlopeThreshold = FMath::Max(0.0f, InTerrainRockSlopeThreshold);
 
-    TerrainSnowMinimumHeight =
-        InTerrainSnowMinimumHeight;
+	TerrainSnowMinimumHeight = InTerrainSnowMinimumHeight;
 
-    bGenerateWater = bInGenerateWater;
-    TerrainWaterLevel = InTerrainWaterLevel;
+	bGenerateWater	  = bInGenerateWater;
+	TerrainWaterLevel = InTerrainWaterLevel;
 
-    TerrainWaterMaterialId =
-        FMath::Max(
-            1,
-            InTerrainWaterMaterialId
-        );
+	TerrainWaterMaterialId = FMath::Max(1, InTerrainWaterMaterialId);
 }
 
-const FCubusBlockChunkData* ACubusVoxelVolumeActor::FindNeighbourChunkData(
-    const FIntVector& CoordinateOffset
-) const
+const FCubusBlockChunkData* ACubusVoxelVolumeActor::FindNeighbourChunkData(const FIntVector& CoordinateOffset) const
 {
-    if (!IsValid(OwningBlockWorld.Get()))
-    {
-        return nullptr;
-    }
+	if (!IsValid(OwningBlockWorld.Get()))
+	{
+		return nullptr;
+	}
 
-    ACubusVoxelVolumeActor* NeighbourActor =
-        OwningBlockWorld->FindChunk(
-            ChunkCoordinate +
-            CoordinateOffset
-        );
+	ACubusVoxelVolumeActor* NeighbourActor = OwningBlockWorld->FindChunk(ChunkCoordinate + CoordinateOffset);
 
-    if (!IsValid(NeighbourActor))
-    {
-        return nullptr;
-    }
+	if (!IsValid(NeighbourActor))
+	{
+		return nullptr;
+	}
 
-    return NeighbourActor->GetChunkData();
+	return NeighbourActor->GetChunkData();
 }
 
-FCubusBlockChunkNeighborhood
-ACubusVoxelVolumeActor::BuildNeighborhood() const
+FCubusBlockChunkNeighborhood ACubusVoxelVolumeActor::BuildNeighborhood() const
 {
-    FCubusBlockChunkNeighborhood Neighborhood;
-    Neighborhood.Centre = ChunkData.Get();
-    Neighborhood.PositiveX =
-        FindNeighbourChunkData(FIntVector(1, 0, 0));
-    Neighborhood.NegativeX =
-        FindNeighbourChunkData(FIntVector(-1, 0, 0));
-    Neighborhood.PositiveY =
-        FindNeighbourChunkData(FIntVector(0, 1, 0));
-    Neighborhood.NegativeY =
-        FindNeighbourChunkData(FIntVector(0, -1, 0));
-    Neighborhood.PositiveZ =
-        FindNeighbourChunkData(FIntVector(0, 0, 1));
-    Neighborhood.NegativeZ =
-        FindNeighbourChunkData(FIntVector(0, 0, -1));
-    return Neighborhood;
+	FCubusBlockChunkNeighborhood Neighborhood;
+	Neighborhood.Centre	   = ChunkData.Get();
+	Neighborhood.PositiveX = FindNeighbourChunkData(FIntVector(1, 0, 0));
+	Neighborhood.NegativeX = FindNeighbourChunkData(FIntVector(-1, 0, 0));
+	Neighborhood.PositiveY = FindNeighbourChunkData(FIntVector(0, 1, 0));
+	Neighborhood.NegativeY = FindNeighbourChunkData(FIntVector(0, -1, 0));
+	Neighborhood.PositiveZ = FindNeighbourChunkData(FIntVector(0, 0, 1));
+	Neighborhood.NegativeZ = FindNeighbourChunkData(FIntVector(0, 0, -1));
+	return Neighborhood;
 }
 
 void ACubusVoxelVolumeActor::RebuildAffectedChunks()
 {
-    if (IsValid(OwningBlockWorld.Get()))
-    {
-        OwningBlockWorld->RebuildChunkAndNeighbours(
-            ChunkCoordinate
-        );
-        return;
-    }
+	if (IsValid(OwningBlockWorld.Get()))
+	{
+		OwningBlockWorld->RebuildChunkAndNeighbours(ChunkCoordinate);
+		return;
+	}
 
-    RebuildVolume();
+	RebuildVolume();
 }
 
 void ACubusVoxelVolumeActor::GenerateFlatTerrain()
 {
-    FCubusBlockTerrainGenerator::GenerateFlatTerrain(
-        *ChunkData,
-        TerrainSurfaceWorldZ,
-        TerrainSurfaceMaterialId,
-        TerrainSubsurfaceMaterialId
-    );
+	FCubusBlockTerrainGenerator::GenerateFlatTerrain(*ChunkData, TerrainSurfaceWorldZ, TerrainSurfaceMaterialId,
+													 TerrainSubsurfaceMaterialId);
 }
 
 void ACubusVoxelVolumeActor::GenerateHeightTerrain()
 {
-    FCubusBlockTerrainGenerator::GenerateHeightTerrain(
-        *ChunkData,
-        TerrainBaseHeight,
-        TerrainContinentAmplitude,
-        TerrainContinentFrequency,
-        TerrainHillAmplitude,
-        TerrainHillFrequency,
-        TerrainDetailAmplitude,
-        TerrainDetailFrequency,
-        TerrainRidgeAmplitude,
-        TerrainRidgeFrequency,
-        TerrainValleyDepth,
-        TerrainValleyFrequency,
-        TerrainValleyWidth,
-        TerrainValleyFalloff,
-        TerrainValleyWarpAmplitude,
-        TerrainValleyWarpFrequency,
-        TerrainRegionFrequency,
-        TerrainPlainsThreshold,
-        TerrainPlainsBlend,
-        TerrainMountainThreshold,
-        TerrainMountainBlend,
-        TerrainSurfaceMaterialId,
-        TerrainSubsurfaceMaterialId,
-        TerrainRockMaterialId,
-        TerrainSnowMaterialId,
-        TerrainRockSlopeThreshold,
-        TerrainSnowMinimumHeight,
-        bGenerateWater,
-        TerrainWaterLevel,
-        TerrainWaterMaterialId,
-        GeologyProfile.Get()
-    );
+	FCubusBlockTerrainGenerator::GenerateHeightTerrain(
+		*ChunkData, TerrainBaseHeight, TerrainContinentAmplitude, TerrainContinentFrequency, TerrainHillAmplitude, TerrainHillFrequency,
+		TerrainDetailAmplitude, TerrainDetailFrequency, TerrainRidgeAmplitude, TerrainRidgeFrequency, TerrainValleyDepth,
+		TerrainValleyFrequency, TerrainValleyWidth, TerrainValleyFalloff, TerrainValleyWarpAmplitude, TerrainValleyWarpFrequency,
+		TerrainRegionFrequency, TerrainPlainsThreshold, TerrainPlainsBlend, TerrainMountainThreshold, TerrainMountainBlend,
+		TerrainSurfaceMaterialId, TerrainSubsurfaceMaterialId, TerrainRockMaterialId, TerrainSnowMaterialId, TerrainRockSlopeThreshold,
+		TerrainSnowMinimumHeight, bGenerateWater, TerrainWaterLevel, TerrainWaterMaterialId, GeologyProfile.Get());
 }
 
 void ACubusVoxelVolumeActor::ResetDiagnostics()
 {
-    TotalVoxelCount = 0;
-    SolidVoxelCount = 0;
-    GeneratedFaceCount = 0;
-    GeneratedVertexCount = 0;
-    GeneratedTriangleCount = 0;
-    GeneratedMaterialSectionCount = 0;
-    GeneratedBlockSectionCount = 0;
-    GeneratedDensitySectionCount = 0;
-    GeneratedDensityTriangleCount = 0;
-    LastBuildTimeMilliseconds = 0.0f;
+	TotalVoxelCount				  = 0;
+	SolidVoxelCount				  = 0;
+	GeneratedFaceCount			  = 0;
+	GeneratedVertexCount		  = 0;
+	GeneratedTriangleCount		  = 0;
+	GeneratedMaterialSectionCount = 0;
+	GeneratedBlockSectionCount	  = 0;
+	GeneratedDensitySectionCount  = 0;
+	GeneratedDensityTriangleCount = 0;
+	LastBuildTimeMilliseconds	  = 0.0f;
 }

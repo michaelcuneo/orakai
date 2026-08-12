@@ -81,6 +81,12 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float SurfaceMaterialDepth = 2.0f;
     float RockMaterialDepth = 7.0f;
 
+    /** Biome-authored subsurface and rock materials used when biomes are enabled. */
+    int32 BiomeSubsurfaceMaterialId = 2;
+    int32 BiomeRockMaterialId = 3;
+    int32 BiomeSnowMaterialId = 4;
+    float BiomeSnowMinimumHeight = 34.0f;
+
     FCubusBiomeFieldSettings BiomeSettings;
     FCubusLandmarkFieldSettings LandmarkSettings;
 };
@@ -206,3 +212,4 @@ private:
         float Value
     );
 };
+
