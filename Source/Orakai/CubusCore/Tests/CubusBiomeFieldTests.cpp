@@ -25,42 +25,22 @@ bool FCubusBiomeClimateFieldTest::RunTest(const FString& Parameters)
     Settings.RockySurfaceMaterialId = 23;
     Settings.WetlandSurfaceMaterialId = 31;
 
-    const FCubusBiomeSample First = FCubusBiomeField::Sample(
-        120.0f, -75.0f, 16.0f, 0.25f, Settings
-    );
-    const FCubusBiomeSample Repeated = FCubusBiomeField::Sample(
-        120.0f, -75.0f, 16.0f, 0.25f, Settings
-    );
-    const FCubusBiomeSample Adjacent = FCubusBiomeField::Sample(
-        121.0f, -75.0f, 16.0f, 0.25f, Settings
-    );
+    const FCubusBiomeSample First = FCubusBiomeField::Sample(120.0f, -75.0f, 16.0f, 0.25f, Settings);
+    const FCubusBiomeSample Repeated = FCubusBiomeField::Sample(120.0f, -75.0f, 16.0f, 0.25f, Settings);
+    const FCubusBiomeSample Adjacent = FCubusBiomeField::Sample(121.0f, -75.0f, 16.0f, 0.25f, Settings);
 
     TestEqual(TEXT("Biome sampling is deterministic"), First.SurfaceMaterialId, Repeated.SurfaceMaterialId);
     TestEqual(TEXT("Biome moisture is deterministic"), First.Moisture, Repeated.Moisture);
-    TestTrue(
-        TEXT("Biome weights are normalized"),
-        FMath::IsNearlyEqual(
-            First.PlainsWeight + First.ForestWeight + First.RockyWeight + First.WetlandWeight,
-            1.0f,
-            0.001f
-        )
-    );
-    TestTrue(
-        TEXT("Climate varies continuously between adjacent columns"),
-        FMath::Abs(First.Moisture - Adjacent.Moisture) < 0.08f
-    );
-    TestTrue(
-        TEXT("Unbound biome settings do not invent a river network"),
-        FMath::IsNearlyEqual(First.RiverDistance, 1.0f)
-    );
+    TestTrue(TEXT("Biome weights are normalized"),
+        FMath::IsNearlyEqual(First.PlainsWeight + First.ForestWeight + First.RockyWeight + First.WetlandWeight, 1.0f, 0.001f));
+    TestTrue(TEXT("Climate varies continuously between adjacent columns"), FMath::Abs(First.Moisture - Adjacent.Moisture) < 0.08f);
+    TestTrue(TEXT("Unbound biome settings do not invent a river network"), FMath::IsNearlyEqual(First.RiverDistance, 1.0f));
+    TestTrue(TEXT("Biome sample exposes normalized soil"), First.SoilDepth >= 0.0f && First.SoilDepth <= 1.0f);
+    TestTrue(TEXT("Biome sample exposes normalized fertility"), First.Fertility >= 0.0f && First.Fertility <= 1.0f);
+    TestTrue(TEXT("Biome sample exposes normalized exposure"), First.Exposure >= 0.0f && First.Exposure <= 1.0f);
 
     const FCubusBiomeSample Cliff = FCubusBiomeField::Sample(
-        120.0f,
-        -75.0f,
-        16.0f,
-        Settings.RockySlopeThreshold * 2.0f,
-        Settings
-    );
+        120.0f, -75.0f, 16.0f, Settings.RockySlopeThreshold * 2.0f, Settings);
     TestEqual(TEXT("Steep terrain resolves to the rocky archetype"), Cliff.DominantBiome, ECubusBiomeKind::Rocky);
 
     FCubusBiomeFieldSettings CustomSettings = Settings;
@@ -80,15 +60,90 @@ bool FCubusBiomeClimateFieldTest::RunTest(const FString& Parameters)
     DryForest.Priority = 100.0f;
     CustomSettings.Definitions.Add(DryForest);
 
-    const FCubusBiomeSample Custom = FCubusBiomeField::Sample(
-        120.0f, -75.0f, 16.0f, 0.25f, CustomSettings
-    );
+    const FCubusBiomeSample Custom = FCubusBiomeField::Sample(120.0f, -75.0f, 16.0f, 0.25f, CustomSettings);
 
     TestEqual(TEXT("Authored biome definition wins by its own envelope"), Custom.BiomeDefinitionIndex, 0);
     TestEqual(TEXT("Authored biome identity is preserved"), Custom.BiomeName, FName(TEXT("DryForest")));
     TestEqual(TEXT("Authored biome material is preserved"), Custom.SurfaceMaterialId, 46);
     TestEqual(TEXT("Authored biome keeps its ecology archetype"), Custom.DominantBiome, ECubusBiomeKind::Forest);
     TestTrue(TEXT("Authored biome exposes a normalized suitability"), Custom.BiomeStrength > 0.0f && Custom.BiomeStrength <= 1.0f);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusBiomeEcologicalNicheTest,
+    "Orakai.Cubus.Generation.BiomeEcologicalNiches",
+    EAutomationTestFlags::EditorContext |
+    EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusBiomeEcologicalNicheTest::RunTest(const FString& Parameters)
+{
+    (void)Parameters;
+
+    FCubusBiomeFieldSettings Settings;
+    Settings.bEnabled = true;
+    Settings.BiomeOffsetX = 771;
+    Settings.BiomeOffsetY = -143;
+
+    FCubusBiomeDefinition ShelteredForest;
+    ShelteredForest.Name = TEXT("ShelteredForest");
+    ShelteredForest.Archetype = ECubusBiomeKind::Forest;
+    ShelteredForest.SurfaceMaterialId = 51;
+    ShelteredForest.TargetMoisture = 0.5f;
+    ShelteredForest.MoistureTolerance = 1.0f;
+    ShelteredForest.TargetTemperature = 0.5f;
+    ShelteredForest.TemperatureTolerance = 1.0f;
+    ShelteredForest.MinimumWorldZ = -1000.0f;
+    ShelteredForest.MaximumWorldZ = 1000.0f;
+    ShelteredForest.MaximumSlope = 4.0f;
+    ShelteredForest.MinimumSoilDepth = 0.35f;
+    ShelteredForest.MaximumSoilDepth = 1.0f;
+    ShelteredForest.MinimumRockExposure = 0.0f;
+    ShelteredForest.MaximumRockExposure = 0.25f;
+    ShelteredForest.MinimumExposure = 0.0f;
+    ShelteredForest.MaximumExposure = 0.45f;
+    ShelteredForest.MinimumFertility = 0.25f;
+    ShelteredForest.Priority = 20.0f;
+    Settings.Definitions.Add(ShelteredForest);
+
+    FCubusBiomeDefinition BareRidge = ShelteredForest;
+    BareRidge.Name = TEXT("BareRidge");
+    BareRidge.Archetype = ECubusBiomeKind::Rocky;
+    BareRidge.SurfaceMaterialId = 52;
+    BareRidge.MinimumSoilDepth = 0.0f;
+    BareRidge.MaximumSoilDepth = 0.28f;
+    BareRidge.MinimumRockExposure = 0.45f;
+    BareRidge.MaximumRockExposure = 1.0f;
+    BareRidge.MinimumExposure = 0.45f;
+    BareRidge.MaximumExposure = 1.0f;
+    BareRidge.MinimumFertility = 0.0f;
+    BareRidge.MaximumFertility = 0.5f;
+    Settings.Definitions.Add(BareRidge);
+
+    FCubusBiomeTerrainContext ShelteredContext;
+    ShelteredContext.Drainage = 0.55f;
+    ShelteredContext.RockExposure = 0.05f;
+    ShelteredContext.FoothillWeight = 0.35f;
+    ShelteredContext.Gradient = FVector2D(-0.1f, -0.1f);
+
+    FCubusBiomeTerrainContext RidgeContext;
+    RidgeContext.Drainage = 0.0f;
+    RidgeContext.RockExposure = 0.95f;
+    RidgeContext.MountainCore = 1.0f;
+    RidgeContext.Ridge = 1.0f;
+    RidgeContext.Gradient = FVector2D(1.0f, 0.8f);
+
+    const FCubusBiomeSample Sheltered = FCubusBiomeField::Sample(64.0f, 64.0f, 20.0f, 0.10f, Settings, ShelteredContext);
+    const FCubusBiomeSample Ridge = FCubusBiomeField::Sample(64.0f, 64.0f, 20.0f, 1.2f, Settings, RidgeContext);
+
+    TestTrue(TEXT("Sheltered terrain retains more soil than exposed ridge terrain"), Sheltered.SoilDepth > Ridge.SoilDepth);
+    TestTrue(TEXT("Exposed ridge reports greater ecological exposure"), Ridge.Exposure > Sheltered.Exposure);
+    TestTrue(TEXT("Explicit rock context reaches biome sample"), Ridge.RockExposure > Sheltered.RockExposure);
+    TestEqual(TEXT("Sheltered niche selects authored forest"), Sheltered.BiomeName, FName(TEXT("ShelteredForest")));
+    TestEqual(TEXT("Exposed niche selects authored ridge biome"), Ridge.BiomeName, FName(TEXT("BareRidge")));
+    TestEqual(TEXT("Niche-specific surface material follows authored biome"), Ridge.SurfaceMaterialId, 52);
 
     return true;
 }
@@ -141,12 +196,11 @@ bool FCubusDensityBiomeContextTest::RunTest(const FString& Parameters)
     const float SurfaceHeight = DensityField.SampleSurfaceVoxelHeight(WorldX, WorldY);
 
     TestEqual(TEXT("Density biome sampling is deterministic"), First.BiomeName, Repeated.BiomeName);
-    TestTrue(
-        TEXT("Density biome sample owns the density surface height"),
-        FMath::IsNearlyEqual(First.SurfaceWorldZ, SurfaceHeight, 0.001f)
-    );
+    TestTrue(TEXT("Density biome sample owns the density surface height"), FMath::IsNearlyEqual(First.SurfaceWorldZ, SurfaceHeight, 0.001f));
     TestTrue(TEXT("Density biome sample exposes a finite slope"), FMath::IsFinite(First.Slope) && First.Slope >= 0.0f);
     TestEqual(TEXT("Density authored biome is selected"), First.BiomeName, FName(TEXT("DensityWorldBiome")));
+    TestTrue(TEXT("Density biome exposes ecological soil"), First.SoilDepth >= 0.0f && First.SoilDepth <= 1.0f);
+    TestTrue(TEXT("Density biome exposes ecological drainage"), First.Drainage >= 0.0f && First.Drainage <= 1.0f);
 
     return true;
 }
