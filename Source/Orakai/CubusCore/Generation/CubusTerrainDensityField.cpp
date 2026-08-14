@@ -79,6 +79,22 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 	TerrainFormSettings.MountainThreshold = Settings.MountainThreshold;
 	TerrainFormSettings.MountainBlend = Settings.MountainBlend;
 
+	HydrologySettings.bEnabled = Settings.bGenerateRivers && Settings.bUseHeightTerrain;
+	HydrologySettings.TerrainFormSettings = TerrainFormSettings;
+	HydrologySettings.TerrainOffsetX = Settings.TerrainOffsetX;
+	HydrologySettings.TerrainOffsetY = Settings.TerrainOffsetY;
+	HydrologySettings.RiverSeed = Settings.RiverSeed;
+	HydrologySettings.SeaLevel = Settings.BaseHeight;
+	HydrologySettings.ValleyDepth = Settings.RiverValleyDepth;
+	HydrologySettings.ChannelDepth = Settings.RiverChannelDepth;
+	HydrologySettings.ChannelHalfWidth = FMath::Max(3.0f, Settings.RiverChannelWidth * 96.0f);
+	HydrologySettings.ValleyHalfWidth = FMath::Max(
+		HydrologySettings.ChannelHalfWidth + 8.0f,
+		Settings.RiverValleyWidth * 160.0f
+	);
+	Settings.BiomeSettings.HydrologySettings = HydrologySettings;
+	Settings.BiomeSettings.bGenerateRivers = HydrologySettings.bEnabled;
+
 	SurfaceCache.Reserve(1600);
 	ColumnCache.Reserve(1600);
 }
@@ -299,24 +315,59 @@ float FCubusTerrainDensityField::SampleValleyMask(const float WorldX, const floa
 
 float FCubusTerrainDensityField::SampleRiverDistance(const float WorldX, const float WorldY) const
 {
-	FCubusBiomeFieldSettings RiverSettings = Settings.BiomeSettings;
-	RiverSettings.bGenerateRivers = Settings.bGenerateRivers;
-	RiverSettings.RiverFrequency = Settings.RiverFrequency;
-	RiverSettings.RiverWarpAmplitude = Settings.RiverWarpAmplitude;
-	RiverSettings.RiverWarpFrequency = Settings.RiverWarpFrequency;
-	RiverSettings.RiverOffsetX = Settings.RiverOffsetX;
-	RiverSettings.RiverOffsetY = Settings.RiverOffsetY;
-	return FCubusBiomeField::SampleRiverDistance(WorldX, WorldY, RiverSettings);
+	const FCubusHydrologySample Hydrology = FCubusHydrologyField::Sample(WorldX, WorldY, HydrologySettings);
+	return FCubusHydrologyField::NormalizeRiverDistance(Hydrology, HydrologySettings);
 }
 
 float FCubusTerrainDensityField::ApplyRiverLowering(const float SurfaceHeight, const float WorldX, const float WorldY) const
 {
-	if (!Settings.bGenerateRivers) return SurfaceHeight;
-	const float RiverDistance = SampleRiverDistance(WorldX, WorldY);
-	if (RiverDistance >= Settings.RiverValleyWidth) return SurfaceHeight;
-	const float ValleyInfluence = 1.0f - SmoothStep(Settings.RiverChannelWidth, Settings.RiverValleyWidth, RiverDistance);
-	const bool bInsideChannel = RiverDistance <= Settings.RiverChannelWidth;
-	return SurfaceHeight - (Settings.RiverValleyDepth * ValleyInfluence + (bInsideChannel ? Settings.RiverChannelDepth : 0.0f));
+	if (!HydrologySettings.bEnabled)
+	{
+		return SurfaceHeight;
+	}
+
+	const FCubusHydrologySample Hydrology = FCubusHydrologyField::Sample(WorldX, WorldY, HydrologySettings);
+	if (!Hydrology.IsChannel())
+	{
+		return SurfaceHeight;
+	}
+
+	const float Strength = 0.20f + Hydrology.ChannelStrength * 0.80f;
+	const float ChannelHalfWidth = FMath::Lerp(
+		HydrologySettings.ChannelHalfWidth * 0.75f,
+		HydrologySettings.ChannelHalfWidth * 1.35f,
+		Hydrology.ChannelStrength
+	);
+	const float ValleyHalfWidth = FMath::Lerp(
+		ChannelHalfWidth * 2.5f,
+		HydrologySettings.ValleyHalfWidth,
+		Hydrology.ChannelStrength
+	);
+
+	if (Hydrology.DistanceToChannel >= ValleyHalfWidth)
+	{
+		return SurfaceHeight;
+	}
+
+	const float ValleyInfluence = 1.0f - SmoothStep(
+		ChannelHalfWidth,
+		ValleyHalfWidth,
+		Hydrology.DistanceToChannel
+	);
+	const float ChannelInfluence = 1.0f - SmoothStep(
+		0.0f,
+		ChannelHalfWidth * 1.8f,
+		Hydrology.DistanceToChannel
+	);
+
+	const float ValleyDepth = HydrologySettings.ValleyDepth * Strength;
+	const float ChannelDepth = HydrologySettings.ChannelDepth * Strength;
+	const float ValleyFloorHeight = Hydrology.HydraulicHeight - ValleyDepth;
+	const float ValleyTarget = FMath::Lerp(SurfaceHeight, ValleyFloorHeight, ValleyInfluence);
+	const float ChannelFloorHeight = Hydrology.HydraulicHeight - ValleyDepth - ChannelDepth;
+	const float ChannelTarget = FMath::Lerp(ValleyTarget, ChannelFloorHeight, ChannelInfluence);
+
+	return FMath::Min(SurfaceHeight, ChannelTarget);
 }
 
 float FCubusTerrainDensityField::SampleGeologicalDensity(const FVector& GlobalSampleCoordinate, const FColumnData& Column,

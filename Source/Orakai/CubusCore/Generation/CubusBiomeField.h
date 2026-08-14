@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "CubusCore/Data/CubusBiomeTypes.h"
+#include "CubusCore/Generation/CubusHydrologyField.h"
 
 class UCubusGeologyProfile;
 
@@ -23,12 +24,17 @@ struct ORAKAI_API FCubusBiomeFieldSettings
 	int32 BiomeOffsetX = 0;
 	int32 BiomeOffsetY = 0;
 
-	bool  bGenerateRivers	 = false;
-	float RiverFrequency	 = 0.0025f;
+	bool bGenerateRivers = false;
+
+	/* Legacy river-noise controls retained for asset compatibility. */
+	float RiverFrequency = 0.0025f;
 	float RiverWarpAmplitude = 48.0f;
 	float RiverWarpFrequency = 0.006f;
-	int32 RiverOffsetX		 = 0;
-	int32 RiverOffsetY		 = 0;
+	int32 RiverOffsetX = 0;
+	int32 RiverOffsetY = 0;
+
+	/** Shared terrain-derived drainage network used by rivers and wetlands. */
+	FCubusHydrologySettings HydrologySettings;
 
 	TArray<FCubusBiomeDefinition> Definitions;
 };
@@ -52,9 +58,7 @@ struct ORAKAI_API FCubusBiomeSample
  * Shared deterministic biome field for block and density terrain.
  *
  * Biomes are derived from broad, domain-warped moisture and temperature
- * fields plus actual terrain slope, elevation and drainage. The continuous
- * weights keep transitions spatially coherent even though block surfaces
- * ultimately choose a discrete material.
+ * fields plus actual terrain slope, elevation and terrain-derived hydrology.
  */
 class ORAKAI_API FCubusBiomeField
 {
@@ -63,7 +67,7 @@ public:
 
 	static FCubusBiomeSample Sample(float WorldX, float WorldY, float SurfaceWorldZ, float Slope, const FCubusBiomeFieldSettings& Settings);
 
-	/** Normalized distance-like field shared by carving and wetland rules. */
+	/** Normalized hydrological distance shared by carving and wetland rules. */
 	static float SampleRiverDistance(float WorldX, float WorldY, const FCubusBiomeFieldSettings& Settings);
 
 private:

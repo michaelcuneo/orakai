@@ -46,10 +46,6 @@ struct ORAKAI_API FCubusTerrainDensitySettings
 
     /**
      * Volumetric geological deformation around exposed steep terrain.
-     *
-     * This is deliberately a low-frequency landform pass, not surface noise.
-     * It bends the scalar field itself so cliffs can form shelves, undercuts
-     * and genuine overhangs while leaving plains and valley floors stable.
      */
     bool bGenerateVolumetricGeology = true;
     float GeologySurfaceBand = 24.0f;
@@ -76,6 +72,7 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float RiverWarpFrequency = 0.006f;
     int32 RiverOffsetX = 0;
     int32 RiverOffsetY = 0;
+    int32 RiverSeed = 0;
 
     bool bGenerateCaves = false;
     int32 CaveMinimumWorldZ = -256;
@@ -112,10 +109,9 @@ struct ORAKAI_API FCubusTerrainDensitySettings
 /**
  * Continuous scalar field for Cubus terrain.
  *
- * The field evaluates the same seeded two-dimensional terrain domain as the
- * block generator, then promotes steep landforms into a true three-dimensional
- * geological shell before river/cave subtraction. Its zero crossing is not
- * quantized to block occupancy and is no longer constrained to Z = f(X, Y).
+ * The field evaluates the same seeded terrain domain as the block generator,
+ * applies a real terrain-derived hydrology network, promotes steep landforms
+ * into a three-dimensional geological shell, then subtracts cave volume.
  */
 class ORAKAI_API FCubusTerrainDensityField final : public ICubusDensityField
 {
@@ -163,9 +159,8 @@ private:
 
     FCubusTerrainDensitySettings Settings;
     FCubusTerrainFormSettings TerrainFormSettings;
+    FCubusHydrologySettings HydrologySettings;
 
-    // Common denominator for the supported 1, 1/2, 1/4 and 1/10 sample steps.
-    // Keeping this at 20 also avoids overflowing cache keys in large worlds.
     static constexpr float CoordinateCacheScale = 20.0f;
 
     mutable TMap<FIntPoint, FSurfaceData> SurfaceCache;

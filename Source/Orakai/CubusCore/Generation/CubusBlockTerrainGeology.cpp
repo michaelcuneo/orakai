@@ -127,6 +127,40 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
         return;
     }
 
+    FCubusHydrologySettings HydrologySettings;
+    HydrologySettings.bEnabled = GeologyProfile->bGenerateRivers;
+    HydrologySettings.TerrainFormSettings.BaseHeight = static_cast<float>(BaseHeight);
+    HydrologySettings.TerrainFormSettings.ContinentAmplitude = ContinentAmplitude;
+    HydrologySettings.TerrainFormSettings.ContinentFrequency = ContinentFrequency;
+    HydrologySettings.TerrainFormSettings.HillAmplitude = HillAmplitude;
+    HydrologySettings.TerrainFormSettings.HillFrequency = HillFrequency;
+    HydrologySettings.TerrainFormSettings.DetailAmplitude = DetailAmplitude;
+    HydrologySettings.TerrainFormSettings.DetailFrequency = DetailFrequency;
+    HydrologySettings.TerrainFormSettings.RidgeAmplitude = RidgeAmplitude;
+    HydrologySettings.TerrainFormSettings.RidgeFrequency = RidgeFrequency;
+    HydrologySettings.TerrainFormSettings.ValleyDepth = ValleyDepth;
+    HydrologySettings.TerrainFormSettings.ValleyFrequency = ValleyFrequency;
+    HydrologySettings.TerrainFormSettings.ValleyWidth = ValleyWidth;
+    HydrologySettings.TerrainFormSettings.ValleyFalloff = ValleyFalloff;
+    HydrologySettings.TerrainFormSettings.ValleyWarpAmplitude = ValleyWarpAmplitude;
+    HydrologySettings.TerrainFormSettings.ValleyWarpFrequency = ValleyWarpFrequency;
+    HydrologySettings.TerrainFormSettings.RegionFrequency = RegionFrequency;
+    HydrologySettings.TerrainFormSettings.PlainsThreshold = PlainsThreshold;
+    HydrologySettings.TerrainFormSettings.PlainsBlend = PlainsBlend;
+    HydrologySettings.TerrainFormSettings.MountainThreshold = MountainThreshold;
+    HydrologySettings.TerrainFormSettings.MountainBlend = MountainBlend;
+    HydrologySettings.TerrainOffsetX = TerrainOffsetX;
+    HydrologySettings.TerrainOffsetY = TerrainOffsetY;
+    HydrologySettings.RiverSeed = Seeds.Rivers;
+    HydrologySettings.SeaLevel = static_cast<float>(WaterLevel);
+    HydrologySettings.ValleyDepth = FMath::Max(0.0f, GeologyProfile->RiverValleyDepth);
+    HydrologySettings.ChannelDepth = FMath::Max(0.0f, static_cast<float>(GeologyProfile->RiverChannelDepth));
+    HydrologySettings.ChannelHalfWidth = FMath::Max(3.0f, GeologyProfile->RiverChannelWidth * 96.0f);
+    HydrologySettings.ValleyHalfWidth = FMath::Max(
+        HydrologySettings.ChannelHalfWidth + 8.0f,
+        GeologyProfile->RiverValleyWidth * 160.0f
+    );
+
     const FCubusLandmarkFieldSettings LandmarkSettings =
         FCubusLandmarkField::MakeSettings(
             GeologyProfile,
@@ -211,7 +245,7 @@ void FCubusBlockTerrainGenerator::GenerateHeightTerrain(
         }
     }
 
-    FCubusBlockTerrainRiverGenerator::Apply(Chunk, GeologyProfile);
+    FCubusBlockTerrainRiverGenerator::Apply(Chunk, GeologyProfile, HydrologySettings);
 
     for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
     {

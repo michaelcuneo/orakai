@@ -4,6 +4,7 @@
 
 class FCubusBlockChunkData;
 class UCubusGeologyProfile;
+struct FCubusHydrologySettings;
 
 /**
  * Applies deterministic surface biome materials after river shaping.
@@ -13,7 +14,8 @@ class ORAKAI_API FCubusBlockTerrainBiomeGenerator
 public:
     static void Apply(
         FCubusBlockChunkData& Chunk,
-        const UCubusGeologyProfile* GeologyProfile
+        const UCubusGeologyProfile* GeologyProfile,
+        const FCubusHydrologySettings* HydrologySettings = nullptr
     );
 
 private:
@@ -22,5 +24,4 @@ private:
         int32 LocalX,
         int32 LocalY
     );
-
 };

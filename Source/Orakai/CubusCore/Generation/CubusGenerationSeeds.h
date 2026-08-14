@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 10: deterministic terrain clutter is now appended from the
-    // terrain material library's surface-layer settings.
-    static constexpr uint32 CurrentGenerationVersion = 10;
+    // Bumped to 11: rivers now use terrain-derived priority-flood/D8
+    // hydrology instead of warped noise contours.
+    static constexpr uint32 CurrentGenerationVersion = 11;
 
     int64 World = 1;
     int32 Terrain = 0;

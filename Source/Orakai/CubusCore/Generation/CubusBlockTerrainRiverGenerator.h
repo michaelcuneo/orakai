@@ -1,19 +1,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CubusCore/Generation/CubusHydrologyField.h"
 
 class FCubusBlockChunkData;
 class UCubusGeologyProfile;
 
 /**
- * Applies deterministic world-space river channels to generated terrain.
+ * Applies the shared terrain-derived hydrology network to block terrain.
  */
 class ORAKAI_API FCubusBlockTerrainRiverGenerator
 {
 public:
     static void Apply(
         FCubusBlockChunkData& Chunk,
-        const UCubusGeologyProfile* GeologyProfile
+        const UCubusGeologyProfile* GeologyProfile,
+        const FCubusHydrologySettings& HydrologySettings
     );
 
 private:
