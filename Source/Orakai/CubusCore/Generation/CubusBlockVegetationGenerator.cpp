@@ -343,7 +343,7 @@ void FCubusBlockVegetationGenerator::Generate(
                     continue;
                 }
 
-                auto FindSurfaceLocalZ = [&Chunk](const int32 X, const int32 Y)
+                auto FindSurfaceLocalZ = [&Chunk](const int32 X, const int32 Y) -> int32
                 {
                     for (int32 Z = Cubus::ChunkSize - 1; Z >= 0; --Z)
                     {
