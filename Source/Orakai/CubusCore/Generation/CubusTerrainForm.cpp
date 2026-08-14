@@ -31,18 +31,15 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     );
     Settings.MountainBlend = FMath::Clamp(Settings.MountainBlend, 0.001f, 1.0f);
 
-    // RegionFrequency used to be sampled directly, making a complete
-    // "mountain region" only a few hundred voxels wide. Treat it as the
-    // author-facing regional-detail frequency and derive a much slower
-    // tectonic field from it. At the defaults (one metre per voxel), the
-    // resulting plate-boundary ranges run for several kilometres.
+    // RegionFrequency is an author-facing regional-detail frequency. The
+    // slower tectonic field makes complete mountain systems span kilometres.
     const float TectonicFrequency = FMath::Max(
         0.000001f,
         Settings.RegionFrequency * 0.10f
     );
 
-    // One kilometre-scale warp is shared by every landform. This keeps local
-    // relief aligned with the range instead of stacking unrelated noise.
+    // One kilometre-scale warp is shared by every landform. It is intentionally
+    // low-frequency: it bends ranges and valleys without creating local spikes.
     const float FormWarpFrequency = FMath::Max(
         0.000001f,
         TectonicFrequency * 0.65f
@@ -71,8 +68,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float TerrainY = WorldY + WarpY;
 
     // Mountain ranges follow warped zero-crossings in a tectonic field. A
-    // zero contour is a connected spine, unlike a thresholded noise blob,
-    // so the range persists across many chunks instead of becoming a mound.
+    // zero contour is a connected spine, unlike a thresholded noise blob.
     const float TectonicSignal = SampleFbm(
         TerrainX + 10427.0f,
         TerrainY - 8633.0f,
@@ -192,12 +188,9 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         0.42f
     );
 
-    // Natural ground is not one uniformly scaled noise field. A slow patch
-    // field changes the character of the surface over hundreds of metres,
-    // while the warped samples below provide broad soil creep, broken ground
-    // and metre-scale irregularity inside those patches. All of them remain
-    // subordinate to DetailAmplitude so existing generation profiles retain
-    // one predictable master control.
+    // Natural ground uses several scales, but they are composed into bounded
+    // broad/fine relief below. This prevents unrelated positive detail layers
+    // from lining up into a narrow needle while retaining visible roughness.
     const float SurfacePatch = FMath::Clamp(
         0.5f + 0.5f * SampleFbm(
             TerrainX + 24793.0f,
@@ -246,18 +239,47 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
             Settings.DetailFrequency * 0.72f,
             3
         ) * 2.0f - 1.0f;
-    const float LocalRidge = SampleRidgedFbm(
+
+    // A single high-frequency ridged field used to be added at full ridge
+    // amplitude, and another ridged field modulated the range uplift. Blend a
+    // lower-frequency shoulder into both instead: summits remain recognisable
+    // ridges, but their support widens before they reach full height.
+    const float LocalRidgeFine = SampleRidgedFbm(
         TerrainX + 911.0f,
         TerrainY + 1511.0f,
         Settings.RidgeFrequency,
         4
     );
-    const float MajorRidge = SampleRidgedFbm(
+    const float LocalRidgeShoulder = SampleRidgedFbm(
+        TerrainX + 911.0f,
+        TerrainY + 1511.0f,
+        Settings.RidgeFrequency * 0.52f,
+        3
+    );
+    const float LocalRidge = FMath::Clamp(
+        LocalRidgeShoulder * 0.58f + LocalRidgeFine * 0.42f,
+        0.0f,
+        1.0f
+    );
+
+    const float MajorRidgeFine = SampleRidgedFbm(
         TerrainX * 0.91f - TerrainY * 0.41f + 15401.0f,
         TerrainX * 0.41f + TerrainY * 0.91f - 12011.0f,
         TectonicFrequency * 4.5f,
         3
     );
+    const float MajorRidgeShoulder = SampleRidgedFbm(
+        TerrainX * 0.91f - TerrainY * 0.41f + 15401.0f,
+        TerrainX * 0.41f + TerrainY * 0.91f - 12011.0f,
+        TectonicFrequency * 2.45f,
+        3
+    );
+    const float MajorRidge = FMath::Clamp(
+        MajorRidgeShoulder * 0.62f + MajorRidgeFine * 0.38f,
+        0.0f,
+        1.0f
+    );
+
     const float PeakRhythm = FMath::Clamp(
         0.5f + 0.5f * SampleFbm(
             TerrainX * 0.78f + TerrainY * 0.63f - 6191.0f,
@@ -306,9 +328,6 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         Tributary * Catchment * 0.78f
     );
 
-    // Two differently oriented rill families are selected by the patch
-    // field. They are shallow and intermittent rather than a repeating set
-    // of parallel grooves, and are later masked away from flat floodplains.
     const float RillA = SampleChannelMask(
         TerrainX * 0.94f - TerrainY * 0.34f + 11939.0f,
         TerrainX * 0.34f + TerrainY * 0.94f - 4153.0f,
@@ -346,9 +365,6 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         0.78f * Result.RollingWeight +
         1.0f * Result.MountainWeight;
 
-    // Erosion removes chatter from floodplains and drainage floors. Plains
-    // still keep broad soil undulation and restrained local irregularity so
-    // they do not collapse into rigid, perfectly predictable sheets.
     const float ValleyFloor = Result.Drainage * Result.Drainage;
     const float Erosion = FMath::Clamp(1.0f - ValleyFloor * 0.82f, 0.12f, 1.0f);
     const float DetailStrength =
@@ -389,17 +405,38 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         1.0f
     );
 
-    // Broad uplift creates the physical mass of the range. MajorRidge and
-    // PeakRhythm vary summits along its connected spine; LocalRidge provides
-    // the smaller exposed crests. Foothills deliberately extend much farther
-    // than the core so a range is approached gradually over many chunks.
+    // Keep slow soil movement separate from the higher-frequency layers. The
+    // latter share one bounded budget so detail cannot accidentally add four
+    // positive amplitudes at the same column.
+    const float BroadSurfaceRelief =
+        SoilUndulation * Settings.DetailAmplitude * 0.70f * UndulationStrength;
+    const float RawFineSurfaceRelief =
+        Detail * Settings.DetailAmplitude * 0.46f * DetailStrength +
+        MicroRelief * Settings.DetailAmplitude * 0.54f * MicroStrength +
+        BrokenGround * Settings.DetailAmplitude * 0.24f * BrokenGroundStrength -
+        LocalRills * Settings.DetailAmplitude * 0.62f * RillStrength;
+    const float FineSurfaceReliefLimit =
+        Settings.DetailAmplitude *
+        FMath::Lerp(0.48f, 0.82f, SurfacePatch) *
+        FMath::Lerp(0.82f, 1.0f, Erosion);
+    const float FineSurfaceRelief = FMath::Clamp(
+        RawFineSurfaceRelief,
+        -FineSurfaceReliefLimit,
+        FineSurfaceReliefLimit
+    );
+
+    // Range height comes mostly from the broad core/foothill masks. Smoothed
+    // major ridges vary the summit without multiplying a razor-thin crest to
+    // several times RidgeAmplitude. Local crests are deliberately subordinate.
     const float RangeUplift =
         Settings.RidgeAmplitude *
         (
-            FoothillBelt * 0.82f +
-            RangeCore * (1.15f + MajorRidge * 1.65f)
+            FoothillBelt * 0.78f +
+            RangeCore * (1.08f + MajorRidge * 0.92f)
         ) *
-        (0.72f + PeakRhythm * 0.55f);
+        (0.82f + PeakRhythm * 0.38f);
+    const float LocalCrestRelief =
+        LocalRidge * Settings.RidgeAmplitude * RidgeStrength * Erosion * 0.52f;
     const float Continent =
         MacroRelief * 0.68f +
         RegionalRelief * 0.32f;
@@ -408,13 +445,10 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         Settings.BaseHeight +
         Continent * Settings.ContinentAmplitude * ContinentStrength +
         Hills * Settings.HillAmplitude * HillStrength * Erosion +
-        SoilUndulation * Settings.DetailAmplitude * 0.78f * UndulationStrength +
-        Detail * Settings.DetailAmplitude * 0.54f * DetailStrength +
-        MicroRelief * Settings.DetailAmplitude * 0.68f * MicroStrength +
-        BrokenGround * Settings.DetailAmplitude * 0.34f * BrokenGroundStrength -
-        LocalRills * Settings.DetailAmplitude * 0.72f * RillStrength +
+        BroadSurfaceRelief +
+        FineSurfaceRelief +
         RangeUplift * Erosion +
-        LocalRidge * Settings.RidgeAmplitude * RidgeStrength -
+        LocalCrestRelief -
         ValleyFloor * Settings.ValleyDepth * ValleyStrength;
 
     return Result;
@@ -484,8 +518,12 @@ float FCubusTerrainForm::SampleRidgedFbm(
                 CurrentFrequency
             )
         );
-        Ridge *= Ridge;
-        Ridge *= FMath::Lerp(0.35f, 1.0f, PreviousRidge);
+
+        // Squaring a ridge response makes its last few percent collapse into
+        // a needle. A gentler exponent keeps a defined crest but gives it a
+        // physically useful shoulder at metre-scale density resolutions.
+        Ridge = FMath::Pow(FMath::Clamp(Ridge, 0.0f, 1.0f), 1.35f);
+        Ridge *= FMath::Lerp(0.45f, 1.0f, PreviousRidge);
         Sum += Ridge * Weight;
         TotalWeight += Weight;
         PreviousRidge = Ridge;
