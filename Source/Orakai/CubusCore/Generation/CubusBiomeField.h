@@ -26,18 +26,25 @@ struct ORAKAI_API FCubusBiomeFieldSettings
 
 	bool bGenerateRivers = false;
 
-	/* Legacy river-noise controls retained for asset compatibility. */
 	float RiverFrequency = 0.0025f;
 	float RiverWarpAmplitude = 48.0f;
 	float RiverWarpFrequency = 0.006f;
 	int32 RiverOffsetX = 0;
 	int32 RiverOffsetY = 0;
 
-	/** Authoritative terrain-derived drainage context, bound by density generation. */
 	FCubusHydrologySettings HydrologySettings;
-
-	/** Authored biome envelopes. These are first-class biome selectors. */
 	TArray<FCubusBiomeDefinition> Definitions;
+};
+
+/** Terrain/environment context supplied by the authoritative density column. */
+struct ORAKAI_API FCubusBiomeTerrainContext
+{
+	float Drainage = 0.0f;
+	float RockExposure = 0.0f;
+	float MountainCore = 0.0f;
+	float FoothillWeight = 0.0f;
+	float Ridge = 0.0f;
+	FVector2D Gradient = FVector2D::ZeroVector;
 };
 
 /** Continuous environment/biome classification at one density-world column. */
@@ -53,41 +60,43 @@ struct ORAKAI_API FCubusBiomeSample
 	float			Moisture			 = 0.5f;
 	float			Temperature			 = 0.5f;
 	float			RiverDistance		 = 1.0f;
+	float			RiverInfluence		 = 0.0f;
+	float			Drainage			 = 0.0f;
+	float			SoilDepth			 = 0.5f;
+	float			RockExposure		 = 0.0f;
+	float			Exposure			 = 0.0f;
+	float			Fertility			 = 0.5f;
 	float			SurfaceWorldZ		 = 0.0f;
 	float			Slope				 = 0.0f;
 	int32			SurfaceMaterialId	 = 1;
 	int32			BiomeDefinitionIndex = INDEX_NONE;
 };
 
-/**
- * Deterministic biome engine for the density world.
- *
- * Climate signals are combined with the real density surface, terrain slope
- * and the same hydrology context used to carve the world. Legacy
- * Plains/Forest/Rocky/Wetland values remain broad ecology archetypes for
- * consumers such as vegetation, while authored definitions are the actual
- * selectable biomes.
- */
+/** Deterministic continuous ecology engine for the density world. */
 class ORAKAI_API FCubusBiomeField
 {
 public:
 	static FCubusBiomeFieldSettings MakeSettings(const UCubusGeologyProfile* GeologyProfile, int32 BiomeSeed, int32 RiverSeed);
 
-	/** Bind the exact hydrology context used by density terrain. */
 	static FCubusBiomeFieldSettings BindHydrology(
 		const FCubusBiomeFieldSettings& BaseSettings,
 		const FCubusHydrologySettings& HydrologySettings
 	);
 
-	static FCubusBiomeSample Sample(float WorldX, float WorldY, float SurfaceWorldZ, float Slope, const FCubusBiomeFieldSettings& Settings);
+	static FCubusBiomeSample Sample(
+		float WorldX,
+		float WorldY,
+		float SurfaceWorldZ,
+		float Slope,
+		const FCubusBiomeFieldSettings& Settings,
+		const FCubusBiomeTerrainContext& TerrainContext = FCubusBiomeTerrainContext()
+	);
 
-	/** Normalized hydrological distance shared by carving and biome rules. */
 	static float SampleRiverDistance(float WorldX, float WorldY, const FCubusBiomeFieldSettings& Settings);
 
 private:
 	static float SampleNoise(float WorldX, float WorldY, float Frequency);
-
 	static float SampleFbm(float WorldX, float WorldY, float Frequency, int32 Octaves, float Gain);
-
 	static float SmoothStep(float EdgeMinimum, float EdgeMaximum, float Value);
+	static float RangeSuitability(float Value, float Minimum, float Maximum, float Softness);
 };
