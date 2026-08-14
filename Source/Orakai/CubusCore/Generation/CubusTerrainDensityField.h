@@ -44,6 +44,24 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float MountainThreshold = 0.30f;
     float MountainBlend = 0.20f;
 
+    /**
+     * Volumetric geological deformation around exposed steep terrain.
+     *
+     * This is deliberately a low-frequency landform pass, not surface noise.
+     * It bends the scalar field itself so cliffs can form shelves, undercuts
+     * and genuine overhangs while leaving plains and valley floors stable.
+     */
+    bool bGenerateVolumetricGeology = true;
+    float GeologySurfaceBand = 24.0f;
+    float GeologyCliffSlopeStart = 0.45f;
+    float GeologyCliffSlopeFull = 1.35f;
+    float GeologyStrataFrequency = 0.055f;
+    float GeologyStrataDip = 0.012f;
+    float GeologyShelfStrength = 5.0f;
+    float GeologyUndercutStrength = 4.0f;
+    float GeologyRockWarpFrequency = 0.035f;
+    float GeologyRockWarpStrength = 1.5f;
+
     /** Same whole-chunk terrain-domain offset used by block generation. */
     int32 TerrainOffsetX = 0;
     int32 TerrainOffsetY = 0;
@@ -95,9 +113,9 @@ struct ORAKAI_API FCubusTerrainDensitySettings
  * Continuous scalar field for Cubus terrain.
  *
  * The field evaluates the same seeded two-dimensional terrain domain as the
- * block generator, applies continuous river lowering, and intersects the
- * result with a smooth three-dimensional cave field. Its zero crossing is not
- * quantized to block occupancy.
+ * block generator, then promotes steep landforms into a true three-dimensional
+ * geological shell before river/cave subtraction. Its zero crossing is not
+ * quantized to block occupancy and is no longer constrained to Z = f(X, Y).
  */
 class ORAKAI_API FCubusTerrainDensityField final : public ICubusDensityField
 {
@@ -127,11 +145,19 @@ private:
         float Mountains = 0.0f;
     };
 
+    struct FSurfaceData
+    {
+        float SurfaceVoxelHeight = 0.0f;
+        FCubusTerrainFormSample FormSample;
+    };
+
     struct FColumnData
     {
         float SurfaceVoxelHeight = 0.0f;
         float SurfaceSampleZ = 1.0f;
         float Slope = 0.0f;
+        FVector2D Gradient = FVector2D::ZeroVector;
+        FCubusTerrainFormSample FormSample;
         int32 SurfaceMaterialId = 1;
     };
 
@@ -142,13 +168,18 @@ private:
     // Keeping this at 20 also avoids overflowing cache keys in large worlds.
     static constexpr float CoordinateCacheScale = 20.0f;
 
-    mutable TMap<FIntPoint, float> HeightCache;
+    mutable TMap<FIntPoint, FSurfaceData> SurfaceCache;
     mutable TMap<FIntPoint, FColumnData> ColumnCache;
 
     static FIntPoint MakeCoordinateCacheKey(
         float WorldX,
         float WorldY
     );
+
+    const FSurfaceData& GetCachedSurfaceData(
+        float WorldX,
+        float WorldY
+    ) const;
 
     float GetCachedSurfaceVoxelHeight(
         float WorldX,
@@ -200,6 +231,12 @@ private:
         float WorldY
     ) const;
 
+    float SampleGeologicalDensity(
+        const FVector& GlobalSampleCoordinate,
+        const FColumnData& Column,
+        float BaseTerrainDensity
+    ) const;
+
     float SampleCaveDensity(
         const FVector& GlobalSampleCoordinate,
         float SurfaceVoxelHeight,
@@ -212,4 +249,3 @@ private:
         float Value
     );
 };
-
