@@ -318,7 +318,9 @@ namespace CubusHydrologyField
 
     uint32 GetTypeHash(const FRegionCacheKey& Key)
     {
-        return HashCombine(::GetTypeHash(Key.Region), ::GetTypeHash(Key.Settings));
+        uint32 Hash = ::GetTypeHash(Key.Region.X);
+        Hash = HashCombine(Hash, ::GetTypeHash(Key.Region.Y));
+        return HashCombine(Hash, ::GetTypeHash(Key.Settings));
     }
 
     FCriticalSection RegionCacheMutex;
