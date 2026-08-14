@@ -1,4 +1,4 @@
-﻿#include "CubusCore/Generation/CubusTerrainDensityField.h"
+#include "CubusCore/Generation/CubusTerrainDensityField.h"
 
 FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensitySettings& InSettings) : Settings(InSettings)
 {
@@ -83,7 +83,9 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 	HydrologySettings.TerrainFormSettings = TerrainFormSettings;
 	HydrologySettings.TerrainOffsetX = Settings.TerrainOffsetX;
 	HydrologySettings.TerrainOffsetY = Settings.TerrainOffsetY;
-	HydrologySettings.RiverSeed = Settings.RiverSeed;
+	HydrologySettings.RiverSeed = Settings.RiverSeed != 0
+		? Settings.RiverSeed
+		: Settings.BiomeSettings.HydrologySettings.RiverSeed;
 	HydrologySettings.SeaLevel = Settings.BaseHeight;
 	HydrologySettings.ValleyDepth = Settings.RiverValleyDepth;
 	HydrologySettings.ChannelDepth = Settings.RiverChannelDepth;
@@ -92,8 +94,8 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 		HydrologySettings.ChannelHalfWidth + 8.0f,
 		Settings.RiverValleyWidth * 160.0f
 	);
-	Settings.BiomeSettings.HydrologySettings = HydrologySettings;
-	Settings.BiomeSettings.bGenerateRivers = HydrologySettings.bEnabled;
+
+	Settings.BiomeSettings = FCubusBiomeField::BindHydrology(Settings.BiomeSettings, HydrologySettings);
 
 	SurfaceCache.Reserve(1600);
 	ColumnCache.Reserve(1600);
@@ -163,6 +165,16 @@ float FCubusTerrainDensityField::SampleSurfaceVoxelHeight(const float WorldX, co
 	return ApplyRiverLowering(BaseSurfaceHeight + LandmarkSample.HeightOffset, WorldX, WorldY);
 }
 
+FCubusBiomeSample FCubusTerrainDensityField::SampleSurfaceBiome(const float WorldX, const float WorldY) const
+{
+	/*
+	 * GetColumnData samples density lattice columns at +0.5 and then converts
+	 * back to terrain-column coordinates internally. Using the same path here
+	 * guarantees materials and ecology see exactly the same biome sample.
+	 */
+	return GetColumnData(WorldX + 0.5f, WorldY + 0.5f).BiomeSample;
+}
+
 FIntPoint FCubusTerrainDensityField::MakeCoordinateCacheKey(const float WorldX, const float WorldY)
 {
 	return FIntPoint(FMath::RoundToInt(WorldX * CoordinateCacheScale), FMath::RoundToInt(WorldY * CoordinateCacheScale));
@@ -226,8 +238,18 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	Column.Gradient = FVector2D(GradientX, GradientY);
 	Column.Slope = Column.Gradient.Size();
 
-	const float TerrainX = WorldSampleX - 0.5f + static_cast<float>(Settings.TerrainOffsetX);
-	const float TerrainY = WorldSampleY - 0.5f + static_cast<float>(Settings.TerrainOffsetY);
+	const float WorldX = WorldSampleX - 0.5f;
+	const float WorldY = WorldSampleY - 0.5f;
+	Column.BiomeSample = FCubusBiomeField::Sample(
+		WorldX,
+		WorldY,
+		Column.SurfaceVoxelHeight,
+		Column.Slope,
+		Settings.BiomeSettings
+	);
+
+	const float TerrainX = WorldX + static_cast<float>(Settings.TerrainOffsetX);
+	const float TerrainY = WorldY + static_cast<float>(Settings.TerrainOffsetY);
 	const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
 
 	if (LandmarkSample.IsInside())
@@ -241,7 +263,7 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	else
 	{
 		Column.SurfaceMaterialId = Settings.BiomeSettings.bEnabled
-			? FCubusBiomeField::Sample(WorldSampleX - 0.5f, WorldSampleY - 0.5f, Column.SurfaceVoxelHeight, Column.Slope, Settings.BiomeSettings).SurfaceMaterialId
+			? Column.BiomeSample.SurfaceMaterialId
 			: Settings.SurfaceMaterialId;
 		if (Column.SurfaceVoxelHeight >= Settings.SnowMinimumHeight && Column.SurfaceMaterialId == Settings.SurfaceMaterialId)
 		{

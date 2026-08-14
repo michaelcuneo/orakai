@@ -33,16 +33,19 @@ struct ORAKAI_API FCubusBiomeFieldSettings
 	int32 RiverOffsetX = 0;
 	int32 RiverOffsetY = 0;
 
-	/** Shared terrain-derived drainage network used by rivers and wetlands. */
+	/** Authoritative terrain-derived drainage context, bound by density generation. */
 	FCubusHydrologySettings HydrologySettings;
 
+	/** Authored biome envelopes. These are first-class biome selectors. */
 	TArray<FCubusBiomeDefinition> Definitions;
 };
 
-/** Continuous climate/terrain classification at one world column. */
+/** Continuous environment/biome classification at one density-world column. */
 struct ORAKAI_API FCubusBiomeSample
 {
 	ECubusBiomeKind DominantBiome		 = ECubusBiomeKind::Plains;
+	FName			BiomeName			 = TEXT("Plains");
+	float			BiomeStrength		 = 1.0f;
 	float			PlainsWeight		 = 1.0f;
 	float			ForestWeight		 = 0.0f;
 	float			RockyWeight			 = 0.0f;
@@ -50,24 +53,35 @@ struct ORAKAI_API FCubusBiomeSample
 	float			Moisture			 = 0.5f;
 	float			Temperature			 = 0.5f;
 	float			RiverDistance		 = 1.0f;
+	float			SurfaceWorldZ		 = 0.0f;
+	float			Slope				 = 0.0f;
 	int32			SurfaceMaterialId	 = 1;
 	int32			BiomeDefinitionIndex = INDEX_NONE;
 };
 
 /**
- * Shared deterministic biome field for block and density terrain.
+ * Deterministic biome engine for the density world.
  *
- * Biomes are derived from broad, domain-warped moisture and temperature
- * fields plus actual terrain slope, elevation and terrain-derived hydrology.
+ * Climate signals are combined with the real density surface, terrain slope
+ * and the same hydrology context used to carve the world. Legacy
+ * Plains/Forest/Rocky/Wetland values remain broad ecology archetypes for
+ * consumers such as vegetation, while authored definitions are the actual
+ * selectable biomes.
  */
 class ORAKAI_API FCubusBiomeField
 {
 public:
 	static FCubusBiomeFieldSettings MakeSettings(const UCubusGeologyProfile* GeologyProfile, int32 BiomeSeed, int32 RiverSeed);
 
+	/** Bind the exact hydrology context used by density terrain. */
+	static FCubusBiomeFieldSettings BindHydrology(
+		const FCubusBiomeFieldSettings& BaseSettings,
+		const FCubusHydrologySettings& HydrologySettings
+	);
+
 	static FCubusBiomeSample Sample(float WorldX, float WorldY, float SurfaceWorldZ, float Slope, const FCubusBiomeFieldSettings& Settings);
 
-	/** Normalized hydrological distance shared by carving and wetland rules. */
+	/** Normalized hydrological distance shared by carving and biome rules. */
 	static float SampleRiverDistance(float WorldX, float WorldY, const FCubusBiomeFieldSettings& Settings);
 
 private:

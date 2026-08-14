@@ -34,7 +34,14 @@ FCubusBiomeFieldSettings FCubusBiomeField::MakeSettings(const UCubusGeologyProfi
 	Settings.RiverFrequency			  = GeologyProfile->RiverFrequency;
 	Settings.RiverWarpAmplitude		  = GeologyProfile->RiverWarpAmplitude;
 	Settings.RiverWarpFrequency		  = GeologyProfile->RiverWarpFrequency;
-	Settings.HydrologySettings.bEnabled = GeologyProfile->bGenerateRivers;
+
+	/*
+	 * MakeSettings() does not know the density terrain form or its domain
+	 * offsets, so enabling hydrology here would create a second, wrong world.
+	 * FCubusTerrainDensityField binds the authoritative hydrology context once
+	 * it has the exact terrain settings.
+	 */
+	Settings.HydrologySettings.bEnabled = false;
 	Settings.HydrologySettings.ValleyDepth = FMath::Max(0.0f, GeologyProfile->RiverValleyDepth);
 	Settings.HydrologySettings.ChannelDepth = FMath::Max(0.0f, static_cast<float>(GeologyProfile->RiverChannelDepth));
 	Settings.HydrologySettings.ChannelHalfWidth = FMath::Max(2.0f, GeologyProfile->RiverChannelWidth * 64.0f);
@@ -44,6 +51,15 @@ FCubusBiomeFieldSettings FCubusBiomeField::MakeSettings(const UCubusGeologyProfi
 	);
 	Settings.Definitions = GeologyProfile->BiomeDefinitions;
 	return Settings;
+}
+
+FCubusBiomeFieldSettings FCubusBiomeField::BindHydrology(const FCubusBiomeFieldSettings& BaseSettings,
+														const FCubusHydrologySettings& HydrologySettings)
+{
+	FCubusBiomeFieldSettings Result = BaseSettings;
+	Result.HydrologySettings = HydrologySettings;
+	Result.bGenerateRivers = BaseSettings.bGenerateRivers && HydrologySettings.bEnabled;
+	return Result;
 }
 
 FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float WorldY, const float SurfaceWorldZ, const float Slope,
@@ -60,6 +76,8 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 	Settings.WetlandSurfaceMaterialId = FMath::Max(1, Settings.WetlandSurfaceMaterialId);
 
 	FCubusBiomeSample Result;
+	Result.SurfaceWorldZ = SurfaceWorldZ;
+	Result.Slope = Slope;
 	Result.SurfaceMaterialId = Settings.PlainsSurfaceMaterialId;
 	if (!Settings.bEnabled)
 	{
@@ -111,26 +129,41 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 
 	float DominantWeight = Result.PlainsWeight;
 	Result.DominantBiome = ECubusBiomeKind::Plains;
+	Result.BiomeName = TEXT("Plains");
+	Result.BiomeStrength = Result.PlainsWeight;
 	Result.SurfaceMaterialId = Settings.PlainsSurfaceMaterialId;
 
 	if (Result.ForestWeight > DominantWeight)
 	{
 		DominantWeight = Result.ForestWeight;
 		Result.DominantBiome = ECubusBiomeKind::Forest;
+		Result.BiomeName = TEXT("Forest");
+		Result.BiomeStrength = Result.ForestWeight;
 		Result.SurfaceMaterialId = Settings.ForestSurfaceMaterialId;
 	}
 	if (Result.RockyWeight > DominantWeight)
 	{
 		DominantWeight = Result.RockyWeight;
 		Result.DominantBiome = ECubusBiomeKind::Rocky;
+		Result.BiomeName = TEXT("Rocky");
+		Result.BiomeStrength = Result.RockyWeight;
 		Result.SurfaceMaterialId = Settings.RockySurfaceMaterialId;
 	}
 	if (Result.WetlandWeight > DominantWeight)
 	{
+		DominantWeight = Result.WetlandWeight;
 		Result.DominantBiome = ECubusBiomeKind::Wetland;
+		Result.BiomeName = TEXT("Wetland");
+		Result.BiomeStrength = Result.WetlandWeight;
 		Result.SurfaceMaterialId = Settings.WetlandSurfaceMaterialId;
 	}
 
+	/*
+	 * Authored definitions are the actual biome engine. They score directly
+	 * against climate, elevation and slope. The old four archetype weights are
+	 * retained as useful broad environmental signals, but they no longer veto
+	 * a definition whose authored envelope is otherwise the best match.
+	 */
 	float BestDefinitionScore = 0.0f;
 	for (int32 DefinitionIndex = 0; DefinitionIndex < Settings.Definitions.Num(); ++DefinitionIndex)
 	{
@@ -147,30 +180,19 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 			(1.0f - SmoothStep(MaximumHeight, MaximumHeight + 8.0f, SurfaceWorldZ));
 		const float MaximumSlope = FMath::Max(0.01f, Definition.MaximumSlope);
 		const float SlopeSuitability = 1.0f - SmoothStep(MaximumSlope * 0.78f, MaximumSlope, Slope);
+		const float DefinitionSuitability =
+			MoistureSuitability * TemperatureSuitability * HeightSuitability * SlopeSuitability;
+		const float DefinitionScore = DefinitionSuitability * FMath::Max(0.01f, Definition.Priority);
 
-		float ArchetypeWeight = Result.PlainsWeight;
-		switch (Definition.Archetype)
-		{
-		case ECubusBiomeKind::Forest:
-			ArchetypeWeight = Result.ForestWeight;
-			break;
-		case ECubusBiomeKind::Rocky:
-			ArchetypeWeight = Result.RockyWeight;
-			break;
-		case ECubusBiomeKind::Wetland:
-			ArchetypeWeight = Result.WetlandWeight;
-			break;
-		default:
-			break;
-		}
-
-		const float DefinitionScore = MoistureSuitability * TemperatureSuitability * HeightSuitability * SlopeSuitability *
-			FMath::Lerp(0.35f, 1.0f, ArchetypeWeight) * FMath::Max(0.01f, Definition.Priority);
 		if (DefinitionScore > BestDefinitionScore)
 		{
 			BestDefinitionScore = DefinitionScore;
 			Result.BiomeDefinitionIndex = DefinitionIndex;
 			Result.DominantBiome = Definition.Archetype;
+			Result.BiomeName = Definition.Name.IsNone()
+				? FName(*FString::Printf(TEXT("Biome_%d"), DefinitionIndex))
+				: Definition.Name;
+			Result.BiomeStrength = FMath::Clamp(DefinitionSuitability, 0.0f, 1.0f);
 			Result.SurfaceMaterialId = FMath::Max(1, Definition.SurfaceMaterialId);
 		}
 	}

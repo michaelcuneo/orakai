@@ -7,11 +7,7 @@
 #include "CubusCore/Generation/CubusLandmarkField.h"
 #include "CubusCore/Generation/CubusTerrainForm.h"
 
-/**
- * Plain, immutable-at-build-time settings for the native terrain density
- * field. Keeping this independent of Actors and UObjects allows density
- * sampling and meshing to move to worker threads later.
- */
+/** Plain, immutable-at-build-time settings for the native terrain density field. */
 struct ORAKAI_API FCubusTerrainDensitySettings
 {
     bool bUseHeightTerrain = true;
@@ -44,9 +40,6 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float MountainThreshold = 0.30f;
     float MountainBlend = 0.20f;
 
-    /**
-     * Volumetric geological deformation around exposed steep terrain.
-     */
     bool bGenerateVolumetricGeology = true;
     float GeologySurfaceBand = 24.0f;
     float GeologyCliffSlopeStart = 0.45f;
@@ -58,7 +51,6 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float GeologyRockWarpFrequency = 0.035f;
     float GeologyRockWarpStrength = 1.5f;
 
-    /** Same whole-chunk terrain-domain offset used by block generation. */
     int32 TerrainOffsetX = 0;
     int32 TerrainOffsetY = 0;
 
@@ -96,7 +88,6 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float SurfaceMaterialDepth = 2.0f;
     float RockMaterialDepth = 7.0f;
 
-    /** Biome-authored subsurface and rock materials used when biomes are enabled. */
     int32 BiomeSubsurfaceMaterialId = 2;
     int32 BiomeRockMaterialId = 3;
     int32 BiomeSnowMaterialId = 4;
@@ -107,31 +98,24 @@ struct ORAKAI_API FCubusTerrainDensitySettings
 };
 
 /**
- * Continuous scalar field for Cubus terrain.
+ * Continuous scalar field for the generated density world.
  *
- * The field evaluates the same seeded terrain domain as the block generator,
- * applies a real terrain-derived hydrology network, promotes steep landforms
- * into a three-dimensional geological shell, then subtracts cave volume.
+ * This object is also the authoritative density-biome context. Consumers that
+ * need ecology information must query SampleSurfaceBiome() rather than
+ * reconstructing climate or hydrology independently.
  */
 class ORAKAI_API FCubusTerrainDensityField final : public ICubusDensityField
 {
 public:
-    explicit FCubusTerrainDensityField(
-        const FCubusTerrainDensitySettings& InSettings
-    );
+    explicit FCubusTerrainDensityField(const FCubusTerrainDensitySettings& InSettings);
 
-    virtual FCubusDensitySample Sample(
-        const FIntVector& GlobalSampleCoordinate
-    ) const override;
+    virtual FCubusDensitySample Sample(const FIntVector& GlobalSampleCoordinate) const override;
+    virtual FCubusDensitySample SampleContinuous(const FVector& GlobalSampleCoordinate) const override;
 
-    virtual FCubusDensitySample SampleContinuous(
-        const FVector& GlobalSampleCoordinate
-    ) const override;
+    float SampleSurfaceVoxelHeight(float WorldX, float WorldY) const;
 
-    float SampleSurfaceVoxelHeight(
-        float WorldX,
-        float WorldY
-    ) const;
+    /** Authoritative biome/environment sample for one density-world column. */
+    FCubusBiomeSample SampleSurfaceBiome(float WorldX, float WorldY) const;
 
 private:
     struct FTerrainRegionWeights
@@ -154,6 +138,7 @@ private:
         float Slope = 0.0f;
         FVector2D Gradient = FVector2D::ZeroVector;
         FCubusTerrainFormSample FormSample;
+        FCubusBiomeSample BiomeSample;
         int32 SurfaceMaterialId = 1;
     };
 
@@ -166,81 +151,23 @@ private:
     mutable TMap<FIntPoint, FSurfaceData> SurfaceCache;
     mutable TMap<FIntPoint, FColumnData> ColumnCache;
 
-    static FIntPoint MakeCoordinateCacheKey(
-        float WorldX,
-        float WorldY
-    );
+    static FIntPoint MakeCoordinateCacheKey(float WorldX, float WorldY);
 
-    const FSurfaceData& GetCachedSurfaceData(
-        float WorldX,
-        float WorldY
-    ) const;
+    const FSurfaceData& GetCachedSurfaceData(float WorldX, float WorldY) const;
+    float GetCachedSurfaceVoxelHeight(float WorldX, float WorldY) const;
+    const FColumnData& GetColumnData(float WorldX, float WorldY) const;
 
-    float GetCachedSurfaceVoxelHeight(
-        float WorldX,
-        float WorldY
-    ) const;
+    FTerrainRegionWeights SampleTerrainRegions(float WorldX, float WorldY) const;
 
-    const FColumnData& GetColumnData(
-        float WorldX,
-        float WorldY
-    ) const;
+    float SampleNoise2D(float WorldX, float WorldY, float Frequency) const;
+    float SampleNoise3D(float WorldX, float WorldY, float WorldZ, float Frequency) const;
+    float SampleRidgedNoise(float WorldX, float WorldY, float Frequency) const;
+    float SampleValleyMask(float WorldX, float WorldY) const;
+    float SampleRiverDistance(float WorldX, float WorldY) const;
+    float ApplyRiverLowering(float SurfaceHeight, float WorldX, float WorldY) const;
 
-    FTerrainRegionWeights SampleTerrainRegions(
-        float WorldX,
-        float WorldY
-    ) const;
+    float SampleGeologicalDensity(const FVector& GlobalSampleCoordinate, const FColumnData& Column, float BaseTerrainDensity) const;
+    float SampleCaveDensity(const FVector& GlobalSampleCoordinate, float SurfaceVoxelHeight, float SurfaceSlope) const;
 
-    float SampleNoise2D(
-        float WorldX,
-        float WorldY,
-        float Frequency
-    ) const;
-
-    float SampleNoise3D(
-        float WorldX,
-        float WorldY,
-        float WorldZ,
-        float Frequency
-    ) const;
-
-    float SampleRidgedNoise(
-        float WorldX,
-        float WorldY,
-        float Frequency
-    ) const;
-
-    float SampleValleyMask(
-        float WorldX,
-        float WorldY
-    ) const;
-
-    float SampleRiverDistance(
-        float WorldX,
-        float WorldY
-    ) const;
-
-    float ApplyRiverLowering(
-        float SurfaceHeight,
-        float WorldX,
-        float WorldY
-    ) const;
-
-    float SampleGeologicalDensity(
-        const FVector& GlobalSampleCoordinate,
-        const FColumnData& Column,
-        float BaseTerrainDensity
-    ) const;
-
-    float SampleCaveDensity(
-        const FVector& GlobalSampleCoordinate,
-        float SurfaceVoxelHeight,
-        float SurfaceSlope
-    ) const;
-
-    static float SmoothStep(
-        float EdgeMinimum,
-        float EdgeMaximum,
-        float Value
-    );
+    static float SmoothStep(float EdgeMinimum, float EdgeMaximum, float Value);
 };
