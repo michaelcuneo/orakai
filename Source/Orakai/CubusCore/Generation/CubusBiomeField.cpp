@@ -3,8 +3,7 @@
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 
-FCubusBiomeFieldSettings FCubusBiomeField::MakeSettings(const UCubusGeologyProfile* GeologyProfile, const int32 BiomeSeed,
-														const int32 RiverSeed)
+FCubusBiomeFieldSettings FCubusBiomeField::MakeSettings(const UCubusGeologyProfile* GeologyProfile, const int32 BiomeSeed, const int32 RiverSeed)
 {
 	FCubusBiomeFieldSettings Settings;
 	Settings.BiomeOffsetX = FCubusGenerationSeeds::DomainOffsetX(BiomeSeed);
@@ -12,11 +11,7 @@ FCubusBiomeFieldSettings FCubusBiomeField::MakeSettings(const UCubusGeologyProfi
 	Settings.RiverOffsetX = FCubusGenerationSeeds::DomainOffsetX(RiverSeed);
 	Settings.RiverOffsetY = FCubusGenerationSeeds::DomainOffsetY(RiverSeed);
 	Settings.HydrologySettings.RiverSeed = RiverSeed;
-
-	if (!IsValid(GeologyProfile))
-	{
-		return Settings;
-	}
+	if (!IsValid(GeologyProfile)) return Settings;
 
 	Settings.bEnabled = GeologyProfile->bGenerateBiomes;
 	Settings.Frequency = GeologyProfile->BiomeFrequency;
@@ -66,9 +61,21 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 	Result.SurfaceWorldZ = SurfaceWorldZ;
 	Result.Slope = Slope;
 	Result.SurfaceMaterialId = Settings.PlainsSurfaceMaterialId;
-	if (!Settings.bEnabled)
+	if (!Settings.bEnabled) return Result;
+
+	/* The bound hydrology context carries the exact terrain form and offsets used by density generation. */
+	FCubusBiomeTerrainContext Ecology = TerrainContext;
+	const float TerrainX = WorldX + static_cast<float>(Settings.HydrologySettings.TerrainOffsetX);
+	const float TerrainY = WorldY + static_cast<float>(Settings.HydrologySettings.TerrainOffsetY);
+	const FCubusTerrainFormSample Form = FCubusTerrainForm::Sample(TerrainX, TerrainY, Settings.HydrologySettings.TerrainFormSettings);
+	Ecology.Drainage = FMath::Max(Ecology.Drainage, Form.Drainage);
+	Ecology.MountainCore = FMath::Max(Ecology.MountainCore, Form.MountainCore);
+	Ecology.FoothillWeight = FMath::Max(Ecology.FoothillWeight, Form.FoothillWeight);
+	Ecology.Ridge = FMath::Max(Ecology.Ridge, Form.Ridge);
+	if (Ecology.RockExposure <= KINDA_SMALL_NUMBER)
 	{
-		return Result;
+		const float CliffExposure = SmoothStep(Settings.RockySlopeThreshold * 0.45f, Settings.RockySlopeThreshold, Slope);
+		Ecology.RockExposure = FMath::Clamp(CliffExposure * (Form.MountainCore * 0.72f + Form.FoothillWeight * 0.32f + Form.Ridge * 0.28f), 0.0f, 1.0f);
 	}
 
 	const float BiomeX = WorldX + static_cast<float>(Settings.BiomeOffsetX);
@@ -83,18 +90,18 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 	const float LocalHumidity = SampleFbm(WarpedX + 1013.0f, WarpedY + 6427.0f, Settings.Frequency * 1.15f, 2, 0.45f);
 
 	Result.RiverDistance = Settings.bGenerateRivers ? SampleRiverDistance(WorldX, WorldY, Settings) : 1.0f;
-	Result.RiverInfluence = Settings.bGenerateRivers
-		? 1.0f - SmoothStep(Settings.WetlandRiverDistance, FMath::Max(Settings.WetlandRiverDistance + 0.001f, Settings.WetlandRiverDistance * 2.8f), Result.RiverDistance)
-		: 0.0f;
-	Result.Drainage = FMath::Clamp(TerrainContext.Drainage, 0.0f, 1.0f);
-	Result.RockExposure = FMath::Clamp(TerrainContext.RockExposure, 0.0f, 1.0f);
+	Result.RiverInfluence = Settings.bGenerateRivers ? 1.0f - SmoothStep(Settings.WetlandRiverDistance,
+		FMath::Max(Settings.WetlandRiverDistance + 0.001f, Settings.WetlandRiverDistance * 2.8f), Result.RiverDistance) : 0.0f;
+	Result.Drainage = FMath::Clamp(Ecology.Drainage, 0.0f, 1.0f);
+	Result.RockExposure = FMath::Clamp(Ecology.RockExposure, 0.0f, 1.0f);
 
-	const float GradientLength = TerrainContext.Gradient.Size();
-	const FVector2D UphillDirection = GradientLength > KINDA_SMALL_NUMBER ? TerrainContext.Gradient / GradientLength : FVector2D::ZeroVector;
+	const float GradientLength = Ecology.Gradient.Size();
+	const FVector2D UphillDirection = GradientLength > KINDA_SMALL_NUMBER ? Ecology.Gradient / GradientLength : FVector2D::ZeroVector;
 	const FVector2D PrevailingWind = FVector2D(0.82f, 0.57f).GetSafeNormal();
-	const float Windwardness = FMath::Clamp(FVector2D::DotProduct(UphillDirection, PrevailingWind) * 0.5f + 0.5f, 0.0f, 1.0f);
-	const float TopographicExposure = FMath::Clamp(
-		TerrainContext.Ridge * 0.42f + TerrainContext.MountainCore * 0.28f +
+	const float Windwardness = GradientLength > KINDA_SMALL_NUMBER
+		? FMath::Clamp(FVector2D::DotProduct(UphillDirection, PrevailingWind) * 0.5f + 0.5f, 0.0f, 1.0f)
+		: 0.5f;
+	const float TopographicExposure = FMath::Clamp(Ecology.Ridge * 0.42f + Ecology.MountainCore * 0.28f +
 		SmoothStep(Settings.RockySlopeThreshold * 0.30f, Settings.RockySlopeThreshold, Slope) * 0.30f, 0.0f, 1.0f);
 	Result.Exposure = FMath::Clamp(TopographicExposure * FMath::Lerp(0.72f, 1.0f, Windwardness), 0.0f, 1.0f);
 
@@ -103,11 +110,10 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 	const float SoilRetention = FMath::Clamp(GentleGround * (1.0f - Result.RockExposure) * (1.0f - Result.Exposure * 0.55f), 0.0f, 1.0f);
 	Result.SoilDepth = FMath::Clamp(SoilRetention * FMath::Lerp(0.55f, 1.0f, DepositionalGround), 0.0f, 1.0f);
 
-	const float OrographicMoisture = Windwardness * TerrainContext.FoothillWeight * 0.13f;
+	const float OrographicMoisture = Windwardness * Ecology.FoothillWeight * 0.13f;
 	const float DrainageMoisture = Result.Drainage * 0.16f + Result.RiverInfluence * 0.26f;
 	const float ExposureDrying = Result.Exposure * 0.13f + Result.RockExposure * 0.08f;
 	Result.Moisture = FMath::Clamp(0.50f + MacroMoisture * 0.34f + LocalHumidity * 0.07f + OrographicMoisture + DrainageMoisture - ExposureDrying, 0.0f, 1.0f);
-
 	const float ElevationCooling = FMath::Clamp((SurfaceWorldZ - Settings.RockyMinimumWorldZ) / 120.0f, -0.18f, 0.52f);
 	Result.Temperature = FMath::Clamp(0.52f + MacroTemperature * 0.34f - ElevationCooling - Result.Exposure * 0.07f + Result.Drainage * 0.035f, 0.0f, 1.0f);
 
@@ -120,7 +126,6 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 	const float SteepCountry = SmoothStep(Settings.RockySlopeThreshold * 0.62f, Settings.RockySlopeThreshold, Slope);
 	const float SaturatedGround = SmoothStep(0.58f, 0.82f, Result.Moisture) * SmoothStep(0.30f, 0.68f, Result.SoilDepth);
 	const float ForestClimate = SmoothStep(0.30f, 0.68f, Result.Fertility) * SmoothStep(0.26f, 0.58f, Result.Moisture);
-
 	Result.WetlandWeight = FMath::Clamp(FMath::Max(Result.RiverInfluence * SaturatedGround, Result.Drainage * SaturatedGround * 0.72f) * GentleTerrain * (1.0f - HighCountry), 0.0f, 1.0f);
 	Result.RockyWeight = FMath::Clamp(FMath::Max(FMath::Max(HighCountry * Result.Exposure, SteepCountry), Result.RockExposure) * (1.0f - Result.WetlandWeight), 0.0f, 1.0f);
 	Result.ForestWeight = FMath::Clamp(ForestClimate * GentleTerrain * (1.0f - Result.Exposure * 0.58f) * (1.0f - Result.WetlandWeight) * (1.0f - Result.RockyWeight), 0.0f, 1.0f);
@@ -137,14 +142,14 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 
 	float DominantWeight = Result.PlainsWeight;
 	Result.DominantBiome = ECubusBiomeKind::Plains;
-	Result.BiomeName = TEXT("Plains");
+	Result.BiomeName = Result.Fertility > 0.55f ? TEXT("Meadow") : TEXT("OpenGrassland");
 	Result.BiomeStrength = Result.PlainsWeight;
 	Result.SurfaceMaterialId = Settings.PlainsSurfaceMaterialId;
 	if (Result.ForestWeight > DominantWeight)
 	{
 		DominantWeight = Result.ForestWeight;
 		Result.DominantBiome = ECubusBiomeKind::Forest;
-		Result.BiomeName = TEXT("Forest");
+		Result.BiomeName = Result.RiverInfluence > 0.28f ? TEXT("RiparianForest") : (HighCountry > 0.35f ? TEXT("MontaneForest") : TEXT("TemperateForest"));
 		Result.BiomeStrength = Result.ForestWeight;
 		Result.SurfaceMaterialId = Settings.ForestSurfaceMaterialId;
 	}
@@ -152,14 +157,14 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 	{
 		DominantWeight = Result.RockyWeight;
 		Result.DominantBiome = ECubusBiomeKind::Rocky;
-		Result.BiomeName = TEXT("Rocky");
+		Result.BiomeName = Result.SoilDepth > 0.32f && Result.Temperature > 0.18f ? TEXT("AlpineMeadow") : (Result.RockExposure > 0.55f ? TEXT("ExposedRock") : TEXT("AlpineScrub"));
 		Result.BiomeStrength = Result.RockyWeight;
 		Result.SurfaceMaterialId = Settings.RockySurfaceMaterialId;
 	}
 	if (Result.WetlandWeight > DominantWeight)
 	{
 		Result.DominantBiome = ECubusBiomeKind::Wetland;
-		Result.BiomeName = TEXT("Wetland");
+		Result.BiomeName = Result.RiverInfluence > 0.60f ? TEXT("RiparianWetland") : TEXT("Marsh");
 		Result.BiomeStrength = Result.WetlandWeight;
 		Result.SurfaceMaterialId = Settings.WetlandSurfaceMaterialId;
 	}
@@ -203,10 +208,7 @@ FCubusBiomeSample FCubusBiomeField::Sample(const float WorldX, const float World
 
 float FCubusBiomeField::SampleRiverDistance(const float WorldX, const float WorldY, const FCubusBiomeFieldSettings& Settings)
 {
-	if (!Settings.bGenerateRivers || !Settings.HydrologySettings.bEnabled)
-	{
-		return 1.0f;
-	}
+	if (!Settings.bGenerateRivers || !Settings.HydrologySettings.bEnabled) return 1.0f;
 	const FCubusHydrologySample Hydrology = FCubusHydrologyField::Sample(WorldX, WorldY, Settings.HydrologySettings);
 	return FCubusHydrologyField::NormalizeRiverDistance(Hydrology, Settings.HydrologySettings);
 }
@@ -234,10 +236,7 @@ float FCubusBiomeField::SampleFbm(const float WorldX, const float WorldY, const 
 
 float FCubusBiomeField::SmoothStep(const float EdgeMinimum, const float EdgeMaximum, const float Value)
 {
-	if (EdgeMaximum <= EdgeMinimum)
-	{
-		return Value >= EdgeMaximum ? 1.0f : 0.0f;
-	}
+	if (EdgeMaximum <= EdgeMinimum) return Value >= EdgeMaximum ? 1.0f : 0.0f;
 	const float T = FMath::Clamp((Value - EdgeMinimum) / (EdgeMaximum - EdgeMinimum), 0.0f, 1.0f);
 	return T * T * (3.0f - 2.0f * T);
 }
