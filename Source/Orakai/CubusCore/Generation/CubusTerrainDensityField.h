@@ -40,6 +40,12 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float MountainThreshold = 0.30f;
     float MountainBlend = 0.20f;
 
+    /*
+     * Volumetric geology is evaluated in continuous canonical world space.
+     * These controls describe rock behaviour rather than another height-noise
+     * stack: hardness preserves shelves, fractures remove material, folds
+     * change strata attitude, and mass noise produces coherent outcrops.
+     */
     bool bGenerateVolumetricGeology = true;
     float GeologySurfaceBand = 24.0f;
     float GeologyCliffSlopeStart = 0.45f;
@@ -50,6 +56,13 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float GeologyUndercutStrength = 4.0f;
     float GeologyRockWarpFrequency = 0.035f;
     float GeologyRockWarpStrength = 1.5f;
+    float GeologyHardnessFrequency = 0.0028f;
+    float GeologyFractureFrequency = 0.017f;
+    float GeologyFoldFrequency = 0.006f;
+    float GeologyMassFrequency = 0.021f;
+    float GeologyMassStrength = 3.5f;
+    float GeologyOverhangStrength = 7.0f;
+    float GeologyFractureStrength = 2.75f;
 
     int32 TerrainOffsetX = 0;
     int32 TerrainOffsetY = 0;
@@ -66,6 +79,11 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     int32 RiverOffsetY = 0;
     int32 RiverSeed = 0;
 
+    /*
+     * Caves use deterministic graph-like tunnel segments in XY with smoothly
+     * varying depth. 3D noise only perturbs the walls; it no longer decides
+     * the topology of the cave system.
+     */
     bool bGenerateCaves = false;
     int32 CaveMinimumWorldZ = -256;
     int32 CaveMaximumWorldZ = 24;
@@ -74,6 +92,11 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     float CaveSecondaryFrequency = 0.07f;
     float CaveThreshold = 0.16f;
     float CaveSurfaceSharpness = 8.0f;
+    float CaveNetworkCellSize = 36.0f;
+    float CaveTunnelRadius = 3.0f;
+    float CaveChamberChance = 0.08f;
+    float CaveChamberRadius = 7.5f;
+    float CaveWallWarpStrength = 0.75f;
     int32 CaveOffsetX = 0;
     int32 CaveOffsetY = 0;
     int32 CaveOffsetZ = 0;
@@ -99,6 +122,10 @@ struct ORAKAI_API FCubusTerrainDensitySettings
 
 /**
  * Continuous scalar field for the generated density world.
+ *
+ * The field is deliberately independent of mesh sampling resolution. A caller
+ * may evaluate the same terrain at 4 m, 1 m, 25 cm or 10 cm spacing without
+ * creating another terrain representation or changing persisted edits.
  *
  * This object is also the authoritative density-biome context. Consumers that
  * need ecology information must query SampleSurfaceBiome() rather than
@@ -137,6 +164,10 @@ private:
         float SurfaceSampleZ = 1.0f;
         float Slope = 0.0f;
         FVector2D Gradient = FVector2D::ZeroVector;
+        float RockHardness = 0.5f;
+        float Fracture = 0.0f;
+        float StrataTilt = 0.0f;
+        float RockExposure = 0.0f;
         FCubusTerrainFormSample FormSample;
         FCubusBiomeSample BiomeSample;
         int32 SurfaceMaterialId = 1;
@@ -162,6 +193,7 @@ private:
     float SampleNoise2D(float WorldX, float WorldY, float Frequency) const;
     float SampleNoise3D(float WorldX, float WorldY, float WorldZ, float Frequency) const;
     float SampleRidgedNoise(float WorldX, float WorldY, float Frequency) const;
+    float SampleRidgedNoise3D(float WorldX, float WorldY, float WorldZ, float Frequency) const;
     float SampleValleyMask(float WorldX, float WorldY) const;
     float SampleRiverDistance(float WorldX, float WorldY) const;
     float ApplyRiverLowering(float SurfaceHeight, float WorldX, float WorldY) const;
