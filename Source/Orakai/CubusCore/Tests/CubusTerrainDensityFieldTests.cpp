@@ -18,6 +18,8 @@ bool FCubusTerrainDensityFractionalPlaneTest::RunTest(
     const FString& Parameters
 )
 {
+    (void)Parameters;
+
     FCubusTerrainDensitySettings Settings;
     Settings.bUseHeightTerrain = false;
     Settings.FlatSurfaceWorldZ = 8.25f;
@@ -132,6 +134,8 @@ bool FCubusTerrainDensitySeedDomainTest::RunTest(
     const FString& Parameters
 )
 {
+    (void)Parameters;
+
     FCubusTerrainDensitySettings UnshiftedSettings;
     UnshiftedSettings.bGenerateRivers = false;
     UnshiftedSettings.bGenerateCaves = false;
@@ -204,6 +208,8 @@ bool FCubusTerrainDensityRiverTest::RunTest(
     const FString& Parameters
 )
 {
+    (void)Parameters;
+
     FCubusTerrainDensitySettings Settings;
     Settings.BaseHeight = 20.0f;
     Settings.ContinentAmplitude = 0.0f;
@@ -252,6 +258,8 @@ bool FCubusTerrainDensityCaveTest::RunTest(
     const FString& Parameters
 )
 {
+    (void)Parameters;
+
     FCubusTerrainDensitySettings Settings;
     Settings.bUseHeightTerrain = false;
     Settings.FlatSurfaceWorldZ = 32.0f;
@@ -260,36 +268,41 @@ bool FCubusTerrainDensityCaveTest::RunTest(
     Settings.CaveMaximumWorldZ = 24;
     Settings.CaveSurfaceClearance = 2;
     Settings.CaveThreshold = 1.0f;
-    Settings.CavePrimaryFrequency = 0.035f;
-    Settings.CaveSecondaryFrequency = 0.07f;
+    Settings.CaveNetworkCellSize = 12.0f;
+    Settings.CaveTunnelRadius = 3.5f;
+    Settings.CaveChamberChance = 1.0f;
+    Settings.CaveChamberRadius = 5.5f;
+    Settings.CaveWallWarpStrength = 0.25f;
     Settings.CaveSurfaceSharpness = 8.0f;
 
     const FCubusTerrainDensityField DensityField(Settings);
 
     bool bFoundCarvedSample = false;
+    int32 CarvedSampleCount = 0;
 
-    for (int32 Z = -8; Z <= 8 && !bFoundCarvedSample; ++Z)
+    for (int32 Z = -20; Z <= 20; ++Z)
     {
-        for (int32 Y = 0; Y < 16 && !bFoundCarvedSample; ++Y)
+        for (int32 Y = -16; Y <= 16; ++Y)
         {
-            for (int32 X = 0; X < 16; ++X)
+            for (int32 X = -16; X <= 16; ++X)
             {
-                if (
-                    !DensityField.Sample(
-                        FIntVector(X, Y, Z)
-                    ).IsSolid()
-                )
+                if (!DensityField.Sample(FIntVector(X, Y, Z)).IsSolid())
                 {
                     bFoundCarvedSample = true;
-                    break;
+                    ++CarvedSampleCount;
                 }
             }
         }
     }
 
     TestTrue(
-        TEXT("The native density field carves empty samples below the terrain surface"),
+        TEXT("The native density field carves deterministic tunnel and chamber samples below the terrain surface"),
         bFoundCarvedSample
+    );
+
+    TestTrue(
+        TEXT("A cave network occupies a meaningful connected volume rather than isolated noise specks"),
+        CarvedSampleCount > 128
     );
 
     TestTrue(
@@ -297,6 +310,150 @@ bool FCubusTerrainDensityCaveTest::RunTest(
         DensityField.Sample(
             FIntVector(0, 0, 31)
         ).IsSolid()
+    );
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusTerrainDensityCaveDeterminismTest,
+    "Orakai.Cubus.Density.NativeTerrain.CaveNetworkDeterminism",
+    EAutomationTestFlags::EditorContext |
+    EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusTerrainDensityCaveDeterminismTest::RunTest(
+    const FString& Parameters
+)
+{
+    (void)Parameters;
+
+    FCubusTerrainDensitySettings Settings;
+    Settings.bUseHeightTerrain = false;
+    Settings.FlatSurfaceWorldZ = 48.0f;
+    Settings.bGenerateCaves = true;
+    Settings.CaveMinimumWorldZ = -48;
+    Settings.CaveMaximumWorldZ = 32;
+    Settings.CaveSurfaceClearance = 4;
+    Settings.CaveThreshold = 0.55f;
+    Settings.CaveNetworkCellSize = 18.0f;
+    Settings.CaveTunnelRadius = 3.25f;
+    Settings.CaveOffsetX = 731;
+    Settings.CaveOffsetY = -199;
+    Settings.CaveOffsetZ = 43;
+
+    const FCubusTerrainDensityField FieldA(Settings);
+    const FCubusTerrainDensityField FieldB(Settings);
+
+    for (int32 Z = -16; Z <= 16; Z += 4)
+    {
+        for (int32 Y = -24; Y <= 24; Y += 4)
+        {
+            for (int32 X = -24; X <= 24; X += 4)
+            {
+                const FVector Position(
+                    static_cast<double>(X) + 0.35,
+                    static_cast<double>(Y) + 0.65,
+                    static_cast<double>(Z) + 0.15
+                );
+                const FCubusDensitySample A = FieldA.SampleContinuous(Position);
+                const FCubusDensitySample B = FieldB.SampleContinuous(Position);
+
+                TestTrue(
+                    TEXT("Cave density is deterministic at fractional coordinates"),
+                    FMath::IsNearlyEqual(A.Density, B.Density, KINDA_SMALL_NUMBER)
+                );
+                TestEqual(
+                    TEXT("Cave material classification is deterministic"),
+                    A.MaterialId,
+                    B.MaterialId
+                );
+            }
+        }
+    }
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusTerrainDensityVolumetricGeologyTest,
+    "Orakai.Cubus.Density.NativeTerrain.VolumetricGeology",
+    EAutomationTestFlags::EditorContext |
+    EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusTerrainDensityVolumetricGeologyTest::RunTest(
+    const FString& Parameters
+)
+{
+    (void)Parameters;
+
+    FCubusTerrainDensitySettings GeologySettings;
+    GeologySettings.bGenerateRivers = false;
+    GeologySettings.bGenerateCaves = false;
+    GeologySettings.bGenerateVolumetricGeology = true;
+    GeologySettings.MountainThreshold = -0.90f;
+    GeologySettings.MountainBlend = 0.05f;
+    GeologySettings.RidgeAmplitude = 28.0f;
+    GeologySettings.HillAmplitude = 14.0f;
+    GeologySettings.GeologySurfaceBand = 36.0f;
+    GeologySettings.GeologyCliffSlopeStart = 0.05f;
+    GeologySettings.GeologyCliffSlopeFull = 0.25f;
+    GeologySettings.GeologyShelfStrength = 7.0f;
+    GeologySettings.GeologyOverhangStrength = 11.0f;
+    GeologySettings.GeologyMassStrength = 5.0f;
+
+    FCubusTerrainDensitySettings HeightOnlySettings = GeologySettings;
+    HeightOnlySettings.bGenerateVolumetricGeology = false;
+
+    const FCubusTerrainDensityField GeologyField(GeologySettings);
+    const FCubusTerrainDensityField HeightOnlyField(HeightOnlySettings);
+
+    bool bFoundRockBeyondHeightEnvelope = false;
+    bool bFoundFractionalDensityVariation = false;
+
+    for (int32 Y = -128; Y <= 128 && !bFoundRockBeyondHeightEnvelope; Y += 4)
+    {
+        for (int32 X = -128; X <= 128; X += 4)
+        {
+            const float SurfaceHeight = GeologyField.SampleSurfaceVoxelHeight(
+                static_cast<float>(X),
+                static_cast<float>(Y)
+            );
+            const FVector AboveSurface(
+                static_cast<double>(X) + 0.5,
+                static_cast<double>(Y) + 0.5,
+                static_cast<double>(SurfaceHeight) + 1.25
+            );
+
+            const FCubusDensitySample GeologicalSample = GeologyField.SampleContinuous(AboveSurface);
+            const FCubusDensitySample HeightOnlySample = HeightOnlyField.SampleContinuous(AboveSurface);
+
+            if (GeologicalSample.IsSolid() && !HeightOnlySample.IsSolid())
+            {
+                bFoundRockBeyondHeightEnvelope = true;
+
+                const FCubusDensitySample FractionalNeighbour = GeologyField.SampleContinuous(
+                    AboveSurface + FVector(0.10, 0.0, 0.0)
+                );
+                bFoundFractionalDensityVariation = !FMath::IsNearlyEqual(
+                    GeologicalSample.Density,
+                    FractionalNeighbour.Density,
+                    0.0001f
+                );
+                break;
+            }
+        }
+    }
+
+    TestTrue(
+        TEXT("Volumetric geology can create solid rock outside the base height envelope"),
+        bFoundRockBeyondHeightEnvelope
+    );
+
+    TestTrue(
+        TEXT("The geological field contains meaningful sub-voxel density variation at 10 cm spacing"),
+        bFoundFractionalDensityVariation
     );
 
     return true;
