@@ -4,6 +4,7 @@
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"
+#include "CubusCore/Generation/CubusTerrainForm.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "CubusCore/Meshing/CubusDensityLod.h"
 #include "CubusCore/Persistence/OrakaiPersistenceSubsystem.h"
@@ -1422,7 +1423,60 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 	const FVector TrackingLocation =
 		bPawnHeldForStreaming ? HeldPawnLocation : (IsValid(PlayerPawn) ? PlayerPawn->GetActorLocation() : GetActorLocation());
 
-	const FIntVector CentreCoordinate = WorldLocationToChunkCoordinate(TrackingLocation);
+	/*
+	 * Terrain ownership follows the pawn horizontally, but never follows the
+	 * pawn into the sky or down through the ground. The old XYZ-centred
+	 * streaming window treated altitude as world traversal and destroyed the
+	 * surface chunks underneath a flying pawn.
+	 *
+	 * Resolve a deterministic surface chunk from the same macro terrain form
+	 * used by generation. Sampling the centre of the current horizontal chunk
+	 * keeps the anchor stable while the pawn moves vertically or moves around
+	 * inside that chunk. X/Y travel still advances streaming normally.
+	 */
+	const FIntVector PawnCoordinate = WorldLocationToChunkCoordinate(TrackingLocation);
+
+	FCubusTerrainFormSettings StreamingTerrainSettings;
+	StreamingTerrainSettings.BaseHeight = static_cast<float>(TerrainBaseHeight);
+	StreamingTerrainSettings.ContinentAmplitude = TerrainContinentAmplitude;
+	StreamingTerrainSettings.ContinentFrequency = TerrainContinentFrequency;
+	StreamingTerrainSettings.HillAmplitude = TerrainHillAmplitude;
+	StreamingTerrainSettings.HillFrequency = TerrainHillFrequency;
+	StreamingTerrainSettings.DetailAmplitude = TerrainDetailAmplitude;
+	StreamingTerrainSettings.DetailFrequency = TerrainDetailFrequency;
+	StreamingTerrainSettings.RidgeAmplitude = TerrainRidgeAmplitude;
+	StreamingTerrainSettings.RidgeFrequency = TerrainRidgeFrequency;
+	StreamingTerrainSettings.ValleyDepth = TerrainValleyDepth;
+	StreamingTerrainSettings.ValleyFrequency = TerrainValleyFrequency;
+	StreamingTerrainSettings.ValleyWidth = TerrainValleyWidth;
+	StreamingTerrainSettings.ValleyFalloff = TerrainValleyFalloff;
+	StreamingTerrainSettings.ValleyWarpAmplitude = TerrainValleyWarpAmplitude;
+	StreamingTerrainSettings.ValleyWarpFrequency = TerrainValleyWarpFrequency;
+	StreamingTerrainSettings.RegionFrequency = TerrainRegionFrequency;
+	StreamingTerrainSettings.PlainsThreshold = TerrainPlainsThreshold;
+	StreamingTerrainSettings.PlainsBlend = TerrainPlainsBlend;
+	StreamingTerrainSettings.MountainThreshold = TerrainMountainThreshold;
+	StreamingTerrainSettings.MountainBlend = TerrainMountainBlend;
+
+	const FCubusGenerationSeeds Seeds = GetGenerationSeeds();
+	const int32 TerrainOffsetX =
+		(FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
+	const int32 TerrainOffsetY =
+		(FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
+
+	const float HorizontalChunkCentreOffset = static_cast<float>(Cubus::ChunkSize) * 0.5f;
+	const float SurfaceSampleX =
+		static_cast<float>(PawnCoordinate.X * Cubus::ChunkSize) + HorizontalChunkCentreOffset + static_cast<float>(TerrainOffsetX);
+	const float SurfaceSampleY =
+		static_cast<float>(PawnCoordinate.Y * Cubus::ChunkSize) + HorizontalChunkCentreOffset + static_cast<float>(TerrainOffsetY);
+
+	const float TerrainSurfaceVoxelZ = bUseHeightTerrain
+		? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, StreamingTerrainSettings).Height
+		: static_cast<float>(TerrainSurfaceWorldZ);
+	const int32 TerrainChunkZ = FMath::FloorToInt(
+		TerrainSurfaceVoxelZ / static_cast<float>(Cubus::ChunkSize));
+
+	const FIntVector CentreCoordinate(PawnCoordinate.X, PawnCoordinate.Y, TerrainChunkZ);
 
 	if (!bForce && CentreCoordinate == LastTrackedChunk)
 	{
