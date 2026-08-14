@@ -12,6 +12,53 @@ namespace CubusVegetationBiome
 }
 
 /**
+ * Compact ecological context captured when a vegetation placement is created.
+ *
+ * Species selection happens later in the world vegetation catalog, so the
+ * placement carries the authoritative density-world habitat with it rather
+ * than re-sampling terrain during rendering. Unit fields are quantized to one
+ * byte; this keeps large near/far vegetation sets cheap while retaining much
+ * more precision than species suitability needs.
+ */
+struct FCubusVegetationHabitatSample
+{
+    uint8 Moisture = 128;
+    uint8 Temperature = 128;
+    uint8 SoilDepth = 128;
+    uint8 Drainage = 0;
+    uint8 RiverInfluence = 0;
+    uint8 RockExposure = 0;
+    uint8 Exposure = 0;
+    uint8 Fertility = 128;
+    uint8 SlopeDegrees = 0;
+
+    static uint8 QuantizeUnit(const float Value)
+    {
+        return static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(FMath::Clamp(Value, 0.0f, 1.0f) * 255.0f), 0, 255));
+    }
+
+    static float DecodeUnit(const uint8 Value)
+    {
+        return static_cast<float>(Value) / 255.0f;
+    }
+
+    static uint8 QuantizeSlopeDegrees(const float Value)
+    {
+        return QuantizeUnit(FMath::Clamp(Value, 0.0f, 90.0f) / 90.0f);
+    }
+
+    float GetMoisture() const { return DecodeUnit(Moisture); }
+    float GetTemperature() const { return DecodeUnit(Temperature); }
+    float GetSoilDepth() const { return DecodeUnit(SoilDepth); }
+    float GetDrainage() const { return DecodeUnit(Drainage); }
+    float GetRiverInfluence() const { return DecodeUnit(RiverInfluence); }
+    float GetRockExposure() const { return DecodeUnit(RockExposure); }
+    float GetExposure() const { return DecodeUnit(Exposure); }
+    float GetFertility() const { return DecodeUnit(Fertility); }
+    float GetSlopeDegrees() const { return DecodeUnit(SlopeDegrees) * 90.0f; }
+};
+
+/**
  * Deterministic vegetation placement generated for one terrain column.
  * Rendering is intentionally handled separately from generation.
  */
@@ -22,6 +69,7 @@ struct FCubusVegetationInstance
     float Scale = 1.0f;
     int32 TypeId = 0;
     int32 BiomeMask = CubusVegetationBiome::All;
+    FCubusVegetationHabitatSample Habitat;
 };
 
 /**
