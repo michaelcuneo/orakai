@@ -124,60 +124,52 @@ bool FCubusTerrainDensityFractionalPlaneTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FCubusTerrainDensityClimateSnowTest,
-    "Orakai.Cubus.Density.NativeTerrain.ClimateSnow",
+    FCubusTerrainDensityAltitudeSnowTest,
+    "Orakai.Cubus.Density.NativeTerrain.AltitudeSnow",
     EAutomationTestFlags::EditorContext |
     EAutomationTestFlags::EngineFilter
 )
 
-bool FCubusTerrainDensityClimateSnowTest::RunTest(
+bool FCubusTerrainDensityAltitudeSnowTest::RunTest(
     const FString& Parameters
 )
 {
     (void)Parameters;
 
-    FCubusTerrainDensitySettings Settings;
-    Settings.bUseHeightTerrain = false;
-    Settings.FlatSurfaceWorldZ = Settings.BiomeSettings.HydrologySettings.SeaLevel;
-    Settings.bGenerateVolumetricGeology = false;
-    Settings.bGenerateCaves = false;
-    Settings.BiomeSettings.bEnabled = true;
-    Settings.BiomeSettings.BiomeOffsetX = 1387;
-    Settings.BiomeSettings.BiomeOffsetY = -2911;
-    Settings.BiomeSettings.PlainsSurfaceMaterialId = 11;
-    Settings.BiomeSettings.ForestSurfaceMaterialId = 17;
-    Settings.BiomeSettings.RockySurfaceMaterialId = 23;
-    Settings.BiomeSettings.WetlandSurfaceMaterialId = 31;
-    Settings.RockSlopeThreshold = 1.25f;
-    Settings.BiomeSnowMaterialId = 91;
+    FCubusTerrainDensitySettings LowSettings;
+    LowSettings.bUseHeightTerrain = false;
+    LowSettings.FlatSurfaceWorldZ = LowSettings.BiomeSettings.HydrologySettings.SeaLevel;
+    LowSettings.bGenerateVolumetricGeology = false;
+    LowSettings.bGenerateCaves = false;
+    LowSettings.BiomeSettings.bEnabled = true;
+    LowSettings.BiomeSettings.BiomeOffsetX = 1387;
+    LowSettings.BiomeSettings.BiomeOffsetY = -2911;
+    LowSettings.BiomeSettings.PlainsSurfaceMaterialId = 11;
+    LowSettings.BiomeSettings.ForestSurfaceMaterialId = 17;
+    LowSettings.BiomeSettings.RockySurfaceMaterialId = 23;
+    LowSettings.BiomeSettings.WetlandSurfaceMaterialId = 31;
+    LowSettings.RockSlopeThreshold = 1.25f;
+    LowSettings.BiomeSnowMaterialId = 91;
+    LowSettings.BiomeSnowMinimumHeight = 72.0f;
 
-    const FCubusTerrainDensityField DensityField(Settings);
+    const FVector2D Site(128.0f, -256.0f);
+    const FCubusTerrainDensityField LowField(LowSettings);
+    const FCubusDensitySample LowSurface = LowField.SampleContinuous(
+        FVector(Site.X + 0.5, Site.Y + 0.5, static_cast<double>(LowSettings.FlatSurfaceWorldZ))
+    );
 
-    bool bFoundColdLowland = false;
-    for (int32 SampleY = -8192; SampleY <= 8192 && !bFoundColdLowland; SampleY += 256)
-    {
-        for (int32 SampleX = -8192; SampleX <= 8192; SampleX += 256)
-        {
-            const float WorldX = static_cast<float>(SampleX);
-            const float WorldY = static_cast<float>(SampleY);
-            const FCubusBiomeSample Biome = DensityField.SampleSurfaceBiome(WorldX, WorldY);
-            if (Biome.Temperature > 0.28f || Biome.Moisture < 0.16f)
-            {
-                continue;
-            }
+    TestTrue(TEXT("Lowland altitude remains solid"), LowSurface.IsSolid());
+    TestNotEqual(TEXT("Lowland altitude never receives alpine snow"), LowSurface.MaterialId, 91);
 
-            const FCubusDensitySample SurfaceSample = DensityField.SampleContinuous(
-                FVector(WorldX + 0.5, WorldY + 0.5, static_cast<double>(Settings.FlatSurfaceWorldZ))
-            );
+    FCubusTerrainDensitySettings AlpineSettings = LowSettings;
+    AlpineSettings.FlatSurfaceWorldZ = 104.0f;
+    const FCubusTerrainDensityField AlpineField(AlpineSettings);
+    const FCubusDensitySample AlpineSurface = AlpineField.SampleContinuous(
+        FVector(Site.X + 0.5, Site.Y + 0.5, static_cast<double>(AlpineSettings.FlatSurfaceWorldZ))
+    );
 
-            TestTrue(TEXT("A cold lowland surface remains solid"), SurfaceSample.IsSolid());
-            TestEqual(TEXT("Cold lowland climate receives the biome snow material"), SurfaceSample.MaterialId, 91);
-            bFoundColdLowland = true;
-            break;
-        }
-    }
-
-    TestTrue(TEXT("The seeded climate produces at least one cold lowland test site"), bFoundColdLowland);
+    TestTrue(TEXT("Alpine altitude remains solid"), AlpineSurface.IsSolid());
+    TestEqual(TEXT("Alpine altitude receives the snow material"), AlpineSurface.MaterialId, 91);
     return true;
 }
 

@@ -107,14 +107,14 @@ struct ORAKAI_API FCubusTerrainDensitySettings
     int32 SnowMaterialId = 4;
 
     float RockSlopeThreshold = 1.25f;
-    float SnowMinimumHeight = 34.0f;
+    float SnowMinimumHeight = 72.0f;
     float SurfaceMaterialDepth = 2.0f;
     float RockMaterialDepth = 7.0f;
 
     int32 BiomeSubsurfaceMaterialId = 2;
     int32 BiomeRockMaterialId = 3;
     int32 BiomeSnowMaterialId = 4;
-    float BiomeSnowMinimumHeight = 34.0f;
+    float BiomeSnowMinimumHeight = 72.0f;
 
     FCubusBiomeFieldSettings BiomeSettings;
     FCubusLandmarkFieldSettings LandmarkSettings;

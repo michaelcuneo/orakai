@@ -335,7 +335,7 @@ protected:
 	float TerrainRockSlopeThreshold = 1.25f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials")
-	int32 TerrainSnowMinimumHeight = 34;
+	int32 TerrainSnowMinimumHeight = 72;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water")
 	bool bGenerateWater = true;

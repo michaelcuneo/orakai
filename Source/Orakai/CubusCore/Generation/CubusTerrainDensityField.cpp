@@ -392,36 +392,30 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 			? Settings.RockMaterialId
 			: (Settings.BiomeSettings.bEnabled ? Column.BiomeSample.SurfaceMaterialId : Settings.SurfaceMaterialId);
 
-		if (Settings.BiomeSettings.bEnabled)
-		{
-			/*
-			 * Snow/ice follows the local climate, not a global world-Z cutoff.
-			 * Temperature already contains the elevation lapse response, so a
-			 * sufficiently cold lowland can freeze while a warm mountain can stay
-			 * bare. Moisture controls accumulation and steep slopes shed snow.
-			 */
-			const float Coldness = 1.0f - SmoothStep(0.28f, 0.46f, Column.BiomeSample.Temperature);
-			const float MoistureSupport = FMath::Lerp(
-				0.62f,
-				1.0f,
-				SmoothStep(0.16f, 0.50f, Column.BiomeSample.Moisture)
-			);
-			const float SnowRetention = 1.0f - SmoothStep(
-				Settings.RockSlopeThreshold * 0.85f,
-				FMath::Max(Settings.RockSlopeThreshold * 1.55f, Settings.RockSlopeThreshold + 0.01f),
-				Column.Slope
-			);
-			const float SnowSuitability = Coldness * MoistureSupport * SnowRetention;
+		/*
+		 * Snow is an alpine altitude band. Climate may describe the ecology,
+		 * but it is never allowed to put snow on low ground. The structural
+		 * floor scales with the authored mountain amplitude so legacy worlds
+		 * carrying the old 34 m default cannot accidentally become snowy
+		 * lowlands after the mountain vertical scale is increased.
+		 */
+		const float StructuralSnowFloor =
+			Settings.BaseHeight + FMath::Max(64.0f, Settings.RidgeAmplitude * 4.0f);
+		const float ConfiguredSnowLine = Settings.BiomeSettings.bEnabled
+			? Settings.BiomeSnowMinimumHeight
+			: Settings.SnowMinimumHeight;
+		const float SnowLine = FMath::Max(ConfiguredSnowLine, StructuralSnowFloor);
+		const float SnowRetention = 1.0f - SmoothStep(
+			Settings.RockSlopeThreshold * 0.95f,
+			FMath::Max(Settings.RockSlopeThreshold * 1.70f, Settings.RockSlopeThreshold + 0.01f),
+			Column.Slope
+		);
 
-			if (SnowSuitability >= 0.42f)
-			{
-				Column.SurfaceMaterialId = Settings.BiomeSnowMaterialId;
-			}
-		}
-		else if (Column.SurfaceVoxelHeight >= Settings.SnowMinimumHeight && Column.SurfaceMaterialId == Settings.SurfaceMaterialId)
+		if (Column.SurfaceVoxelHeight >= SnowLine && SnowRetention >= 0.30f)
 		{
-			/* Preserve the legacy fixed-height rule only for non-biome worlds. */
-			Column.SurfaceMaterialId = Settings.SnowMaterialId;
+			Column.SurfaceMaterialId = Settings.BiomeSettings.bEnabled
+				? Settings.BiomeSnowMaterialId
+				: Settings.SnowMaterialId;
 		}
 	}
 

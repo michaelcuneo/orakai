@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 13: seeded multiscale climate provinces replace the warm-lowland
-    // bias, and biome snow/ice is now driven by local climate rather than world Z.
-    static constexpr uint32 CurrentGenerationVersion = 13;
+    // Bumped to 14: broad mountain mass now creates a genuine alpine elevation
+    // range, and snow/ice is strictly altitude-gated above the alpine snowline.
+    static constexpr uint32 CurrentGenerationVersion = 14;
 
     int64 World = 1;
     int32 Terrain = 0;

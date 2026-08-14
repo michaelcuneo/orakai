@@ -210,6 +210,7 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
 
             MountainMask[RangeIndex(GridX, GridY)] =
                 Sample.MountainCore > 0.35f ? 1u : 0u;
+            MaximumAlpineHeight = FMath::Max(MaximumAlpineHeight, Sample.Height);
             bFoundPlain |= Sample.PlainsWeight > 0.65f;
             bFoundMountain |= Sample.MountainWeight > 0.65f;
             bFoundStrongDrainage |= Sample.Drainage > 0.75f;
@@ -219,6 +220,7 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
     TArray<uint8> Visited;
     Visited.SetNumZeroed(MountainMask.Num());
     int32 LongestConnectedRange = 0;
+    float MaximumAlpineHeight = -MAX_flt;
     constexpr int32 NeighbourOffsets[8][2] =
     {
         {-1, -1}, {0, -1}, {1, -1}, {-1, 0},
@@ -318,6 +320,10 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
     TestTrue(
         TEXT("A connected mountain range spans at least 2.4 kilometres"),
         LongestConnectedRange >= 2400
+    );
+    TestTrue(
+        TEXT("Mountain systems reach a genuine alpine altitude band"),
+        MaximumAlpineHeight >= Settings.BaseHeight + Settings.RidgeAmplitude * 5.0f
     );
     TestTrue(
         TEXT("Neighbouring terrain columns remain continuous"),

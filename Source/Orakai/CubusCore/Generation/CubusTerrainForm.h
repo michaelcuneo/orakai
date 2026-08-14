@@ -36,6 +36,9 @@ struct ORAKAI_API FCubusTerrainFormSettings
     float PlainsBlend = 0.18f;
     float MountainThreshold = 0.30f;
     float MountainBlend = 0.20f;
+
+    /** Broad vertical scale for mountain systems; does not amplify local ridge detail. */
+    float MountainElevationScale = 2.60f;
 };
 
 /** Useful diagnostics accompanying one natural-terrain height sample. */

@@ -30,6 +30,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         1.0f
     );
     Settings.MountainBlend = FMath::Clamp(Settings.MountainBlend, 0.001f, 1.0f);
+    Settings.MountainElevationScale = FMath::Clamp(Settings.MountainElevationScale, 1.0f, 4.0f);
 
     // RegionFrequency is an author-facing regional-detail frequency. The
     // slower tectonic field makes complete mountain systems span kilometres.
@@ -428,8 +429,14 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     // Range height comes mostly from the broad core/foothill masks. Smoothed
     // major ridges vary the summit without multiplying a razor-thin crest to
     // several times RidgeAmplitude. Local crests are deliberately subordinate.
+    /*
+     * Mountain altitude must come from the broad range mass, not from sharper
+     * ridge detail. Scaling only this kilometre-scale uplift creates a real
+     * lowland -> foothill -> alpine vertical hierarchy without reintroducing
+     * the unsupported needle peaks removed in generation v12.
+     */
     const float RangeUplift =
-        Settings.RidgeAmplitude *
+        Settings.RidgeAmplitude * Settings.MountainElevationScale *
         (
             FoothillBelt * 0.78f +
             RangeCore * (1.08f + MajorRidge * 0.92f)
