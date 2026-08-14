@@ -359,9 +359,10 @@ private:
 	TArray<FCubusFarVegetationCellBuild>			  FarVegetationBuilds;
 	TMap<FIntPoint, TArray<FCubusVegetationInstance>> FarVegetationCellCache;
 	TMap<FIntPoint, int32>							  FarVegetationCellRefinementPasses;
-	int32											  FarVegetationRefinementPass	= 0;
-	float											  TimeUntilFarVegetationPublish = 0.0f;
-	bool											  bFarVegetationRenderDirty		= false;
+	int32											  FarVegetationRefinementPass		  = 0;
+	float											  TimeUntilFarVegetationPublish		  = 0.0f;
+	bool											  bFarVegetationRenderDirty			  = false;
+	bool											  bSuppressedByWorldVegetationSetting = false;
 
 	FCubusVegetationCatalog	  VegetationCatalog;
 	FCubusVegetationRenderer  VegetationRenderer;
@@ -379,6 +380,7 @@ private:
 	void						   ApplyVegetationDistancePolicy(float VoxelSize);
 
 	void ResolveBlockWorld();
+	bool IsWorldVegetationEnabled() const;
 	void RefreshVegetationBatches();
 	void UpdateDynamicWindBridge();
 	void RefreshFarVegetationBatches();

@@ -130,6 +130,7 @@ void ACubusWorldVegetationActor::ConfigureForWorld(ACubusBlockWorldActor* InBloc
 	PublishedPlacementHash = 0;
 	TimeUntilRefresh	   = 0.0f;
 	VegetationPlacement.Reset();
+	bSuppressedByWorldVegetationSetting = false;
 
 	if (HasActorBegunPlay())
 	{
@@ -144,11 +145,18 @@ void ACubusWorldVegetationActor::BeginPlay()
 	VegetationPlacement.Reset();
 
 	ResolveBlockWorld();
+	if (!IsWorldVegetationEnabled())
+	{
+		ClearWorldVegetation();
+		ClearFarVegetation();
+		return;
+	}
+
 	RefreshVegetationBatches();
 
 #if WITH_EDITOR
 	// Auto-bake skeletal→static far proxies so the far tree ISM batches exist without manual button clicks.
-	if (bEnableFarVegetation)
+	if (bRenderWorldPlantBatches && bEnableFarVegetation)
 	{
 		EnsureFarVegetationProxyAssets(true);
 	}
@@ -164,9 +172,29 @@ void ACubusWorldVegetationActor::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	UpdateDynamicWindBridge();
 	ResolveBlockWorld();
-	UpdateFarVegetationStreaming(DeltaSeconds);
+	if (!IsWorldVegetationEnabled())
+	{
+		if (!bSuppressedByWorldVegetationSetting)
+		{
+			ClearWorldVegetation();
+			ClearFarVegetation();
+			bSuppressedByWorldVegetationSetting = true;
+		}
+		return;
+	}
+
+	bSuppressedByWorldVegetationSetting = false;
+	UpdateDynamicWindBridge();
+	if (bRenderWorldPlantBatches)
+	{
+		UpdateFarVegetationStreaming(DeltaSeconds);
+	}
+	else if (!FarVegetationBuilds.IsEmpty() || !FarCatalogStaticBatchComponents.IsEmpty() || !PendingFarVegetationCells.IsEmpty() ||
+			 !FarVegetationCellCache.IsEmpty())
+	{
+		ClearFarVegetation();
+	}
 
 	TimeUntilRefresh -= DeltaSeconds;
 	if (TimeUntilRefresh > 0.0f)
@@ -799,6 +827,11 @@ bool ACubusWorldVegetationActor::FindInteractiveTreeAlongRay(const FVector& Trac
 
 bool ACubusWorldVegetationActor::EnsureFarVegetationProxyAssets(const bool bSaveGeneratedAssets)
 {
+	if (!bRenderWorldPlantBatches)
+	{
+		return false;
+	}
+
 #if WITH_EDITOR
 	UWorld* World = GetWorld();
 
@@ -931,6 +964,11 @@ bool ACubusWorldVegetationActor::EnsureFarVegetationProxyAssets(const bool bSave
 void ACubusWorldVegetationActor::BakeFarVegetationProxies()
 {
 #if WITH_EDITOR
+	if (!bRenderWorldPlantBatches)
+	{
+		return;
+	}
+
 	EnsureFarVegetationProxyAssets(true);
 	RefreshVegetationBatches();
 	RefreshFarVegetationBatches();
@@ -950,7 +988,7 @@ void ACubusWorldVegetationActor::RefreshFarVegetationBatches()
 
 	FarCatalogStaticBatchComponents.Reset();
 
-	if (!bEnableFarVegetation)
+	if (!bRenderWorldPlantBatches || !bEnableFarVegetation)
 	{
 		return;
 	}
@@ -1062,6 +1100,12 @@ void ACubusWorldVegetationActor::RefreshFarVegetationBatches()
 void ACubusWorldVegetationActor::RebuildWorldVegetation()
 {
 	ResolveBlockWorld();
+	if (!IsWorldVegetationEnabled())
+	{
+		ClearWorldVegetation();
+		ClearFarVegetation();
+		return;
+	}
 
 	const FCubusVegetationRandomizationSettings RandomizationSettings{
 		bEnableRuntimeRandomization, RuntimeRandomizationSeed,			RandomPruneProbability, RandomScaleJitterMin,
@@ -1786,6 +1830,11 @@ void ACubusWorldVegetationActor::ResolveBlockWorld()
 	}
 }
 
+bool ACubusWorldVegetationActor::IsWorldVegetationEnabled() const
+{
+	return IsValid(BlockWorld) && BlockWorld->IsWorldVegetationEnabled();
+}
+
 uint32 ACubusWorldVegetationActor::CalculateVegetationSettingsHash() const
 {
 	const FCubusVegetationRandomizationSettings RandomizationSettings{
@@ -2033,7 +2082,7 @@ void ACubusWorldVegetationActor::UpdateFarVegetationStreaming(const float DeltaS
 
 	TimeUntilFarVegetationPublish -= DeltaSeconds;
 
-	if (!bEnableFarVegetation || !IsValid(BlockWorld))
+	if (!bRenderWorldPlantBatches || !bEnableFarVegetation || !IsValid(BlockWorld))
 	{
 		return;
 	}
@@ -2272,7 +2321,7 @@ void ACubusWorldVegetationActor::UpdateFarVegetationStreaming(const float DeltaS
 
 void ACubusWorldVegetationActor::PublishFarVegetation(const FVector& CameraLocation, const float VoxelSize)
 {
-	if (!bEnableFarVegetation)
+	if (!bRenderWorldPlantBatches || !bEnableFarVegetation)
 	{
 		return;
 	}

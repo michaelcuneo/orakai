@@ -5,14 +5,11 @@
 #include "CubusCore/Data/CubusBlockVoxel.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Generation/CubusBiomeField.h"
-#include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Generation/CubusLandmarkField.h"
 
-void FCubusBlockTerrainBiomeGenerator::Apply(
-	FCubusBlockChunkData& Chunk,
-	const UCubusGeologyProfile* GeologyProfile,
-	const FCubusHydrologySettings* HydrologySettings)
+void FCubusBlockTerrainBiomeGenerator::Apply(FCubusBlockChunkData& Chunk, const UCubusGeologyProfile* GeologyProfile,
+											 const FCubusHydrologySettings* HydrologySettings)
 {
 	if (!IsValid(GeologyProfile))
 	{
@@ -22,21 +19,20 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
 
 	if (!GeologyProfile->bGenerateBiomes)
 	{
-		FCubusBlockVegetationGenerator::Generate(Chunk, GeologyProfile);
 		return;
 	}
 
-	const FIntVector ChunkCoordinate = Chunk.GetChunkCoordinate();
-	const int32 BaseX = ChunkCoordinate.X * Cubus::ChunkSize;
-	const int32 BaseY = ChunkCoordinate.Y * Cubus::ChunkSize;
-	const int32 BaseZ = ChunkCoordinate.Z * Cubus::ChunkSize;
-	const int32 BiomeSeed = Chunk.GetGenerationSeeds().Biomes;
-	const int32 RiverSeed = Chunk.GetGenerationSeeds().Rivers;
-	FCubusBiomeFieldSettings BiomeSettings = FCubusBiomeField::MakeSettings(GeologyProfile, BiomeSeed, RiverSeed);
+	const FIntVector		 ChunkCoordinate = Chunk.GetChunkCoordinate();
+	const int32				 BaseX			 = ChunkCoordinate.X * Cubus::ChunkSize;
+	const int32				 BaseY			 = ChunkCoordinate.Y * Cubus::ChunkSize;
+	const int32				 BaseZ			 = ChunkCoordinate.Z * Cubus::ChunkSize;
+	const int32				 BiomeSeed		 = Chunk.GetGenerationSeeds().Biomes;
+	const int32				 RiverSeed		 = Chunk.GetGenerationSeeds().Rivers;
+	FCubusBiomeFieldSettings BiomeSettings	 = FCubusBiomeField::MakeSettings(GeologyProfile, BiomeSeed, RiverSeed);
 	if (HydrologySettings != nullptr)
 	{
 		BiomeSettings.HydrologySettings = *HydrologySettings;
-		BiomeSettings.bGenerateRivers = HydrologySettings->bEnabled;
+		BiomeSettings.bGenerateRivers	= HydrologySettings->bEnabled;
 	}
 
 	const FCubusLandmarkFieldSettings LandmarkSettings =
@@ -46,10 +42,10 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
 	const int32 TerrainOffsetY =
 		(FCubusGenerationSeeds::DomainOffsetY(Chunk.GetGenerationSeeds().Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
 
-	int32 PlainsCount = 0;
-	int32 ForestCount = 0;
-	int32 RockyCount = 0;
-	int32 WetlandCount = 0;
+	int32 PlainsCount		= 0;
+	int32 ForestCount		= 0;
+	int32 RockyCount		= 0;
+	int32 WetlandCount		= 0;
 	int32 BuriedColumnCount = 0;
 
 	for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
@@ -77,8 +73,8 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
 				continue;
 			}
 
-			const int32 WestSurface = FindSurfaceLocalZ(Chunk, FMath::Max(0, LocalX - 1), LocalY);
-			const int32 EastSurface = FindSurfaceLocalZ(Chunk, FMath::Min(Cubus::ChunkSize - 1, LocalX + 1), LocalY);
+			const int32 WestSurface	 = FindSurfaceLocalZ(Chunk, FMath::Max(0, LocalX - 1), LocalY);
+			const int32 EastSurface	 = FindSurfaceLocalZ(Chunk, FMath::Min(Cubus::ChunkSize - 1, LocalX + 1), LocalY);
 			const int32 SouthSurface = FindSurfaceLocalZ(Chunk, LocalX, FMath::Max(0, LocalY - 1));
 			const int32 NorthSurface = FindSurfaceLocalZ(Chunk, LocalX, FMath::Min(Cubus::ChunkSize - 1, LocalY + 1));
 
@@ -86,20 +82,14 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
 				(EastSurface != INDEX_NONE && WestSurface != INDEX_NONE) ? static_cast<float>(EastSurface - WestSurface) * 0.5f : 0.0f;
 			const float GradientY =
 				(NorthSurface != INDEX_NONE && SouthSurface != INDEX_NONE) ? static_cast<float>(NorthSurface - SouthSurface) * 0.5f : 0.0f;
-			const float LocalSlope = FMath::Sqrt(GradientX * GradientX + GradientY * GradientY);
-			const int32 WorldX = BaseX + LocalX;
-			const int32 SurfaceWorldZ = BaseZ + SurfaceLocalZ;
-			const FCubusBiomeSample BiomeSample = FCubusBiomeField::Sample(
-				static_cast<float>(WorldX),
-				static_cast<float>(WorldY),
-				static_cast<float>(SurfaceWorldZ),
-				LocalSlope,
-				BiomeSettings);
+			const float				   LocalSlope	 = FMath::Sqrt(GradientX * GradientX + GradientY * GradientY);
+			const int32				   WorldX		 = BaseX + LocalX;
+			const int32				   SurfaceWorldZ = BaseZ + SurfaceLocalZ;
+			const FCubusBiomeSample	   BiomeSample = FCubusBiomeField::Sample(static_cast<float>(WorldX), static_cast<float>(WorldY),
+																			  static_cast<float>(SurfaceWorldZ), LocalSlope, BiomeSettings);
 			const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(
-				static_cast<float>(WorldX + TerrainOffsetX),
-				static_cast<float>(WorldY + TerrainOffsetY),
-				LandmarkSettings);
-			const bool bIsLandmark = LandmarkSample.IsInside();
+				static_cast<float>(WorldX + TerrainOffsetX), static_cast<float>(WorldY + TerrainOffsetY), LandmarkSettings);
+			const bool	bIsLandmark = LandmarkSample.IsInside();
 			const int32 SelectedMaterialId =
 				bIsLandmark ? FMath::Max(1, LandmarkSettings.SurfaceMaterialId) : BiomeSample.SurfaceMaterialId;
 
@@ -130,12 +120,10 @@ void FCubusBlockTerrainBiomeGenerator::Apply(
 		}
 	}
 
-	FCubusBlockVegetationGenerator::Generate(Chunk, GeologyProfile);
-
 	UE_LOG(LogTemp, Verbose,
-		TEXT("Cubus biomes chunk (%d, %d, %d), seed %d: plains %d, forest %d, rocky %d, wetland %d, buried skipped %d"),
-		ChunkCoordinate.X, ChunkCoordinate.Y, ChunkCoordinate.Z, BiomeSeed, PlainsCount, ForestCount, RockyCount, WetlandCount,
-		BuriedColumnCount);
+		   TEXT("Cubus biomes chunk (%d, %d, %d), seed %d: plains %d, forest %d, rocky %d, wetland %d, buried skipped %d"),
+		   ChunkCoordinate.X, ChunkCoordinate.Y, ChunkCoordinate.Z, BiomeSeed, PlainsCount, ForestCount, RockyCount, WetlandCount,
+		   BuriedColumnCount);
 }
 
 int32 FCubusBlockTerrainBiomeGenerator::FindSurfaceLocalZ(const FCubusBlockChunkData& Chunk, const int32 LocalX, const int32 LocalY)

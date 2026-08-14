@@ -20,582 +20,499 @@ class FCubusBlockChunkData;
 
 struct FCubusStreamingChunkBuild
 {
-    FIntVector Coordinate =
-        FIntVector::ZeroValue;
+	FIntVector Coordinate = FIntVector::ZeroValue;
 
-    TWeakObjectPtr<ACubusVoxelVolumeActor> Chunk;
+	TWeakObjectPtr<ACubusVoxelVolumeActor> Chunk;
 
-    UE::Tasks::TTask<
-        FCubusDensityMeshBuildResult
-    > Task;
+	UE::Tasks::TTask<FCubusDensityMeshBuildResult> Task;
 };
 
-UCLASS(
-    BlueprintType,
-    Blueprintable,
-    Config = GameUserSettings,
-    ClassGroup = "Cubus",
-    meta = (DisplayName = "Cubus Block World")
-)
+UCLASS(BlueprintType, Blueprintable, Config = GameUserSettings, ClassGroup = "Cubus", meta = (DisplayName = "Cubus Block World"))
 class ORAKAI_API ACubusBlockWorldActor : public AActor
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    ACubusBlockWorldActor();
+	ACubusBlockWorldActor();
 
-    virtual void OnConstruction(const FTransform& Transform) override;
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaSeconds) override;
+	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 
-    void RegisterChunk(ACubusVoxelVolumeActor* ChunkActor);
-    void UnregisterChunk(ACubusVoxelVolumeActor* ChunkActor);
+	void RegisterChunk(ACubusVoxelVolumeActor* ChunkActor);
+	void UnregisterChunk(ACubusVoxelVolumeActor* ChunkActor);
 
-    ACubusVoxelVolumeActor* FindChunk(const FIntVector& ChunkCoordinate) const;
-    const TMap<
-        FIntVector,
-        TWeakObjectPtr<ACubusVoxelVolumeActor>
-    >& GetRegisteredChunks() const
-    {
-        return ChunksByCoordinate;
-    }
-    void RebuildChunkAndNeighbours(const FIntVector& ChunkCoordinate);
-    void QueueChunkForRebuild(const FIntVector& ChunkCoordinate);
-    void QueueChunkAndFaceNeighboursForRebuild(const FIntVector& ChunkCoordinate);
-    void QueueDensityEditDependenciesForRebuild(
-        const FIntVector& ChangedSampleMinimum,
-        const FIntVector& ChangedSampleMaximum
-    );
-    FCubusDensityEditMap BuildDensityEditSnapshot(const FIntVector& ChunkCoordinate) const;
-    bool BuildBlockEditOverlayChunk(const FIntVector& ChunkCoordinate, FCubusBlockChunkData& OutChunk) const;
+	ACubusVoxelVolumeActor*											FindChunk(const FIntVector& ChunkCoordinate) const;
+	const TMap<FIntVector, TWeakObjectPtr<ACubusVoxelVolumeActor>>& GetRegisteredChunks() const { return ChunksByCoordinate; }
+	void															RebuildChunkAndNeighbours(const FIntVector& ChunkCoordinate);
+	void															QueueChunkForRebuild(const FIntVector& ChunkCoordinate);
+	void QueueChunkAndFaceNeighboursForRebuild(const FIntVector& ChunkCoordinate);
+	void QueueDensityEditDependenciesForRebuild(const FIntVector& ChangedSampleMinimum, const FIntVector& ChangedSampleMaximum);
+	FCubusDensityEditMap BuildDensityEditSnapshot(const FIntVector& ChunkCoordinate) const;
+	bool				 BuildBlockEditOverlayChunk(const FIntVector& ChunkCoordinate, FCubusBlockChunkData& OutChunk) const;
 
-    const FCubusGenerationSeeds GetGenerationSeeds() const
-    {
-        return FCubusGenerationSeeds::FromWorldSeed(WorldSeed);
-    }
+	const FCubusGenerationSeeds GetGenerationSeeds() const { return FCubusGenerationSeeds::FromWorldSeed(WorldSeed); }
 
-    UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Seed")
-    int64 GetWorldSeed() const { return WorldSeed; }
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Seed")
+	int64 GetWorldSeed() const { return WorldSeed; }
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Client Settings")
-    void SetClientViewDistance(int32 InHorizontalViewRadius, int32 InVerticalViewRadius, bool bSaveSetting = true);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Client Settings")
+	void SetClientViewDistance(int32 InHorizontalViewRadius, int32 InVerticalViewRadius, bool bSaveSetting = true);
 
-    UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
-    int32 GetClientHorizontalViewDistance() const { return HorizontalViewRadius; }
+	UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
+	int32 GetClientHorizontalViewDistance() const { return HorizontalViewRadius; }
 
-    UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
-    int32 GetClientVerticalViewDistance() const { return VerticalViewRadius; }
+	UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
+	int32 GetClientVerticalViewDistance() const { return VerticalViewRadius; }
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Client Settings")
-    void SetClientChunkLoadRate(int32 InMaxChunksGeneratedPerTick, bool bSaveSetting = true);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Client Settings")
+	void SetClientChunkLoadRate(int32 InMaxChunksGeneratedPerTick, bool bSaveSetting = true);
 
-    UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
-    int32 GetClientChunkLoadRate() const { return MaxChunksGeneratedPerTick; }
+	UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
+	int32 GetClientChunkLoadRate() const { return MaxChunksGeneratedPerTick; }
 
-    /** Canonical LOD0 voxel size used by world-space systems such as vegetation. */
-    float GetGeneratedVoxelSize() const
-    {
-        return GeneratedVoxelSize;
-    }
+	/** Canonical LOD0 voxel size used by world-space systems such as vegetation. */
+	float GetGeneratedVoxelSize() const { return GeneratedVoxelSize; }
 
-    UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Spawn")
-    bool IsInitialSpawnAreaReady() const { return bInitialSpawnAreaReady; }
+	bool IsWorldVegetationEnabled() const { return bEnableWorldVegetation; }
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
-    void GenerateChunkGrid();
+	UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Spawn")
+	bool IsInitialSpawnAreaReady() const { return bInitialSpawnAreaReady; }
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
-    void ClearGeneratedChunks();
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
+	void GenerateChunkGrid();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
-    void RefreshChunkRegistry();
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
+	void ClearGeneratedChunks();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
-    void RebuildAllChunks();
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
+	void RefreshChunkRegistry();
 
-    UFUNCTION(BlueprintPure, Category = "Cubus|Rendering")
-    ECubusVoxelRenderMode GetVoxelRenderMode() const;
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
+	void RebuildAllChunks();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Terrain")
-    void RegenerateTerrain();
+	UFUNCTION(BlueprintPure, Category = "Cubus|Rendering")
+	ECubusVoxelRenderMode GetVoxelRenderMode() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
-    bool EditVoxelAtWorldVoxel(FIntVector WorldVoxel, int32 MaterialId, bool bIsWater);
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Terrain")
+	void RegenerateTerrain();
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
-    int32 EditBlockSphereAtWorldVoxel(FIntVector CentreWorldVoxel, int32 BrushRadius, int32 MaterialId, bool bIsWater = false);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+	bool EditVoxelAtWorldVoxel(FIntVector WorldVoxel, int32 MaterialId, bool bIsWater);
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
-    int32 EditDensitySphereAtWorldSample(FIntVector CentreWorldSample, int32 BrushRadius, float DensityDelta, int32 MaterialId = 1);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+	int32 EditBlockSphereAtWorldVoxel(FIntVector CentreWorldVoxel, int32 BrushRadius, int32 MaterialId, bool bIsWater = false);
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
-    int32 SmoothDensityEditsAtWorldSample(FIntVector CentreWorldSample, int32 BrushRadius, float Strength);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+	int32 EditDensitySphereAtWorldSample(FIntVector CentreWorldSample, int32 BrushRadius, float DensityDelta, int32 MaterialId = 1);
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
-    int32 LevelDensityEditsAtWorldSample(FIntVector CentreWorldSample, int32 BrushRadius, float Strength, int32 MaterialId = 1);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+	int32 SmoothDensityEditsAtWorldSample(FIntVector CentreWorldSample, int32 BrushRadius, float Strength);
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
-    int32 RestoreDensityEditsAtWorldSample(FIntVector CentreWorldSample, int32 BrushRadius, float Strength);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+	int32 LevelDensityEditsAtWorldSample(FIntVector CentreWorldSample, int32 BrushRadius, float Strength, int32 MaterialId = 1);
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
-    bool ClearVoxelEditAtWorldVoxel(FIntVector WorldVoxel);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+	int32 RestoreDensityEditsAtWorldSample(FIntVector CentreWorldSample, int32 BrushRadius, float Strength);
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
-    void RecordFoliageEditAtWorldVoxel(FIntVector WorldVoxel, int32 TypeId, float RotationYaw, float Scale);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+	bool ClearVoxelEditAtWorldVoxel(FIntVector WorldVoxel);
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
-    void RemoveFoliageAtWorldVoxel(FIntVector WorldVoxel);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+	void RecordFoliageEditAtWorldVoxel(FIntVector WorldVoxel, int32 TypeId, float RotationYaw, float Scale);
 
-    UFUNCTION(BlueprintCallable, Category = "Cubus|Gameplay")
-    bool HarvestTreeAlongRay(FVector TraceStart, FVector TraceEnd, float SelectionRadius, FIntVector& OutTreeWorldVoxel);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Edits")
+	void RemoveFoliageAtWorldVoxel(FIntVector WorldVoxel);
 
-    void ReleaseHeldPawnAtLocation(APawn* PlayerPawn, const FVector& ReleaseLocation);
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Gameplay")
+	bool HarvestTreeAlongRay(FVector TraceStart, FVector TraceEnd, float SelectionRadius, FIntVector& OutTreeWorldVoxel);
+
+	void ReleaseHeldPawnAtLocation(APawn* PlayerPawn, const FVector& ReleaseLocation);
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
-    TObjectPtr<USceneComponent> WorldRoot;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
+	TObjectPtr<USceneComponent> WorldRoot;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Seed")
-    int64 WorldSeed = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Seed")
+	int64 WorldSeed = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
-    bool bConnectToSpacetimeDB = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
+	bool bConnectToSpacetimeDB = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
-    FString SpacetimeServerUri = TEXT("127.0.0.1:3000");
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
+	FString SpacetimeServerUri = TEXT("127.0.0.1:3000");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
-    FString SpacetimeDatabaseName = TEXT("orakai");
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
+	FString SpacetimeDatabaseName = TEXT("orakai");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
-    FString SpacetimeTokenFilePath = TEXT(".spacetime_orakai");
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Persistence")
+	FString SpacetimeTokenFilePath = TEXT(".spacetime_orakai");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
-    FIntVector GridDimensions = FIntVector(2, 2, 1);
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
+	FIntVector GridDimensions = FIntVector(2, 2, 1);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
-    FIntVector GridOrigin = FIntVector::ZeroValue;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
+	FIntVector GridOrigin = FIntVector::ZeroValue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation", meta = (ClampMin = "1.0", Units = "cm"))
-    float GeneratedVoxelSize = 100.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation", meta = (ClampMin = "1.0", Units = "cm"))
+	float GeneratedVoxelSize = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD")
-    bool bEnableDensityLod = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD")
+	bool bEnableDensityLod = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", ClampMax = "100.0", Units = "cm"))
-    float DensityNearSampleSpacing = 25.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD",
+			  meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", ClampMax = "100.0", Units = "cm"))
+	float DensityNearSampleSpacing = 25.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "0", UIMax = "8"))
-    int32 DensityNearChunkRadius = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD",
+			  meta = (EditCondition = "bEnableDensityLod", ClampMin = "0", UIMax = "8"))
+	int32 DensityNearChunkRadius = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", ClampMax = "100.0", Units = "cm"))
-    float DensityMiddleSampleSpacing = 50.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD",
+			  meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", ClampMax = "100.0", Units = "cm"))
+	float DensityMiddleSampleSpacing = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "0", UIMax = "16"))
-    int32 DensityMiddleChunkRadius = 3;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD",
+			  meta = (EditCondition = "bEnableDensityLod", ClampMin = "0", UIMax = "16"))
+	int32 DensityMiddleChunkRadius = 3;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", Units = "cm"))
-    float DensityFarSampleSpacing = 100.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD",
+			  meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", Units = "cm"))
+	float DensityFarSampleSpacing = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
-    TSubclassOf<ACubusVoxelVolumeActor> ChunkActorClass;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
+	TSubclassOf<ACubusVoxelVolumeActor> ChunkActorClass;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming")
-    bool bEnableRuntimeStreaming = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming")
+	bool bEnableRuntimeStreaming = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation")
-    bool bEnableWorldVegetation = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation")
+	bool bEnableWorldVegetation = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation")
-    TSubclassOf<ACubusWorldVegetationActor> WorldVegetationActorClass;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation")
+	TSubclassOf<ACubusWorldVegetationActor> WorldVegetationActorClass;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "16"))
-    int32 InitialLoadRadius = 2;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "16"))
+	int32 InitialLoadRadius = 2;
 
-    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "32"))
-    int32 HorizontalViewRadius = 4;
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "32"))
+	int32 HorizontalViewRadius = 4;
 
-    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
-    int32 VerticalViewRadius = 2;
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
+	int32 VerticalViewRadius = 2;
 
-    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
-    int32 MaxChunksGeneratedPerTick = 8;
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
+	int32 MaxChunksGeneratedPerTick = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
-    int32 MaxChunksRemovedPerTick = 2;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
+	int32 MaxChunksRemovedPerTick = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
-    int32 MaxDirtyChunksRebuiltPerTick = 2;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
+	int32 MaxDirtyChunksRebuiltPerTick = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", UIMax = "16"))
-    int32 MaxAtomicDensityChunksStagedPerTick = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", UIMax = "16"))
+	int32 MaxAtomicDensityChunksStagedPerTick = 1;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Density Editing",
-        meta = (
-            ClampMin = "1",
-            ClampMax = "16",
-            UIMax = "8"
-        )
-    )
-    int32 MaxConcurrentDensityBuilds = 4;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
+	int32 MaxConcurrentDensityBuilds = 4;
 
-    /*
-    * Maximum number of completed density meshes uploaded into hidden staging
-    * components during one game-thread tick.
-    *
-    * Uploads remain invisible until the complete transaction is committed.
-    */
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Density Editing",
-        meta = (
-            ClampMin = "1",
-            ClampMax = "16",
-            UIMax = "8"
-        )
-    )
-    int32 MaxAtomicDensityUploadsPerTick = 4;
+	/*
+	 * Maximum number of completed density meshes uploaded into hidden staging
+	 * components during one game-thread tick.
+	 *
+	 * Uploads remain invisible until the complete transaction is committed.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
+	int32 MaxAtomicDensityUploadsPerTick = 4;
 
-    /*
-    * Soft game-thread time budget for hidden density mesh uploads.
-    *
-    * At least one pending upload is allowed each tick so an individually
-    * expensive chunk can never permanently stall the transaction.
-    *
-    * The hard MaxAtomicDensityUploadsPerTick limit still applies as well.
-    */
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Density Editing",
-        meta = (
-            ClampMin = "0.25",
-            ClampMax = "16.0",
-            UIMax = "8.0",
-            Units = "ms"
-        )
-    )
-    float MaxAtomicDensityUploadMillisecondsPerTick = 3.0f;
+	/*
+	 * Soft game-thread time budget for hidden density mesh uploads.
+	 *
+	 * At least one pending upload is allowed each tick so an individually
+	 * expensive chunk can never permanently stall the transaction.
+	 *
+	 * The hard MaxAtomicDensityUploadsPerTick limit still applies as well.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing",
+			  meta = (ClampMin = "0.25", ClampMax = "16.0", UIMax = "8.0", Units = "ms"))
+	float MaxAtomicDensityUploadMillisecondsPerTick = 3.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0.05", Units = "s"))
-    float StreamingUpdateInterval = 0.25f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0.05", Units = "s"))
+	float StreamingUpdateInterval = 0.25f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn")
-    bool bHoldPawnUntilInitialAreaReady = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn")
+	bool bHoldPawnUntilInitialAreaReady = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn", meta = (ClampMin = "0.0", Units = "cm"))
-    float SpawnHeightOffset = 200.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn", meta = (ClampMin = "0.0", Units = "cm"))
+	float SpawnHeightOffset = 200.0f;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming|Spawn",
-        meta = (
-            ClampMin = "1",
-            ClampMax = "16",
-            UIMax = "8"
-        )
-    )
-    int32 MaxConcurrentStreamingChunkBuilds = 4;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn",
+			  meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
+	int32 MaxConcurrentStreamingChunkBuilds = 1;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming|Spawn",
-        meta = (
-            ClampMin = "1",
-            ClampMax = "16",
-            UIMax = "8"
-        )
-    )
-    int32 MaxStreamingChunkUploadsPerTick = 4;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn",
+			  meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
+	int32 MaxStreamingChunkUploadsPerTick = 1;
 
-    UPROPERTY(
-        EditAnywhere,
-        BlueprintReadWrite,
-        Category = "Cubus|Runtime Streaming|Spawn",
-        meta = (
-            ClampMin = "0",
-            ClampMax = "4",
-            UIMax = "2"
-        )
-    )
-    int32 InitialVerticalLoadRadius = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn",
+			  meta = (ClampMin = "0", ClampMax = "4", UIMax = "2"))
+	int32 InitialVerticalLoadRadius = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
-    bool bUseHeightTerrain = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
+	bool bUseHeightTerrain = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
-    int32 TerrainSurfaceWorldZ = 8;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
+	int32 TerrainSurfaceWorldZ = 8;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
-    int32 TerrainBaseHeight = 8;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain")
+	int32 TerrainBaseHeight = 8;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
-    float TerrainContinentAmplitude = 18.0f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
-    float TerrainContinentFrequency = 0.003f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
-    float TerrainHillAmplitude = 10.0f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
-    float TerrainHillFrequency = 0.015f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
-    float TerrainDetailAmplitude = 2.0f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
-    float TerrainDetailFrequency = 0.08f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
-    float TerrainRidgeAmplitude = 16.0f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
-    float TerrainRidgeFrequency = 0.012f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
-    float TerrainValleyDepth = 14.0f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
-    float TerrainValleyFrequency = 0.006f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float TerrainValleyWidth = 0.08f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.001", ClampMax = "1.0"))
-    float TerrainValleyFalloff = 0.22f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
-    float TerrainValleyWarpAmplitude = 24.0f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
-    float TerrainValleyWarpFrequency = 0.004f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "0.000001"))
-    float TerrainRegionFrequency = 0.0025f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
-    float TerrainPlainsThreshold = -0.25f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "0.001", ClampMax = "1.0"))
-    float TerrainPlainsBlend = 0.18f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
-    float TerrainMountainThreshold = 0.30f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "0.001", ClampMax = "1.0"))
-    float TerrainMountainBlend = 0.20f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
+	float TerrainContinentAmplitude = 18.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
+	float TerrainContinentFrequency = 0.003f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
+	float TerrainHillAmplitude = 10.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
+	float TerrainHillFrequency = 0.015f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
+	float TerrainDetailAmplitude = 2.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
+	float TerrainDetailFrequency = 0.08f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
+	float TerrainRidgeAmplitude = 16.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
+	float TerrainRidgeFrequency = 0.012f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
+	float TerrainValleyDepth = 14.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
+	float TerrainValleyFrequency = 0.006f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float TerrainValleyWidth = 0.08f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.001", ClampMax = "1.0"))
+	float TerrainValleyFalloff = 0.22f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.0"))
+	float TerrainValleyWarpAmplitude = 24.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Shape", meta = (ClampMin = "0.000001"))
+	float TerrainValleyWarpFrequency = 0.004f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "0.000001"))
+	float TerrainRegionFrequency = 0.0025f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
+	float TerrainPlainsThreshold = -0.25f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "0.001", ClampMax = "1.0"))
+	float TerrainPlainsBlend = 0.18f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
+	float TerrainMountainThreshold = 0.30f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Regions", meta = (ClampMin = "0.001", ClampMax = "1.0"))
+	float TerrainMountainBlend = 0.20f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
-    TObjectPtr<UCubusMaterialRegistry> MaterialRegistry = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Rendering")
+	TObjectPtr<UCubusMaterialRegistry> MaterialRegistry = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials")
-    bool bEnableWeatherMaterialBridge = true;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.01", Units = "s"))
-    float WeatherMaterialUpdateInterval = 0.1f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0"))
-    float WeatherWettingRate = 0.12f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0"))
-    float WeatherDryingRate = 0.015f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0", ClampMax = "1.0"))
-    float WeatherWetDarkening = 0.65f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials", meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0", ClampMax = "1.0"))
-    float WeatherWetRoughness = 0.12f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials|Testing", meta = (EditCondition = "bEnableWeatherMaterialBridge"))
-    bool bOverrideWeatherRainIntensity = false;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials|Testing", meta = (EditCondition = "bEnableWeatherMaterialBridge && bOverrideWeatherRainIntensity", ClampMin = "0.0", ClampMax = "1.0"))
-    float WeatherRainIntensityOverride = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials")
+	bool bEnableWeatherMaterialBridge = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials",
+			  meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.01", Units = "s"))
+	float WeatherMaterialUpdateInterval = 0.1f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials",
+			  meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0"))
+	float WeatherWettingRate = 0.12f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials",
+			  meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0"))
+	float WeatherDryingRate = 0.015f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials",
+			  meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0", ClampMax = "1.0"))
+	float WeatherWetDarkening = 0.65f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials",
+			  meta = (EditCondition = "bEnableWeatherMaterialBridge", ClampMin = "0.0", ClampMax = "1.0"))
+	float WeatherWetRoughness = 0.12f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials|Testing",
+			  meta = (EditCondition = "bEnableWeatherMaterialBridge"))
+	bool bOverrideWeatherRainIntensity = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Weather|Materials|Testing",
+			  meta = (EditCondition = "bEnableWeatherMaterialBridge && bOverrideWeatherRainIntensity", ClampMin = "0.0", ClampMax = "1.0"))
+	float WeatherRainIntensityOverride = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Geology")
-    TObjectPtr<UCubusGeologyProfile> GeologyProfile = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Geology")
+	TObjectPtr<UCubusGeologyProfile> GeologyProfile = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
-    int32 TerrainRockMaterialId = 3;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
-    int32 TerrainSnowMaterialId = 4;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "0.0"))
-    float TerrainRockSlopeThreshold = 1.25f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials")
-    int32 TerrainSnowMinimumHeight = 34;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water")
-    bool bGenerateWater = true;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water")
-    int32 TerrainWaterLevel = 8;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water", meta = (ClampMin = "1"))
-    int32 TerrainWaterMaterialId = 5;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
-    int32 TerrainSurfaceMaterialId = 1;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
-    int32 TerrainSubsurfaceMaterialId = 2;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
+	int32 TerrainRockMaterialId = 3;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
+	int32 TerrainSnowMaterialId = 4;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "0.0"))
+	float TerrainRockSlopeThreshold = 1.25f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials")
+	int32 TerrainSnowMinimumHeight = 34;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water")
+	bool bGenerateWater = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water")
+	int32 TerrainWaterLevel = 8;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water", meta = (ClampMin = "1"))
+	int32 TerrainWaterMaterialId = 5;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
+	int32 TerrainSurfaceMaterialId = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "1"))
+	int32 TerrainSubsurfaceMaterialId = 2;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
-    int32 RegisteredChunkCount = 0;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
-    int32 GeneratedChunkCount = 0;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
-    int32 PendingRuntimeChunkCount = 0;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
-    bool bInitialSpawnAreaReady = false;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
-    bool bWeatherMaterialBridgeConnected = false;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
-    float CurrentWeatherRainIntensity = 0.0f;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
-    float CurrentMaterialWetness = 0.0f;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+	int32 RegisteredChunkCount = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+	int32 GeneratedChunkCount = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+	int32 PendingRuntimeChunkCount = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+	bool bInitialSpawnAreaReady = false;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
+	bool bWeatherMaterialBridgeConnected = false;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
+	float CurrentWeatherRainIntensity = 0.0f;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
+	float CurrentMaterialWetness = 0.0f;
 
 private:
-    TMap<
-        FIntVector,
-        TWeakObjectPtr<ACubusVoxelVolumeActor>
-    > ChunksByCoordinate;
+	TMap<FIntVector, TWeakObjectPtr<ACubusVoxelVolumeActor>> ChunksByCoordinate;
 
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<ACubusVoxelVolumeActor>> GeneratedChunks;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<ACubusVoxelVolumeActor>> GeneratedChunks;
 
-    TArray<FIntVector> PendingChunkGeneration;
-    TArray<FIntVector> PendingChunkRemoval;
+	TArray<FIntVector> PendingChunkGeneration;
+	TArray<FIntVector> PendingChunkRemoval;
 
-    /*
-    * Ordinary block/streaming rebuilds may publish independently.
-    */
-    TSet<FIntVector> DirtyChunkCoordinates;
+	/*
+	 * Ordinary block/streaming rebuilds may publish independently.
+	 */
+	TSet<FIntVector> DirtyChunkCoordinates;
 
-    /*
-    * Density edits may never publish independently.
-    *
-    * Every loaded chunk in this set is rebuilt into its hidden staging
-    * component first. Only after the complete set is ready do we publish
-    * the batch.
-    */
-    TSet<FIntVector> AtomicDensityDirtyChunkCoordinates;
+	/*
+	 * Density edits may never publish independently.
+	 *
+	 * Every loaded chunk in this set is rebuilt into its hidden staging
+	 * component first. Only after the complete set is ready do we publish
+	 * the batch.
+	 */
+	TSet<FIntVector> AtomicDensityDirtyChunkCoordinates;
 
-    TArray<FCubusStreamingChunkBuild> StreamingChunkBuilds;
+	TArray<FCubusStreamingChunkBuild> StreamingChunkBuilds;
 
-    TSet<FIntVector> StreamingChunksBuilding;
+	TSet<FIntVector> StreamingChunksBuilding;
 
-    TSet<FIntVector> StreamingChunksReady;
+	TSet<FIntVector> StreamingChunksReady;
 
-    /*
-    * Current hidden density rebuild transaction.
-    *
-    * The visible terrain remains on the previous committed revision until every
-    * coordinate in ActiveAtomicDensityBatchCoordinates has been staged.
-    */
-    TArray<FIntVector> ActiveAtomicDensityBatchCoordinates;
+	/*
+	 * Current hidden density rebuild transaction.
+	 *
+	 * The visible terrain remains on the previous committed revision until every
+	 * coordinate in ActiveAtomicDensityBatchCoordinates has been staged.
+	 */
+	TArray<FIntVector> ActiveAtomicDensityBatchCoordinates;
 
-    TArray<
-        TWeakObjectPtr<ACubusVoxelVolumeActor>
-    > ActiveAtomicDensityStagedChunks;
+	TArray<TWeakObjectPtr<ACubusVoxelVolumeActor>> ActiveAtomicDensityStagedChunks;
 
-    int32 ActiveAtomicDensityBuildIndex = 0;
+	int32 ActiveAtomicDensityBuildIndex = 0;
 
-    struct FAtomicDensityAsyncBuild
-    {
-        FIntVector ChunkCoordinate =
-            FIntVector::ZeroValue;
+	struct FAtomicDensityAsyncBuild
+	{
+		FIntVector ChunkCoordinate = FIntVector::ZeroValue;
 
-        uint64 Revision = 0;
+		uint64 Revision = 0;
 
-        UE::Tasks::TTask<
-            FCubusDensityMeshBuildResult
-        > Task;
-    };
+		UE::Tasks::TTask<FCubusDensityMeshBuildResult> Task;
+	};
 
-    TArray<TUniquePtr<FAtomicDensityAsyncBuild>>
-        ActiveAtomicDensityAsyncBuilds;
+	TArray<TUniquePtr<FAtomicDensityAsyncBuild>> ActiveAtomicDensityAsyncBuilds;
 
-    /*
-    * Worker-complete mesh data waiting for its bounded game-thread upload.
-    *
-    * These results contain no visible terrain state. They are uploaded only to
-    * each chunk's hidden staging procedural mesh.
-    */
-    struct FAtomicDensityPendingUpload
-    {
-        FIntVector ChunkCoordinate =
-            FIntVector::ZeroValue;
+	/*
+	 * Worker-complete mesh data waiting for its bounded game-thread upload.
+	 *
+	 * These results contain no visible terrain state. They are uploaded only to
+	 * each chunk's hidden staging procedural mesh.
+	 */
+	struct FAtomicDensityPendingUpload
+	{
+		FIntVector ChunkCoordinate = FIntVector::ZeroValue;
 
-        uint64 Revision = 0;
+		uint64 Revision = 0;
 
-        FCubusDensityMeshBuildResult BuildResult;
-    };
+		FCubusDensityMeshBuildResult BuildResult;
+	};
 
-    TArray<TUniquePtr<FAtomicDensityPendingUpload>>
-        ActiveAtomicDensityPendingUploads;
+	TArray<TUniquePtr<FAtomicDensityPendingUpload>> ActiveAtomicDensityPendingUploads;
 
-    /*
-    * Incremented whenever the authoritative density edit field changes.
-    */
-    uint64 DensityEditRevision = 0;
+	/*
+	 * Incremented whenever the authoritative density edit field changes.
+	 */
+	uint64 DensityEditRevision = 0;
 
-    /*
-    * Revision against which the current staged transaction is being built.
-    */
-    uint64 ActiveAtomicDensityRevision = 0;
+	/*
+	 * Revision against which the current staged transaction is being built.
+	 */
+	uint64 ActiveAtomicDensityRevision = 0;
 
-    bool bAtomicDensityBatchActive = false;
+	bool bAtomicDensityBatchActive = false;
 
-    TSet<FIntVector> RequiredChunkCoordinates;
-    TSet<FIntVector> InitialRequiredCoordinates;
+	TSet<FIntVector> RequiredChunkCoordinates;
+	TSet<FIntVector> InitialRequiredCoordinates;
 
-    FCubusDensityEditMap DensityEdits;
+	FCubusDensityEditMap DensityEdits;
 
-    TMap<
-        FIntVector,
-        FCubusDensityEditMap
-    > DensityEditsByChunk;
+	TMap<FIntVector, FCubusDensityEditMap> DensityEditsByChunk;
 
-    TWeakObjectPtr<APawn> TrackedPawn;
-    TWeakObjectPtr<ACubusWorldVegetationActor> WorldVegetationActor;
+	TWeakObjectPtr<APawn>					   TrackedPawn;
+	TWeakObjectPtr<ACubusWorldVegetationActor> WorldVegetationActor;
 
-    UPROPERTY(Transient)
-    TObjectPtr<AActor> CachedWeatherActor = nullptr;
+	UPROPERTY(Transient)
+	TObjectPtr<AActor> CachedWeatherActor = nullptr;
 
-    FIntVector LastTrackedChunk = FIntVector(MAX_int32, MAX_int32, MAX_int32);
-    FVector HeldPawnLocation = FVector::ZeroVector;
-    bool bPawnHeldForStreaming = false;
-    bool bSpawnTimeoutReported = false;
-    float HeldPawnElapsedSeconds = 0.0f;
-    float TimeUntilStreamingUpdate = 0.0f;
-    float TimeUntilWeatherMaterialUpdate = 0.0f;
-    float WeatherMaterialElapsedSeconds = 0.0f;
+	FIntVector LastTrackedChunk				  = FIntVector(MAX_int32, MAX_int32, MAX_int32);
+	FVector	   HeldPawnLocation				  = FVector::ZeroVector;
+	bool	   bPawnHeldForStreaming		  = false;
+	bool	   bSpawnTimeoutReported		  = false;
+	float	   HeldPawnElapsedSeconds		  = 0.0f;
+	float	   TimeUntilStreamingUpdate		  = 0.0f;
+	float	   TimeUntilWeatherMaterialUpdate = 0.0f;
+	float	   WeatherMaterialElapsedSeconds  = 0.0f;
 
-    void RemoveInvalidChunks();
-    void RebuildChunkAtCoordinate(const FIntVector& ChunkCoordinate);
-    void PublishWorldConfig();
+	void RemoveInvalidChunks();
+	void RebuildChunkAtCoordinate(const FIntVector& ChunkCoordinate);
+	void PublishWorldConfig();
 
-    void RestoreDensityEdits();
+	void RestoreDensityEdits();
 
-    void RebuildDensityEditIndex();
+	void RebuildDensityEditIndex();
 
-    void ReindexDensityEditSample(
-        const FIntVector& WorldSample
-    );
-    void ApplyPersistedEditsToChunk(ACubusVoxelVolumeActor& ChunkActor);
-    void RecordTrackedPawnCoordinate();
-    ACubusVoxelVolumeActor*
-    SpawnChunkAtCoordinate(
-        const FIntVector& Coordinate,
-        bool bGenerateVegetation,
-        bool bBuildImmediately = true
-    );
-    void UpdateRuntimeStreaming(bool bForce);
-    void ProcessRuntimeQueues();
-    void ProcessAtomicDensityEditBatch();
-    void DiscardActiveAtomicDensityBuilds();
-    double ActiveAtomicDensityWorkerMilliseconds = 0.0;
-    double ActiveAtomicDensityUploadMilliseconds = 0.0;
-    double ActiveAtomicDensityMaxUploadTickMilliseconds = 0.0;
+	void					ReindexDensityEditSample(const FIntVector& WorldSample);
+	void					ApplyPersistedEditsToChunk(ACubusVoxelVolumeActor& ChunkActor);
+	void					RecordTrackedPawnCoordinate();
+	ACubusVoxelVolumeActor* SpawnChunkAtCoordinate(const FIntVector& Coordinate, bool bGenerateVegetation, bool bBuildImmediately = true);
+	void					UpdateRuntimeStreaming(bool bForce);
+	void					ProcessRuntimeQueues();
+	void					ProcessAtomicDensityEditBatch();
+	void					DiscardActiveAtomicDensityBuilds();
+	double					ActiveAtomicDensityWorkerMilliseconds		 = 0.0;
+	double					ActiveAtomicDensityUploadMilliseconds		 = 0.0;
+	double					ActiveAtomicDensityMaxUploadTickMilliseconds = 0.0;
 
-    int32 ActiveAtomicDensityCompletedBuildCount = 0;
-    int32 ActiveAtomicDensityUploadTickCount = 0;
+	int32 ActiveAtomicDensityCompletedBuildCount = 0;
+	int32 ActiveAtomicDensityUploadTickCount	 = 0;
 
-    void ProcessInitialStreaming();
+	void ProcessInitialStreaming();
 
-    void QueueStreamingChunkBuilds();
-    void ProcessCompletedStreamingChunkBuilds();
+	void QueueStreamingChunkBuilds();
+	void ProcessCompletedStreamingChunkBuilds();
 
-    bool IsInitialChunkReady(
-        const FIntVector& Coordinate
-    ) const;
+	bool IsInitialChunkReady(const FIntVector& Coordinate) const;
 
-    bool AreInitialChunksReady() const;
-    void ProcessDirtyChunkQueue();
-    void BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius, TSet<FIntVector>& OutCoordinates) const;
-    FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;
-    int32 ResolveDensitySubdivisions(const FIntVector& ChunkCoordinate) const;
-    void UpdateDensityLods();
-    void HoldPawnForInitialStreaming();
-    void TryReleasePawnToTerrain();
-    void EnsureWorldVegetationActor();
-    void UpdateWeatherMaterials(float DeltaSeconds);
-    void RecordGeneratedTreeTombstone(const FIntVector& WorldVoxel);
+	bool	   AreInitialChunksReady() const;
+	void	   ProcessDirtyChunkQueue();
+	void	   BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius,
+										TSet<FIntVector>& OutCoordinates) const;
+	FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;
+	int32	   ResolveDensitySubdivisions(const FIntVector& ChunkCoordinate) const;
+	void	   UpdateDensityLods();
+	void	   HoldPawnForInitialStreaming();
+	void	   TryReleasePawnToTerrain();
+	void	   EnsureWorldVegetationActor();
+	void	   UpdateWeatherMaterials(float DeltaSeconds);
+	void	   RecordGeneratedTreeTombstone(const FIntVector& WorldVoxel);
 };
