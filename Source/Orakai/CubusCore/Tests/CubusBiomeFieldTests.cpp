@@ -39,6 +39,29 @@ bool FCubusBiomeClimateFieldTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Biome sample exposes normalized fertility"), First.Fertility >= 0.0f && First.Fertility <= 1.0f);
     TestTrue(TEXT("Biome sample exposes normalized exposure"), First.Exposure >= 0.0f && First.Exposure <= 1.0f);
 
+    float MinimumLowlandTemperature = 1.0f;
+    float MaximumLowlandTemperature = 0.0f;
+    for (int32 SampleY = -4096; SampleY <= 4096; SampleY += 512)
+    {
+        for (int32 SampleX = -4096; SampleX <= 4096; SampleX += 512)
+        {
+            const FCubusBiomeSample ClimateSample = FCubusBiomeField::Sample(
+                static_cast<float>(SampleX),
+                static_cast<float>(SampleY),
+                Settings.HydrologySettings.SeaLevel,
+                0.10f,
+                Settings
+            );
+            MinimumLowlandTemperature = FMath::Min(MinimumLowlandTemperature, ClimateSample.Temperature);
+            MaximumLowlandTemperature = FMath::Max(MaximumLowlandTemperature, ClimateSample.Temperature);
+        }
+    }
+
+    TestTrue(TEXT("Seeded lowlands include genuinely cold climate"), MinimumLowlandTemperature < 0.38f);
+    TestTrue(TEXT("Seeded lowlands include genuinely warm climate"), MaximumLowlandTemperature > 0.62f);
+    TestTrue(TEXT("Climate varies substantially without relying on elevation"),
+        MaximumLowlandTemperature - MinimumLowlandTemperature > 0.30f);
+
     const FCubusBiomeSample Cliff = FCubusBiomeField::Sample(
         120.0f, -75.0f, 16.0f, Settings.RockySlopeThreshold * 2.0f, Settings);
     TestEqual(TEXT("Steep terrain resolves to the rocky archetype"), Cliff.DominantBiome, ECubusBiomeKind::Rocky);

@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 12: mountain ridge shoulders and bounded local relief replace
-    // the version-eleven terrain response that could form narrow air spikes.
-    static constexpr uint32 CurrentGenerationVersion = 12;
+    // Bumped to 13: seeded multiscale climate provinces replace the warm-lowland
+    // bias, and biome snow/ice is now driven by local climate rather than world Z.
+    static constexpr uint32 CurrentGenerationVersion = 13;
 
     int64 World = 1;
     int32 Terrain = 0;

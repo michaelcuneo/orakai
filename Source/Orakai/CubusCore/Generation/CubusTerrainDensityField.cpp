@@ -141,6 +141,7 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 	Settings.SubsurfaceMaterialId = FMath::Max(1, Settings.SubsurfaceMaterialId);
 	Settings.RockMaterialId = FMath::Max(1, Settings.RockMaterialId);
 	Settings.SnowMaterialId = FMath::Max(1, Settings.SnowMaterialId);
+	Settings.BiomeSnowMaterialId = FMath::Max(1, Settings.BiomeSnowMaterialId);
 	Settings.RockSlopeThreshold = FMath::Max(0.0f, Settings.RockSlopeThreshold);
 	Settings.SurfaceMaterialDepth = FMath::Max(0.01f, Settings.SurfaceMaterialDepth);
 	Settings.RockMaterialDepth = FMath::Max(Settings.SurfaceMaterialDepth, Settings.RockMaterialDepth);
@@ -385,17 +386,41 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	{
 		Column.SurfaceMaterialId = FMath::Max(1, Settings.LandmarkSettings.SurfaceMaterialId);
 	}
-	else if (Column.Slope >= Settings.RockSlopeThreshold)
-	{
-		Column.SurfaceMaterialId = Settings.RockMaterialId;
-	}
 	else
 	{
-		Column.SurfaceMaterialId = Settings.BiomeSettings.bEnabled
-			? Column.BiomeSample.SurfaceMaterialId
-			: Settings.SurfaceMaterialId;
-		if (Column.SurfaceVoxelHeight >= Settings.SnowMinimumHeight && Column.SurfaceMaterialId == Settings.SurfaceMaterialId)
+		Column.SurfaceMaterialId = Column.Slope >= Settings.RockSlopeThreshold
+			? Settings.RockMaterialId
+			: (Settings.BiomeSettings.bEnabled ? Column.BiomeSample.SurfaceMaterialId : Settings.SurfaceMaterialId);
+
+		if (Settings.BiomeSettings.bEnabled)
 		{
+			/*
+			 * Snow/ice follows the local climate, not a global world-Z cutoff.
+			 * Temperature already contains the elevation lapse response, so a
+			 * sufficiently cold lowland can freeze while a warm mountain can stay
+			 * bare. Moisture controls accumulation and steep slopes shed snow.
+			 */
+			const float Coldness = 1.0f - SmoothStep(0.28f, 0.46f, Column.BiomeSample.Temperature);
+			const float MoistureSupport = FMath::Lerp(
+				0.62f,
+				1.0f,
+				SmoothStep(0.16f, 0.50f, Column.BiomeSample.Moisture)
+			);
+			const float SnowRetention = 1.0f - SmoothStep(
+				Settings.RockSlopeThreshold * 0.85f,
+				FMath::Max(Settings.RockSlopeThreshold * 1.55f, Settings.RockSlopeThreshold + 0.01f),
+				Column.Slope
+			);
+			const float SnowSuitability = Coldness * MoistureSupport * SnowRetention;
+
+			if (SnowSuitability >= 0.42f)
+			{
+				Column.SurfaceMaterialId = Settings.BiomeSnowMaterialId;
+			}
+		}
+		else if (Column.SurfaceVoxelHeight >= Settings.SnowMinimumHeight && Column.SurfaceMaterialId == Settings.SurfaceMaterialId)
+		{
+			/* Preserve the legacy fixed-height rule only for non-biome worlds. */
 			Column.SurfaceMaterialId = Settings.SnowMaterialId;
 		}
 	}

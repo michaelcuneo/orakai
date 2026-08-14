@@ -589,10 +589,12 @@ FCubusTerrainDensitySettings ACubusVoxelVolumeActor::BuildDensitySettings() cons
 	DensitySettings.RockMaterialId = TerrainRockMaterialId;
 
 	DensitySettings.SnowMaterialId = TerrainSnowMaterialId;
+	DensitySettings.BiomeSnowMaterialId = TerrainSnowMaterialId;
 
 	DensitySettings.RockSlopeThreshold = TerrainRockSlopeThreshold;
 
 	DensitySettings.SnowMinimumHeight = static_cast<float>(TerrainSnowMinimumHeight);
+	DensitySettings.BiomeSnowMinimumHeight = static_cast<float>(TerrainSnowMinimumHeight);
 
 	const FCubusGenerationSeeds& Seeds = ChunkData->GetGenerationSeeds();
 

@@ -124,6 +124,64 @@ bool FCubusTerrainDensityFractionalPlaneTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusTerrainDensityClimateSnowTest,
+    "Orakai.Cubus.Density.NativeTerrain.ClimateSnow",
+    EAutomationTestFlags::EditorContext |
+    EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusTerrainDensityClimateSnowTest::RunTest(
+    const FString& Parameters
+)
+{
+    (void)Parameters;
+
+    FCubusTerrainDensitySettings Settings;
+    Settings.bUseHeightTerrain = false;
+    Settings.FlatSurfaceWorldZ = Settings.BiomeSettings.HydrologySettings.SeaLevel;
+    Settings.bGenerateVolumetricGeology = false;
+    Settings.bGenerateCaves = false;
+    Settings.BiomeSettings.bEnabled = true;
+    Settings.BiomeSettings.BiomeOffsetX = 1387;
+    Settings.BiomeSettings.BiomeOffsetY = -2911;
+    Settings.BiomeSettings.PlainsSurfaceMaterialId = 11;
+    Settings.BiomeSettings.ForestSurfaceMaterialId = 17;
+    Settings.BiomeSettings.RockySurfaceMaterialId = 23;
+    Settings.BiomeSettings.WetlandSurfaceMaterialId = 31;
+    Settings.RockSlopeThreshold = 1.25f;
+    Settings.BiomeSnowMaterialId = 91;
+
+    const FCubusTerrainDensityField DensityField(Settings);
+
+    bool bFoundColdLowland = false;
+    for (int32 SampleY = -8192; SampleY <= 8192 && !bFoundColdLowland; SampleY += 256)
+    {
+        for (int32 SampleX = -8192; SampleX <= 8192; SampleX += 256)
+        {
+            const float WorldX = static_cast<float>(SampleX);
+            const float WorldY = static_cast<float>(SampleY);
+            const FCubusBiomeSample Biome = DensityField.SampleSurfaceBiome(WorldX, WorldY);
+            if (Biome.Temperature > 0.28f || Biome.Moisture < 0.16f)
+            {
+                continue;
+            }
+
+            const FCubusDensitySample SurfaceSample = DensityField.SampleContinuous(
+                FVector(WorldX + 0.5, WorldY + 0.5, static_cast<double>(Settings.FlatSurfaceWorldZ))
+            );
+
+            TestTrue(TEXT("A cold lowland surface remains solid"), SurfaceSample.IsSolid());
+            TestEqual(TEXT("Cold lowland climate receives the biome snow material"), SurfaceSample.MaterialId, 91);
+            bFoundColdLowland = true;
+            break;
+        }
+    }
+
+    TestTrue(TEXT("The seeded climate produces at least one cold lowland test site"), bFoundColdLowland);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCubusTerrainDensitySeedDomainTest,
     "Orakai.Cubus.Density.NativeTerrain.SeededDomain",
     EAutomationTestFlags::EditorContext |
