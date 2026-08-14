@@ -19,6 +19,8 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
     FCubusTerrainFormSettings NoDetailSettings = Settings;
     NoDetailSettings.DetailAmplitude = 0.0f;
     float MaximumAdjacentHeightDelta = 0.0f;
+    float MaximumUnsupportedPeak = 0.0f;
+    float MaximumAxisCurvature = 0.0f;
     float MinimumSurfaceRoughness = 1.0f;
     float MaximumSurfaceRoughness = 0.0f;
     float MaximumErosionRill = 0.0f;
@@ -101,6 +103,81 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
             bFoundPlain |= Sample.PlainsWeight > 0.65f;
             bFoundMountain |= Sample.MountainWeight > 0.65f;
             bFoundStrongDrainage |= Sample.Drainage > 0.75f;
+        }
+    }
+
+    // Probe the height-form itself at one-voxel spacing. A legitimate mountain
+    // ridge can be steep, but its height is supported by neighbouring columns.
+    // A generated air needle instead has a large positive centre residual and
+    // a large second derivative. Volumetric cliffs and overhangs are tested in
+    // the density field and are intentionally outside this height-form guard.
+    constexpr int32 SpikeHalfExtent = 192;
+    constexpr int32 SpikeNeighbourRadius = 2;
+    for (int32 Y = -SpikeHalfExtent; Y <= SpikeHalfExtent; ++Y)
+    {
+        for (int32 X = -SpikeHalfExtent; X <= SpikeHalfExtent; ++X)
+        {
+            const float Centre = FCubusTerrainForm::Sample(
+                static_cast<float>(X),
+                static_cast<float>(Y),
+                Settings
+            ).Height;
+            const float West = FCubusTerrainForm::Sample(
+                static_cast<float>(X - SpikeNeighbourRadius),
+                static_cast<float>(Y),
+                Settings
+            ).Height;
+            const float East = FCubusTerrainForm::Sample(
+                static_cast<float>(X + SpikeNeighbourRadius),
+                static_cast<float>(Y),
+                Settings
+            ).Height;
+            const float South = FCubusTerrainForm::Sample(
+                static_cast<float>(X),
+                static_cast<float>(Y - SpikeNeighbourRadius),
+                Settings
+            ).Height;
+            const float North = FCubusTerrainForm::Sample(
+                static_cast<float>(X),
+                static_cast<float>(Y + SpikeNeighbourRadius),
+                Settings
+            ).Height;
+            const float SouthWest = FCubusTerrainForm::Sample(
+                static_cast<float>(X - SpikeNeighbourRadius),
+                static_cast<float>(Y - SpikeNeighbourRadius),
+                Settings
+            ).Height;
+            const float SouthEast = FCubusTerrainForm::Sample(
+                static_cast<float>(X + SpikeNeighbourRadius),
+                static_cast<float>(Y - SpikeNeighbourRadius),
+                Settings
+            ).Height;
+            const float NorthWest = FCubusTerrainForm::Sample(
+                static_cast<float>(X - SpikeNeighbourRadius),
+                static_cast<float>(Y + SpikeNeighbourRadius),
+                Settings
+            ).Height;
+            const float NorthEast = FCubusTerrainForm::Sample(
+                static_cast<float>(X + SpikeNeighbourRadius),
+                static_cast<float>(Y + SpikeNeighbourRadius),
+                Settings
+            ).Height;
+
+            const float NeighbourMean =
+                (West + East + South + North +
+                 SouthWest + SouthEast + NorthWest + NorthEast) /
+                8.0f;
+            MaximumUnsupportedPeak = FMath::Max(
+                MaximumUnsupportedPeak,
+                Centre - NeighbourMean
+            );
+
+            const float CurvatureX = FMath::Abs(Centre - (West + East) * 0.5f);
+            const float CurvatureY = FMath::Abs(Centre - (South + North) * 0.5f);
+            MaximumAxisCurvature = FMath::Max(
+                MaximumAxisCurvature,
+                FMath::Max(CurvatureX, CurvatureY)
+            );
         }
     }
 
@@ -245,6 +322,14 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
     TestTrue(
         TEXT("Neighbouring terrain columns remain continuous"),
         MaximumAdjacentHeightDelta < 8.0f
+    );
+    TestTrue(
+        TEXT("Terrain has no unsupported needle peaks"),
+        MaximumUnsupportedPeak < 2.5f
+    );
+    TestTrue(
+        TEXT("Terrain ridge curvature remains supported across neighbouring columns"),
+        MaximumAxisCurvature < 2.5f
     );
     return true;
 }
