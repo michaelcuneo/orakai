@@ -22,6 +22,28 @@ void ApplyTextureIfValid(UMaterialInstanceDynamic* RuntimeMaterial, const FName 
 	}
 }
 
+void PinDensityTextureArray(UTexture2DArray* Texture)
+{
+	if (!IsValid(Texture) || Texture->NeverStream)
+	{
+		return;
+	}
+
+	/*
+	 * Density terrain samples texture arrays from custom triplanar HLSL using
+	 * world-space coordinates. Unreal's ordinary UV-driven streaming heuristics
+	 * cannot reliably predict which mips those custom samples need, which can
+	 * leave distant terrain on coarse mips until the player approaches it.
+	 *
+	 * These arrays are shared by the entire terrain material, so make them
+	 * permanently resident when the unified density MID is first bound. This
+	 * prevents distance-dependent material warm-up without changing biome,
+	 * meshing, or terrain LOD generation.
+	 */
+	Texture->NeverStream = true;
+	Texture->UpdateResource();
+}
+
 FFloat16Color MakeDataColor(const float R, const float G, const float B, const float A)
 {
 	return FFloat16Color(FLinearColor(R, G, B, A));
@@ -184,6 +206,13 @@ void UCubusMaterialRegistry::BindDensityGpuResources(UMaterialInstanceDynamic* R
 	{
 		RebuildDensityMaterialDataTexture();
 	}
+
+	CubusMaterialRegistry::PinDensityTextureArray(DensityBaseColorArray.Get());
+	CubusMaterialRegistry::PinDensityTextureArray(DensityNormalArray.Get());
+	CubusMaterialRegistry::PinDensityTextureArray(DensityOrmArray.Get());
+	CubusMaterialRegistry::PinDensityTextureArray(DensityHeightArray.Get());
+	CubusMaterialRegistry::PinDensityTextureArray(DensityMacroColorArray.Get());
+	CubusMaterialRegistry::PinDensityTextureArray(DensityDetailNormalArray.Get());
 
 	CubusMaterialRegistry::ApplyTextureIfValid(RuntimeMaterial, TEXT("DensityBaseColorArray"), DensityBaseColorArray.Get());
 	CubusMaterialRegistry::ApplyTextureIfValid(RuntimeMaterial, TEXT("DensityNormalArray"), DensityNormalArray.Get());
