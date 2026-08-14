@@ -1,5 +1,80 @@
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
 
+namespace CubusTerrainDensityField
+{
+	uint32 HashCoordinates(const int32 X, const int32 Y, const uint32 Seed)
+	{
+		uint32 Value = static_cast<uint32>(X) * 0x9E3779B9u;
+		Value ^= static_cast<uint32>(Y) * 0x85EBCA6Bu;
+		Value ^= Seed * 0xC2B2AE35u;
+		Value ^= Value >> 16;
+		Value *= 0x7FEB352Du;
+		Value ^= Value >> 15;
+		Value *= 0x846CA68Bu;
+		Value ^= Value >> 16;
+		return Value;
+	}
+
+	float Hash01(const int32 X, const int32 Y, const uint32 Seed)
+	{
+		return static_cast<float>(HashCoordinates(X, Y, Seed) & 0x00ffffffu) /
+			static_cast<float>(0x00ffffffu);
+	}
+
+	uint32 CaveSeed(const FCubusTerrainDensitySettings& Settings)
+	{
+		uint32 Seed = static_cast<uint32>(Settings.CaveOffsetX) * 0x9E3779B9u;
+		Seed ^= static_cast<uint32>(Settings.CaveOffsetY) * 0x85EBCA6Bu;
+		Seed ^= static_cast<uint32>(Settings.CaveOffsetZ) * 0xC2B2AE35u;
+		return Seed;
+	}
+
+	FVector CaveNode(
+		const int32 CellX,
+		const int32 CellY,
+		const FCubusTerrainDensitySettings& Settings,
+		const uint32 Seed
+	)
+	{
+		const float CellSize = Settings.CaveNetworkCellSize;
+		const float JitterRadius = CellSize * 0.30f;
+		const float JitterX = (Hash01(CellX, CellY, Seed ^ 0xA341316Cu) * 2.0f - 1.0f) * JitterRadius;
+		const float JitterY = (Hash01(CellX, CellY, Seed ^ 0xC8013EA4u) * 2.0f - 1.0f) * JitterRadius;
+
+		const float MinimumZ = static_cast<float>(Settings.CaveMinimumWorldZ + Settings.CaveOffsetZ);
+		const float MaximumZ = static_cast<float>(Settings.CaveMaximumWorldZ + Settings.CaveOffsetZ);
+		const float VerticalMargin = FMath::Min(4.0f, FMath::Max(0.0f, (MaximumZ - MinimumZ) * 0.15f));
+		const float NodeZ = FMath::Lerp(
+			MinimumZ + VerticalMargin,
+			MaximumZ - VerticalMargin,
+			Hash01(CellX, CellY, Seed ^ 0xAD90777Du)
+		);
+
+		return FVector(
+			(static_cast<float>(CellX) + 0.5f) * CellSize + JitterX,
+			(static_cast<float>(CellY) + 0.5f) * CellSize + JitterY,
+			NodeZ
+		);
+	}
+
+	float DistanceToSegment(const FVector& Point, const FVector& A, const FVector& B)
+	{
+		const FVector Segment = B - A;
+		const double LengthSquared = Segment.SizeSquared();
+		if (LengthSquared <= UE_SMALL_NUMBER)
+		{
+			return static_cast<float>(FVector::Distance(Point, A));
+		}
+
+		const double Alpha = FMath::Clamp(
+			FVector::DotProduct(Point - A, Segment) / LengthSquared,
+			0.0,
+			1.0
+		);
+		return static_cast<float>(FVector::Distance(Point, A + Segment * Alpha));
+	}
+}
+
 FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensitySettings& InSettings) : Settings(InSettings)
 {
 	Settings.ContinentAmplitude = FMath::Max(0.0f, Settings.ContinentAmplitude);
@@ -30,6 +105,13 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 	Settings.GeologyUndercutStrength = FMath::Max(0.0f, Settings.GeologyUndercutStrength);
 	Settings.GeologyRockWarpFrequency = FMath::Max(0.000001f, Settings.GeologyRockWarpFrequency);
 	Settings.GeologyRockWarpStrength = FMath::Max(0.0f, Settings.GeologyRockWarpStrength);
+	Settings.GeologyHardnessFrequency = FMath::Max(0.000001f, Settings.GeologyHardnessFrequency);
+	Settings.GeologyFractureFrequency = FMath::Max(0.000001f, Settings.GeologyFractureFrequency);
+	Settings.GeologyFoldFrequency = FMath::Max(0.000001f, Settings.GeologyFoldFrequency);
+	Settings.GeologyMassFrequency = FMath::Max(0.000001f, Settings.GeologyMassFrequency);
+	Settings.GeologyMassStrength = FMath::Max(0.0f, Settings.GeologyMassStrength);
+	Settings.GeologyOverhangStrength = FMath::Max(0.0f, Settings.GeologyOverhangStrength);
+	Settings.GeologyFractureStrength = FMath::Max(0.0f, Settings.GeologyFractureStrength);
 
 	Settings.RiverFrequency = FMath::Max(0.000001f, Settings.RiverFrequency);
 	Settings.RiverChannelWidth = FMath::Clamp(Settings.RiverChannelWidth, 0.0f, 1.0f);
@@ -49,6 +131,11 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 	Settings.CaveSecondaryFrequency = FMath::Max(0.000001f, Settings.CaveSecondaryFrequency);
 	Settings.CaveThreshold = FMath::Clamp(Settings.CaveThreshold, 0.0f, 1.0f);
 	Settings.CaveSurfaceSharpness = FMath::Max(0.001f, Settings.CaveSurfaceSharpness);
+	Settings.CaveNetworkCellSize = FMath::Max(8.0f, Settings.CaveNetworkCellSize);
+	Settings.CaveTunnelRadius = FMath::Clamp(Settings.CaveTunnelRadius, 0.5f, Settings.CaveNetworkCellSize * 0.35f);
+	Settings.CaveChamberChance = FMath::Clamp(Settings.CaveChamberChance, 0.0f, 1.0f);
+	Settings.CaveChamberRadius = FMath::Max(Settings.CaveTunnelRadius, Settings.CaveChamberRadius);
+	Settings.CaveWallWarpStrength = FMath::Max(0.0f, Settings.CaveWallWarpStrength);
 
 	Settings.SurfaceMaterialId = FMath::Max(1, Settings.SurfaceMaterialId);
 	Settings.SubsurfaceMaterialId = FMath::Max(1, Settings.SubsurfaceMaterialId);
@@ -167,11 +254,6 @@ float FCubusTerrainDensityField::SampleSurfaceVoxelHeight(const float WorldX, co
 
 FCubusBiomeSample FCubusTerrainDensityField::SampleSurfaceBiome(const float WorldX, const float WorldY) const
 {
-	/*
-	 * GetColumnData samples density lattice columns at +0.5 and then converts
-	 * back to terrain-column coordinates internally. Using the same path here
-	 * guarantees materials and ecology see exactly the same biome sample.
-	 */
 	return GetColumnData(WorldX + 0.5f, WorldY + 0.5f).BiomeSample;
 }
 
@@ -240,6 +322,56 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 
 	const float WorldX = WorldSampleX - 0.5f;
 	const float WorldY = WorldSampleY - 0.5f;
+	const float TerrainX = WorldX + static_cast<float>(Settings.TerrainOffsetX);
+	const float TerrainY = WorldY + static_cast<float>(Settings.TerrainOffsetY);
+
+	const float HardnessSignal = SampleNoise2D(
+		TerrainX + 19031.0f,
+		TerrainY - 12763.0f,
+		Settings.GeologyHardnessFrequency
+	);
+	Column.RockHardness = FMath::Clamp(0.5f + HardnessSignal * 0.5f, 0.0f, 1.0f);
+
+	const float FractureLines = SampleRidgedNoise(
+		TerrainX - 7127.0f,
+		TerrainY + 15551.0f,
+		Settings.GeologyFractureFrequency
+	);
+	const float FractureProvince = FMath::Clamp(
+		0.5f + SampleNoise2D(
+			TerrainX + 3721.0f,
+			TerrainY + 9281.0f,
+			Settings.GeologyHardnessFrequency * 0.72f
+		) * 0.5f,
+		0.0f,
+		1.0f
+	);
+	Column.Fracture = FMath::Clamp(FractureLines * FractureProvince, 0.0f, 1.0f);
+	Column.StrataTilt = SampleNoise2D(
+		TerrainX - 1091.0f,
+		TerrainY - 23981.0f,
+		Settings.GeologyFoldFrequency
+	);
+
+	const float CliffExposure = SmoothStep(
+		Settings.GeologyCliffSlopeStart,
+		Settings.GeologyCliffSlopeFull,
+		Column.Slope
+	);
+	const float LandformExposure = FMath::Clamp(
+		Column.FormSample.MountainCore * 0.82f +
+		Column.FormSample.FoothillWeight * 0.46f +
+		Column.FormSample.Ridge * 0.32f,
+		0.0f,
+		1.0f
+	);
+	const float DrainageProtection = 1.0f - FMath::Clamp(
+		Column.FormSample.Drainage * Column.FormSample.Drainage,
+		0.0f,
+		1.0f
+	);
+	Column.RockExposure = CliffExposure * LandformExposure * DrainageProtection;
+
 	Column.BiomeSample = FCubusBiomeField::Sample(
 		WorldX,
 		WorldY,
@@ -248,10 +380,7 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 		Settings.BiomeSettings
 	);
 
-	const float TerrainX = WorldX + static_cast<float>(Settings.TerrainOffsetX);
-	const float TerrainY = WorldY + static_cast<float>(Settings.TerrainOffsetY);
 	const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
-
 	if (LandmarkSample.IsInside())
 	{
 		Column.SurfaceMaterialId = FMath::Max(1, Settings.LandmarkSettings.SurfaceMaterialId);
@@ -316,6 +445,13 @@ float FCubusTerrainDensityField::SampleNoise3D(const float WorldX, const float W
 float FCubusTerrainDensityField::SampleRidgedNoise(const float WorldX, const float WorldY, const float Frequency) const
 {
 	const float NoiseValue = SampleNoise2D(WorldX, WorldY, Frequency);
+	const float RidgeValue = 1.0f - FMath::Abs(NoiseValue);
+	return RidgeValue * RidgeValue;
+}
+
+float FCubusTerrainDensityField::SampleRidgedNoise3D(const float WorldX, const float WorldY, const float WorldZ, const float Frequency) const
+{
+	const float NoiseValue = SampleNoise3D(WorldX, WorldY, WorldZ, Frequency);
 	const float RidgeValue = 1.0f - FMath::Abs(NoiseValue);
 	return RidgeValue * RidgeValue;
 }
@@ -392,24 +528,14 @@ float FCubusTerrainDensityField::ApplyRiverLowering(const float SurfaceHeight, c
 	return FMath::Min(SurfaceHeight, ChannelTarget);
 }
 
-float FCubusTerrainDensityField::SampleGeologicalDensity(const FVector& GlobalSampleCoordinate, const FColumnData& Column,
-														 const float BaseTerrainDensity) const
+float FCubusTerrainDensityField::SampleGeologicalDensity(
+	const FVector& GlobalSampleCoordinate,
+	const FColumnData& Column,
+	const float BaseTerrainDensity
+) const
 {
 	const float DistanceFromSurface = FMath::Abs(BaseTerrainDensity);
-	if (DistanceFromSurface >= Settings.GeologySurfaceBand)
-	{
-		return BaseTerrainDensity;
-	}
-
-	const float CliffMask = SmoothStep(Settings.GeologyCliffSlopeStart, Settings.GeologyCliffSlopeFull, Column.Slope);
-	const float LandformMask = FMath::Clamp(
-		Column.FormSample.MountainCore * 0.75f +
-		Column.FormSample.FoothillWeight * 0.45f +
-		Column.FormSample.Ridge * 0.20f,
-		0.0f, 1.0f);
-	const float DrainageMask = 1.0f - FMath::Clamp(Column.FormSample.Drainage * Column.FormSample.Drainage, 0.0f, 1.0f);
-	const float Exposure = CliffMask * LandformMask * DrainageMask;
-	if (Exposure <= KINDA_SMALL_NUMBER)
+	if (DistanceFromSurface >= Settings.GeologySurfaceBand || Column.RockExposure <= KINDA_SMALL_NUMBER)
 	{
 		return BaseTerrainDensity;
 	}
@@ -424,49 +550,183 @@ float FCubusTerrainDensityField::SampleGeologicalDensity(const FVector& GlobalSa
 	{
 		return BaseTerrainDensity;
 	}
+
 	const FVector2D AlongCliff(-Downhill.Y, Downhill.X);
 	const float Across = WorldX * Downhill.X + WorldY * Downhill.Y;
 	const float Along = WorldX * AlongCliff.X + WorldY * AlongCliff.Y;
+	const float Hardness = FMath::Lerp(0.58f, 1.30f, Column.RockHardness);
 
 	const float RockWarp = SampleNoise3D(
 		WorldX + 1709.0f,
 		WorldY - 3187.0f,
 		WorldZ + 733.0f,
-		Settings.GeologyRockWarpFrequency) * Settings.GeologyRockWarpStrength;
+		Settings.GeologyRockWarpFrequency
+	) * Settings.GeologyRockWarpStrength;
 
+	const float FoldedDip = Settings.GeologyStrataDip + Column.StrataTilt * 0.020f;
 	const float StrataPhase =
 		WorldZ * Settings.GeologyStrataFrequency +
-		Across * Settings.GeologyStrataDip +
-		SampleNoise2D(Along + 9113.0f, Across - 4327.0f, Settings.GeologyStrataFrequency * 0.18f) * 0.35f;
+		Across * FoldedDip +
+		SampleNoise2D(
+			Along + 9113.0f,
+			Across - 4327.0f,
+			Settings.GeologyStrataFrequency * 0.18f
+		) * 0.35f;
 	const float StrataWave = FMath::Sin(StrataPhase * 2.0f * PI);
 	const float ShelfBand = FMath::Square(FMath::Max(0.0f, StrataWave));
 	const float UndercutBand = FMath::Square(FMath::Max(0.0f, -StrataWave));
 
+	const float MassRidge = SampleRidgedNoise3D(
+		WorldX - 6211.0f,
+		WorldY + 4177.0f,
+		WorldZ - 1987.0f,
+		Settings.GeologyMassFrequency
+	);
+	const float MassNoise = SampleNoise3D(
+		WorldX + 2381.0f,
+		WorldY + 7151.0f,
+		WorldZ - 3319.0f,
+		Settings.GeologyMassFrequency * 0.53f
+	);
+	const float RockMass =
+		(MassRidge - 0.48f) * Settings.GeologyMassStrength +
+		MassNoise * Settings.GeologyMassStrength * 0.32f;
+
+	const float FractureVolume = SampleRidgedNoise3D(
+		WorldX + 12011.0f,
+		WorldY - 4919.0f,
+		WorldZ + 2791.0f,
+		Settings.GeologyFractureFrequency
+	);
+	const float FractureCut =
+		SmoothStep(0.72f, 0.96f, FractureVolume) *
+		Column.Fracture *
+		Settings.GeologyFractureStrength;
+
+	const float ShelfDisplacement = Settings.GeologyShelfStrength * ShelfBand * Hardness;
+	const float UndercutDisplacement = Settings.GeologyUndercutStrength * UndercutBand * FMath::Lerp(1.15f, 0.65f, Column.RockHardness);
+	const float OverhangCarrier = FMath::Clamp(
+		ShelfBand * 0.62f + MassRidge * 0.38f,
+		0.0f,
+		1.0f
+	);
+	const float OverhangDisplacement =
+		Settings.GeologyOverhangStrength *
+		OverhangCarrier *
+		Column.RockHardness *
+		SmoothStep(0.18f, 0.72f, Column.RockExposure);
+
 	const float GeologicalDisplacement =
-		Settings.GeologyShelfStrength * ShelfBand -
-		Settings.GeologyUndercutStrength * UndercutBand +
+		ShelfDisplacement +
+		RockMass +
+		OverhangDisplacement -
+		UndercutDisplacement -
+		FractureCut +
 		RockWarp;
 
-	return BaseTerrainDensity + GeologicalDisplacement * Exposure * SurfaceBandMask;
+	return BaseTerrainDensity + GeologicalDisplacement * Column.RockExposure * SurfaceBandMask;
 }
 
-float FCubusTerrainDensityField::SampleCaveDensity(const FVector& GlobalSampleCoordinate, const float SurfaceVoxelHeight, const float SurfaceSlope) const
+float FCubusTerrainDensityField::SampleCaveDensity(
+	const FVector& GlobalSampleCoordinate,
+	const float SurfaceVoxelHeight,
+	const float SurfaceSlope
+) const
 {
 	const float WorldZ = static_cast<float>(GlobalSampleCoordinate.Z);
 	const float VerticalDepth = SurfaceVoxelHeight - WorldZ;
 	const float ApproximateShellDepth = VerticalDepth / FMath::Sqrt(1.0f + SurfaceSlope * SurfaceSlope);
-	if (WorldZ < Settings.CaveMinimumWorldZ || WorldZ > Settings.CaveMaximumWorldZ ||
-		ApproximateShellDepth < static_cast<float>(Settings.CaveSurfaceClearance))
+	if (
+		WorldZ < Settings.CaveMinimumWorldZ ||
+		WorldZ > Settings.CaveMaximumWorldZ ||
+		ApproximateShellDepth < static_cast<float>(Settings.CaveSurfaceClearance)
+	)
 	{
 		return MAX_flt;
 	}
 
-	const float WorldX = static_cast<float>(GlobalSampleCoordinate.X) + static_cast<float>(Settings.CaveOffsetX);
-	const float WorldY = static_cast<float>(GlobalSampleCoordinate.Y) + static_cast<float>(Settings.CaveOffsetY);
-	const float ShiftedWorldZ = static_cast<float>(GlobalSampleCoordinate.Z) + static_cast<float>(Settings.CaveOffsetZ);
-	const float PrimaryNoise = FMath::Abs(SampleNoise3D(WorldX, WorldY, ShiftedWorldZ, Settings.CavePrimaryFrequency));
-	const float SecondaryNoise = FMath::Abs(SampleNoise3D(WorldX + 1871.0f, WorldY - 953.0f, ShiftedWorldZ + 421.0f, Settings.CaveSecondaryFrequency));
-	return (PrimaryNoise + SecondaryNoise - Settings.CaveThreshold) * Settings.CaveSurfaceSharpness;
+	const FVector Query(
+		GlobalSampleCoordinate.X + static_cast<double>(Settings.CaveOffsetX),
+		GlobalSampleCoordinate.Y + static_cast<double>(Settings.CaveOffsetY),
+		GlobalSampleCoordinate.Z + static_cast<double>(Settings.CaveOffsetZ)
+	);
+	const float CellSize = Settings.CaveNetworkCellSize;
+	const int32 CentreCellX = FMath::FloorToInt(static_cast<float>(Query.X) / CellSize);
+	const int32 CentreCellY = FMath::FloorToInt(static_cast<float>(Query.Y) / CellSize);
+	const uint32 Seed = CubusTerrainDensityField::CaveSeed(Settings);
+
+	float MinimumSignedDistance = MAX_flt;
+	for (int32 CellY = CentreCellY - 1; CellY <= CentreCellY + 1; ++CellY)
+	{
+		for (int32 CellX = CentreCellX - 1; CellX <= CentreCellX + 1; ++CellX)
+		{
+			const float Activity = CubusTerrainDensityField::Hash01(
+				CellX,
+				CellY,
+				Seed ^ 0xB5297A4Du
+			);
+			if (Activity > Settings.CaveThreshold)
+			{
+				continue;
+			}
+
+			const FVector Node = CubusTerrainDensityField::CaveNode(CellX, CellY, Settings, Seed);
+			const float DirectionChoice = CubusTerrainDensityField::Hash01(
+				CellX,
+				CellY,
+				Seed ^ 0x68E31DA4u
+			);
+			const int32 TargetX = CellX + (DirectionChoice < 0.46f ? 1 : (DirectionChoice < 0.84f ? 0 : 1));
+			const int32 TargetY = CellY + (DirectionChoice < 0.46f ? 0 : 1);
+			const FVector Target = CubusTerrainDensityField::CaveNode(TargetX, TargetY, Settings, Seed);
+
+			const float RadiusVariation = FMath::Lerp(
+				0.72f,
+				1.28f,
+				CubusTerrainDensityField::Hash01(CellX, CellY, Seed ^ 0x1B56C4E9u)
+			);
+			const float TunnelRadius = Settings.CaveTunnelRadius * RadiusVariation;
+			const float SegmentDistance = CubusTerrainDensityField::DistanceToSegment(Query, Node, Target);
+			MinimumSignedDistance = FMath::Min(MinimumSignedDistance, SegmentDistance - TunnelRadius);
+
+			const float ChamberRoll = CubusTerrainDensityField::Hash01(CellX, CellY, Seed ^ 0x9E3779B1u);
+			if (ChamberRoll < Settings.CaveChamberChance)
+			{
+				const float ChamberVariation = FMath::Lerp(
+					0.75f,
+					1.25f,
+					CubusTerrainDensityField::Hash01(CellX, CellY, Seed ^ 0xD1B54A35u)
+				);
+				const float ChamberDistance = static_cast<float>(FVector::Distance(Query, Node)) -
+					Settings.CaveChamberRadius * ChamberVariation;
+				MinimumSignedDistance = FMath::Min(MinimumSignedDistance, ChamberDistance);
+			}
+		}
+	}
+
+	if (MinimumSignedDistance >= MAX_flt * 0.5f)
+	{
+		return MAX_flt;
+	}
+
+	const float WallWarp =
+		SampleNoise3D(
+			static_cast<float>(Query.X) + 1871.0f,
+			static_cast<float>(Query.Y) - 953.0f,
+			static_cast<float>(Query.Z) + 421.0f,
+			Settings.CavePrimaryFrequency
+		) * 0.65f +
+		SampleNoise3D(
+			static_cast<float>(Query.X) - 3167.0f,
+			static_cast<float>(Query.Y) + 2297.0f,
+			static_cast<float>(Query.Z) - 811.0f,
+			Settings.CaveSecondaryFrequency
+		) * 0.35f;
+
+	return (
+		MinimumSignedDistance -
+		WallWarp * Settings.CaveWallWarpStrength
+	) * Settings.CaveSurfaceSharpness;
 }
 
 float FCubusTerrainDensityField::SmoothStep(const float EdgeMinimum, const float EdgeMaximum, const float Value)
