@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 11: rivers now use terrain-derived priority-flood/D8
-    // hydrology instead of warped noise contours.
-    static constexpr uint32 CurrentGenerationVersion = 11;
+    // Bumped to 12: mountain ridge shoulders and bounded local relief replace
+    // the version-eleven terrain response that could form narrow air spikes.
+    static constexpr uint32 CurrentGenerationVersion = 12;
 
     int64 World = 1;
     int32 Terrain = 0;
