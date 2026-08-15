@@ -962,20 +962,40 @@ namespace CubusDensityMesher
         const FIntVector FineCellOrigin =
             CoarseCellOrigin * Subdivisions;
 
-        const bool bFirstCornerSolid =
-            SampleCache.GetSample(FineCellOrigin).IsSolid(IsoLevel);
+        bool bAnySolid = false;
+        bool bAnyEmpty = false;
+        float MinimumDistanceFromIso = MAX_flt;
 
-        for (int32 CornerIndex = 1; CornerIndex < 8; ++CornerIndex)
+        for (int32 CornerIndex = 0; CornerIndex < 8; ++CornerIndex)
         {
             const FIntVector FineCorner =
                 FineCellOrigin +
                 CornerOffsets[CornerIndex] * Subdivisions;
+            const FCubusDensitySample CornerSample =
+                SampleCache.GetSample(FineCorner);
+            bAnySolid |= CornerSample.IsSolid(IsoLevel);
+            bAnyEmpty |= !CornerSample.IsSolid(IsoLevel);
+            MinimumDistanceFromIso = FMath::Min(
+                MinimumDistanceFromIso,
+                FMath::Abs(CornerSample.Density - IsoLevel)
+            );
+        }
 
-            if (SampleCache.GetSample(FineCorner).IsSolid(IsoLevel) !=
-                bFirstCornerSolid)
-            {
-                return true;
-            }
+        if (bAnySolid && bAnyEmpty)
+        {
+            return true;
+        }
+
+        /*
+         * Do not let the canonical 80 cm lattice decide whether 20 cm detail is
+         * allowed to exist. Terrain fine relief is capped at 0.34 voxel and
+         * geology at 0.72 voxel; a 2.0-voxel conservative band therefore
+         * guarantees that a bounded interior zero-crossing is refined rather
+         * than discarded before the fine lattice is sampled.
+         */
+        if (MinimumDistanceFromIso <= 2.0f)
+        {
+            return true;
         }
 
         const int32 Half = Subdivisions / 2;
@@ -992,9 +1012,11 @@ namespace CubusDensityMesher
 
         for (const FIntVector& ProbeOffset : ProbeOffsets)
         {
-            if (SampleCache.GetSample(
+            const FCubusDensitySample Probe = SampleCache.GetSample(
                 FineCellOrigin + ProbeOffset
-            ).IsSolid(IsoLevel) != bFirstCornerSolid)
+            );
+            if (Probe.IsSolid(IsoLevel) != bAnySolid ||
+                FMath::Abs(Probe.Density - IsoLevel) <= 1.0f)
             {
                 return true;
             }

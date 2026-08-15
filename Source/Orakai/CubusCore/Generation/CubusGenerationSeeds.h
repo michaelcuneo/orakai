@@ -11,10 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 28: retire the under-resolved v27 mesh-detail experiment and
-    // re-enable bounded adaptive density sampling. The procedural field remains
-    // canonical; near/middle/far meshes only change sample spacing.
-    static constexpr uint32 CurrentGenerationVersion = 28;
+    // Bumped to 29: terrain generation is split into smooth macro form,
+    // bounded continuous sub-voxel surface relief, and bounded volumetric rock
+    // deformation. Adaptive refinement now preserves interior fine crossings.
+    static constexpr uint32 CurrentGenerationVersion = 29;
 
     int64 World = 1;
     int32 Terrain = 0;

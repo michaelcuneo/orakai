@@ -302,8 +302,9 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
         MaximumErosionRill > 0.12f
     );
     TestTrue(
-        TEXT("Local detail produces visible terrain-scale height variation"),
-        MaximumLocalDetailContribution > 0.5f
+        TEXT("Macro terrain retains restrained local height variation"),
+        MaximumLocalDetailContribution > 0.05f &&
+            MaximumLocalDetailContribution < Settings.DetailAmplitude * 0.75f
     );
     TestTrue(
         TEXT("The local sample contains both floodplain and upland terrain"),

@@ -200,7 +200,63 @@ FCubusDensitySample FCubusTerrainDensityField::Sample(const FIntVector& GlobalSa
 FCubusDensitySample FCubusTerrainDensityField::SampleContinuous(const FVector& GlobalSampleCoordinate) const
 {
 	const FColumnData& Column = GetColumnData(static_cast<float>(GlobalSampleCoordinate.X), static_cast<float>(GlobalSampleCoordinate.Y));
-	const float BaseTerrainDensity = Column.SurfaceSampleZ - static_cast<float>(GlobalSampleCoordinate.Z);
+	const float MacroTerrainDensity = Column.SurfaceSampleZ - static_cast<float>(GlobalSampleCoordinate.Z);
+
+	/*
+	 * Fine terrain belongs to the continuous density field, not TerrainForm.
+	 *
+	 * TerrainForm is the stable kilometre/hillside support surface used by
+	 * hydrology, biome classification and coarse streaming. This band adds
+	 * bounded metre-to-decimetre relief directly to the scalar field. At the
+	 * default 80 cm canonical voxel, 4x adaptive sampling evaluates it every
+	 * 20 cm and therefore resolves genuine geometry that an 80 cm mesh cannot.
+	 *
+	 * The amplitude is deliberately less than half a canonical voxel. Fine
+	 * relief can wrinkle soil and weather rock, but it cannot manufacture a
+	 * detached spike or move a cliff by metres.
+	 */
+	float FineSurfaceDisplacement = 0.0f;
+	if (FMath::Abs(MacroTerrainDensity) < 2.5f)
+	{
+		const float WorldX = static_cast<float>(GlobalSampleCoordinate.X) + static_cast<float>(Settings.TerrainOffsetX);
+		const float WorldY = static_cast<float>(GlobalSampleCoordinate.Y) + static_cast<float>(Settings.TerrainOffsetY);
+		const float Roughness = FMath::Clamp(Column.FormSample.SurfaceRoughness, 0.0f, 1.0f);
+		const float ValleyCalm = 1.0f - FMath::Clamp(Column.FormSample.ValleyCarve * 0.82f, 0.0f, 0.88f);
+		const float MountainTexture = FMath::Lerp(0.72f, 1.0f, Column.FormSample.MountainWeight);
+
+		const float MesoscopicNoise = SampleNoise2D(
+			WorldX + 42017.0f,
+			WorldY - 18311.0f,
+			FMath::Max(0.30f, Settings.DetailFrequency * 3.8f)
+		);
+		const float FineNoise = SampleNoise2D(
+			WorldX * 0.79f - WorldY * 0.61f - 11719.0f,
+			WorldX * 0.61f + WorldY * 0.79f + 23801.0f,
+			FMath::Max(0.68f, Settings.DetailFrequency * 8.5f)
+		);
+		const float FineWarp = SampleNoise2D(
+			WorldX - 7193.0f,
+			WorldY + 3119.0f,
+			FMath::Max(0.16f, Settings.DetailFrequency * 2.0f)
+		);
+		const float WarpedFineNoise = SampleNoise2D(
+			WorldX + FineWarp * 0.42f + 13007.0f,
+			WorldY - FineWarp * 0.42f - 9113.0f,
+			FMath::Max(1.05f, Settings.DetailFrequency * 13.0f)
+		);
+
+		const float FineAmplitude =
+			FMath::Lerp(0.08f, 0.34f, Roughness) *
+			ValleyCalm *
+			MountainTexture;
+		FineSurfaceDisplacement = FMath::Clamp(
+			(MesoscopicNoise * 0.54f + FineNoise * 0.31f + WarpedFineNoise * 0.15f) * FineAmplitude,
+			-0.34f,
+			0.34f
+		);
+	}
+
+	const float BaseTerrainDensity = MacroTerrainDensity + FineSurfaceDisplacement;
 	const float TerrainDensity = Settings.bGenerateVolumetricGeology
 		? SampleGeologicalDensity(GlobalSampleCoordinate, Column, BaseTerrainDensity)
 		: BaseTerrainDensity;
@@ -790,102 +846,134 @@ float FCubusTerrainDensityField::ApplyRiverLowering(
 }
 
 float FCubusTerrainDensityField::SampleGeologicalDensity(
-	const FVector& GlobalSampleCoordinate,
-	const FColumnData& Column,
-	const float BaseTerrainDensity
+\tconst FVector& GlobalSampleCoordinate,
+\tconst FColumnData& Column,
+\tconst float BaseTerrainDensity
 ) const
 {
-	const float DistanceFromSurface = FMath::Abs(BaseTerrainDensity);
-	if (DistanceFromSurface >= Settings.GeologySurfaceBand || Column.RockExposure <= KINDA_SMALL_NUMBER)
-	{
-		return BaseTerrainDensity;
-	}
+\tconst float DistanceFromSurface = FMath::Abs(BaseTerrainDensity);
+\tconst float EffectiveSurfaceBand = FMath::Min(Settings.GeologySurfaceBand, 6.0f);
+\tif (DistanceFromSurface >= EffectiveSurfaceBand || Column.RockExposure <= KINDA_SMALL_NUMBER)
+\t{
+\t\treturn BaseTerrainDensity;
+\t}
 
-	const float SurfaceBandMask = 1.0f - SmoothStep(0.0f, Settings.GeologySurfaceBand, DistanceFromSurface);
-	const float WorldX = static_cast<float>(GlobalSampleCoordinate.X) + static_cast<float>(Settings.TerrainOffsetX);
-	const float WorldY = static_cast<float>(GlobalSampleCoordinate.Y) + static_cast<float>(Settings.TerrainOffsetY);
-	const float WorldZ = static_cast<float>(GlobalSampleCoordinate.Z);
+\tconst float SurfaceBandMask = 1.0f - SmoothStep(0.0f, EffectiveSurfaceBand, DistanceFromSurface);
+\tconst float WorldX = static_cast<float>(GlobalSampleCoordinate.X) + static_cast<float>(Settings.TerrainOffsetX);
+\tconst float WorldY = static_cast<float>(GlobalSampleCoordinate.Y) + static_cast<float>(Settings.TerrainOffsetY);
+\tconst float WorldZ = static_cast<float>(GlobalSampleCoordinate.Z);
 
-	FVector2D Downhill = -Column.Gradient;
-	if (!Downhill.Normalize())
-	{
-		return BaseTerrainDensity;
-	}
+\t/*
+\t * Structural permission comes from the macro landform. A steep slope alone
+\t * is not permission to turn every cliff into a noisy saw blade.
+\t */
+\tconst float StructuralCarrier = FMath::Clamp(
+\t\tColumn.FormSample.Escarpment * 0.62f +
+\t\tColumn.FormSample.MountainCore * 0.22f +
+\t\tColumn.FormSample.MassifWeight * 0.18f +
+\t\tColumn.FormSample.Ridge * 0.12f,
+\t\t0.0f,
+\t\t1.0f
+\t);
+\tconst float ValleyProtection = 1.0f - FMath::Clamp(
+\t\tColumn.FormSample.ValleyCarve * 0.86f,
+\t\t0.0f,
+\t\t0.92f
+\t);
+\tconst float GeologyCarrier = FMath::Clamp(
+\t\tColumn.RockExposure *
+\t\tFMath::Lerp(0.34f, 1.0f, StructuralCarrier) *
+\t\tValleyProtection,
+\t\t0.0f,
+\t\t1.0f
+\t);
+\tif (GeologyCarrier <= KINDA_SMALL_NUMBER)
+\t{
+\t\treturn BaseTerrainDensity;
+\t}
 
-	const FVector2D AlongCliff(-Downhill.Y, Downhill.X);
-	const float Across = WorldX * Downhill.X + WorldY * Downhill.Y;
-	const float Along = WorldX * AlongCliff.X + WorldY * AlongCliff.Y;
-	const float Hardness = FMath::Lerp(0.58f, 1.30f, Column.RockHardness);
+\tFVector2D Downhill = -Column.Gradient;
+\tif (!Downhill.Normalize())
+\t{
+\t\treturn BaseTerrainDensity;
+\t}
+\tconst FVector2D AlongCliff(-Downhill.Y, Downhill.X);
+\tconst float Across = WorldX * Downhill.X + WorldY * Downhill.Y;
+\tconst float Along = WorldX * AlongCliff.X + WorldY * AlongCliff.Y;
 
-	const float RockWarp = SampleNoise3D(
-		WorldX + 1709.0f,
-		WorldY - 3187.0f,
-		WorldZ + 733.0f,
-		Settings.GeologyRockWarpFrequency
-	) * Settings.GeologyRockWarpStrength;
+\t/* Broad strata. This is shape modulation, never a multi-voxel shelf stamp. */
+\tconst float StrataFrequency = FMath::Clamp(
+\t\tSettings.GeologyStrataFrequency,
+\t\t0.008f,
+\t\t0.16f
+\t);
+\tconst float FoldedDip = FMath::Clamp(
+\t\tSettings.GeologyStrataDip + Column.StrataTilt * 0.012f,
+\t\t-0.035f,
+\t\t0.035f
+\t);
+\tconst float StrataPhase =
+\t\tWorldZ * StrataFrequency +
+\t\tAcross * FoldedDip +
+\t\tSampleNoise2D(Along + 9113.0f, Across - 4327.0f, StrataFrequency * 0.16f) * 0.20f;
+\tconst float StrataWave = FMath::Sin(StrataPhase * 2.0f * PI);
 
-	const float FoldedDip = Settings.GeologyStrataDip + Column.StrataTilt * 0.020f;
-	const float StrataPhase =
-		WorldZ * Settings.GeologyStrataFrequency +
-		Across * FoldedDip +
-		SampleNoise2D(
-			Along + 9113.0f,
-			Across - 4327.0f,
-			Settings.GeologyStrataFrequency * 0.18f
-		) * 0.35f;
-	const float StrataWave = FMath::Sin(StrataPhase * 2.0f * PI);
-	const float ShelfBand = FMath::Square(FMath::Max(0.0f, StrataWave));
-	const float UndercutBand = FMath::Square(FMath::Max(0.0f, -StrataWave));
+\tconst float RockMass = SampleNoise3D(
+\t\tWorldX - 6211.0f,
+\t\tWorldY + 4177.0f,
+\t\tWorldZ - 1987.0f,
+\t\tFMath::Clamp(Settings.GeologyMassFrequency, 0.006f, 0.18f)
+\t);
+\tconst float RockWarp = SampleNoise3D(
+\t\tWorldX + 1709.0f,
+\t\tWorldY - 3187.0f,
+\t\tWorldZ + 733.0f,
+\t\tFMath::Clamp(Settings.GeologyRockWarpFrequency, 0.008f, 0.22f)
+\t);
+\tconst float FractureVolume = SampleRidgedNoise3D(
+\t\tWorldX + 12011.0f,
+\t\tWorldY - 4919.0f,
+\t\tWorldZ + 2791.0f,
+\t\tFMath::Clamp(Settings.GeologyFractureFrequency, 0.006f, 0.18f)
+\t);
+\tconst float FractureCut =
+\t\tSmoothStep(0.80f, 0.97f, FractureVolume) *
+\t\tColumn.Fracture;
 
-	const float MassRidge = SampleRidgedNoise3D(
-		WorldX - 6211.0f,
-		WorldY + 4177.0f,
-		WorldZ - 1987.0f,
-		Settings.GeologyMassFrequency
-	);
-	const float MassNoise = SampleNoise3D(
-		WorldX + 2381.0f,
-		WorldY + 7151.0f,
-		WorldZ - 3319.0f,
-		Settings.GeologyMassFrequency * 0.53f
-	);
-	const float RockMass =
-		(MassRidge - 0.48f) * Settings.GeologyMassStrength +
-		MassNoise * Settings.GeologyMassStrength * 0.32f;
+\t/*
+\t * A vertical-varying lateral signal permits small real overhangs where the
+\t * cliff structure supports them. Its budget is centimetres/decimetres in
+\t * voxel-space, not the old several-metre displacement.
+\t */
+\tconst float OverhangSignal = SampleNoise3D(
+\t\tAcross + 2381.0f,
+\t\tAlong + 7151.0f,
+\t\tWorldZ - 3319.0f,
+\t\t0.11f
+\t);
+\tconst float OverhangPermission =
+\t\tSmoothStep(0.42f, 0.88f, StructuralCarrier) *
+\t\tColumn.RockHardness;
 
-	const float FractureVolume = SampleRidgedNoise3D(
-		WorldX + 12011.0f,
-		WorldY - 4919.0f,
-		WorldZ + 2791.0f,
-		Settings.GeologyFractureFrequency
-	);
-	const float FractureCut =
-		SmoothStep(0.72f, 0.96f, FractureVolume) *
-		Column.Fracture *
-		Settings.GeologyFractureStrength;
+\tconst float RawDeformation =
+\t\tStrataWave * 0.22f * FMath::Lerp(0.62f, 1.0f, Column.RockHardness) +
+\t\tRockMass * 0.24f +
+\t\tRockWarp * 0.12f +
+\t\tOverhangSignal * 0.30f * OverhangPermission -
+\t\tFractureCut * 0.20f;
 
-	const float ShelfDisplacement = Settings.GeologyShelfStrength * ShelfBand * Hardness;
-	const float UndercutDisplacement = Settings.GeologyUndercutStrength * UndercutBand * FMath::Lerp(1.15f, 0.65f, Column.RockHardness);
-	const float OverhangCarrier = FMath::Clamp(
-		ShelfBand * 0.62f + MassRidge * 0.38f,
-		0.0f,
-		1.0f
-	);
-	const float OverhangDisplacement =
-		Settings.GeologyOverhangStrength *
-		OverhangCarrier *
-		Column.RockHardness *
-		SmoothStep(0.18f, 0.72f, Column.RockExposure);
+\tconst float MaximumDisplacement = FMath::Lerp(
+\t\t0.16f,
+\t\t0.72f,
+\t\tGeologyCarrier
+\t) * SurfaceBandMask;
+\tconst float GeologicalDisplacement = FMath::Clamp(
+\t\tRawDeformation,
+\t\t-MaximumDisplacement,
+\t\tMaximumDisplacement
+\t);
 
-	const float GeologicalDisplacement =
-		ShelfDisplacement +
-		RockMass +
-		OverhangDisplacement -
-		UndercutDisplacement -
-		FractureCut +
-		RockWarp;
-
-	return BaseTerrainDensity + GeologicalDisplacement * Column.RockExposure * SurfaceBandMask;
+\treturn BaseTerrainDensity + GeologicalDisplacement;
 }
 
 float FCubusTerrainDensityField::SampleCaveDensity(
