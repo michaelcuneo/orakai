@@ -1,5 +1,7 @@
 from pathlib import Path
 
+# Trigger v27 structured geomorphology source patch.
+
 
 def replace_once(path: str, old: str, new: str) -> None:
     p = Path(path)
@@ -190,8 +192,6 @@ new_function = r'''float FCubusTerrainDensityField::SampleGeologicalDensity(
 	const float Along = WorldX * AlongCliff.X + WorldY * AlongCliff.Y;
 	const float Hardness = FMath::Lerp(0.58f, 1.30f, Column.RockHardness);
 
-	// Low-amplitude wall warp breaks planar Marching-Cubes faces but is restrained
-	// outside real exposed structures so soil hills do not become stone noise.
 	const float RockWarp = SampleNoise3D(
 		WorldX + 1709.0f,
 		WorldY - 3187.0f,
@@ -199,8 +199,6 @@ new_function = r'''float FCubusTerrainDensityField::SampleGeologicalDensity(
 		Settings.GeologyRockWarpFrequency
 	) * Settings.GeologyRockWarpStrength;
 
-	// Bedding follows cliff aspect and slowly folded strata. Positive bands form
-	// resistant ledges; negative bands become recessive seams and shallow alcoves.
 	const float FoldedDip = Settings.GeologyStrataDip + Column.StrataTilt * 0.020f;
 	const float StrataPhase =
 		WorldZ * Settings.GeologyStrataFrequency +
@@ -230,9 +228,6 @@ new_function = r'''float FCubusTerrainDensityField::SampleGeologicalDensity(
 		(MassRidge - 0.48f) * Settings.GeologyMassStrength * 0.72f +
 		MassNoise * Settings.GeologyMassStrength * 0.24f;
 
-	// Vertical/oblique ribs run along exposed faces. They are elongated in Z and
-	// cliff-tangent space rather than isotropic 3D noise, so cliffs read as eroded
-	// rock masses instead of porous blobs.
 	const float CliffRibSignal = SampleRidgedNoise(
 		Along + Across * 0.13f + 18457.0f,
 		WorldZ * 0.34f - Across * 0.07f - 9271.0f,
@@ -242,8 +237,6 @@ new_function = r'''float FCubusTerrainDensityField::SampleGeologicalDensity(
 	const float CliffRibDisplacement =
 		Settings.GeologyMassStrength * 0.82f * CliffRib * Hardness;
 
-	// Sparse alcoves remove material behind the face and combine with recessive
-	// bedding to create real shallow overhang topology in the scalar field.
 	const float AlcoveNoise = FMath::Clamp(
 		0.5f + 0.5f * SampleNoise3D(
 			WorldX - 14321.0f,
@@ -286,8 +279,6 @@ new_function = r'''float FCubusTerrainDensityField::SampleGeologicalDensity(
 		Column.RockHardness *
 		SmoothStep(0.18f, 0.72f, FMath::Max(Column.RockExposure, StructuralCliff));
 
-	// Colluvium/talus is a separate depositional signal: medium slopes + local
-	// concavity receive irregular positive density, building aprons beneath cliffs.
 	const float TalusPattern = FMath::Clamp(
 		0.5f + 0.5f * SampleNoise2D(
 			Across + 3271.0f,
