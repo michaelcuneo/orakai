@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 #include "CubusCore/Meshing/CubusMeshData.h"
+#include "CubusCore/Meshing/CubusDensityLod.h"
 
 class FCubusDensitySamplingBuffer;
 class ICubusDensityField;
@@ -33,7 +34,9 @@ public:
         float IsoLevel,
         TMap<int32, FCubusMeshData>& OutMaterialMeshes,
         int32& OutGeneratedTriangleCount,
-        const ICubusDensityField* SurfaceMaterialField = nullptr
+        const ICubusDensityField* SurfaceMaterialField = nullptr,
+        const ICubusDensityField* TransitionField = nullptr,
+        const FCubusDensityTransitionFaces& TransitionFaces = FCubusDensityTransitionFaces()
     );
 
     /**
@@ -49,6 +52,7 @@ public:
         int32 SubdivisionsPerVoxel,
         float IsoLevel,
         TMap<int32, FCubusMeshData>& OutMaterialMeshes,
-        int32& OutGeneratedTriangleCount
+        int32& OutGeneratedTriangleCount,
+        const FCubusDensityTransitionFaces& TransitionFaces = FCubusDensityTransitionFaces()
     );
 };

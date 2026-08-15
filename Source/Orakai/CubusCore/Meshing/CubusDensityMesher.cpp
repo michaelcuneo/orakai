@@ -5,6 +5,7 @@
 #include "CubusCore/Generation/CubusDensityField.h"
 #include "CubusCore/Meshing/CubusDensityLod.h"
 #include "CubusCore/Meshing/CubusMarchingCubesTables.h"
+#include "CubusCore/Meshing/CubusTransvoxelTables.h"
 
 namespace CubusDensityMesher
 {
@@ -534,6 +535,136 @@ namespace CubusDensityMesher
         return FVector::ForwardVector;
     }
 
+    FCubusDensitySample SampleConsistentField(
+        const ICubusDensityField& DensityField,
+        const FVector& GlobalCoordinate
+    )
+    {
+        const FIntVector Rounded(
+            FMath::RoundToInt(GlobalCoordinate.X),
+            FMath::RoundToInt(GlobalCoordinate.Y),
+            FMath::RoundToInt(GlobalCoordinate.Z)
+        );
+        const bool bCanonicalLatticePoint =
+            FMath::IsNearlyEqual(GlobalCoordinate.X, static_cast<double>(Rounded.X), 1.0e-6) &&
+            FMath::IsNearlyEqual(GlobalCoordinate.Y, static_cast<double>(Rounded.Y), 1.0e-6) &&
+            FMath::IsNearlyEqual(GlobalCoordinate.Z, static_cast<double>(Rounded.Z), 1.0e-6);
+
+        return bCanonicalLatticePoint
+            ? DensityField.Sample(Rounded)
+            : DensityField.SampleContinuous(GlobalCoordinate);
+    }
+
+    struct FTransitionFaceBasis
+    {
+        FVector BoundaryOrigin = FVector::ZeroVector;
+        FVector Inward = FVector::ZeroVector;
+        FVector U = FVector::ZeroVector;
+        FVector V = FVector::ZeroVector;
+    };
+
+    FTransitionFaceBasis GetTransitionFaceBasis(const ECubusDensityFace Face)
+    {
+        FTransitionFaceBasis Result;
+        switch (Face)
+        {
+        case ECubusDensityFace::NegativeX:
+            Result.BoundaryOrigin = FVector(0.0, 0.0, 0.0);
+            Result.Inward = FVector(1.0, 0.0, 0.0);
+            Result.U = FVector(0.0, 1.0, 0.0);
+            Result.V = FVector(0.0, 0.0, 1.0);
+            break;
+        case ECubusDensityFace::PositiveX:
+            Result.BoundaryOrigin = FVector(Cubus::ChunkSize, 0.0, 0.0);
+            Result.Inward = FVector(-1.0, 0.0, 0.0);
+            Result.U = FVector(0.0, 1.0, 0.0);
+            Result.V = FVector(0.0, 0.0, 1.0);
+            break;
+        case ECubusDensityFace::NegativeY:
+            Result.BoundaryOrigin = FVector(0.0, 0.0, 0.0);
+            Result.Inward = FVector(0.0, 1.0, 0.0);
+            Result.U = FVector(1.0, 0.0, 0.0);
+            Result.V = FVector(0.0, 0.0, 1.0);
+            break;
+        case ECubusDensityFace::PositiveY:
+            Result.BoundaryOrigin = FVector(0.0, Cubus::ChunkSize, 0.0);
+            Result.Inward = FVector(0.0, -1.0, 0.0);
+            Result.U = FVector(1.0, 0.0, 0.0);
+            Result.V = FVector(0.0, 0.0, 1.0);
+            break;
+        case ECubusDensityFace::NegativeZ:
+            Result.BoundaryOrigin = FVector(0.0, 0.0, 0.0);
+            Result.Inward = FVector(0.0, 0.0, 1.0);
+            Result.U = FVector(1.0, 0.0, 0.0);
+            Result.V = FVector(0.0, 1.0, 0.0);
+            break;
+        case ECubusDensityFace::PositiveZ:
+            Result.BoundaryOrigin = FVector(0.0, 0.0, Cubus::ChunkSize);
+            Result.Inward = FVector(0.0, 0.0, -1.0);
+            Result.U = FVector(1.0, 0.0, 0.0);
+            Result.V = FVector(0.0, 1.0, 0.0);
+            break;
+        default:
+            break;
+        }
+        return Result;
+    }
+
+    FVector ApplyTransitionTransform(
+        const FVector& LocalSamplePosition,
+        const int32 SelfSubdivisions,
+        const FCubusDensityTransitionFaces& TransitionFaces
+    )
+    {
+        FVector Result = LocalSamplePosition;
+        const int32 SafeSubdivisions = FCubusDensityLod::NormalizeSubdivisions(SelfSubdivisions);
+        const double CoarseSpacing = 1.0 / static_cast<double>(SafeSubdivisions);
+        const double TransitionThickness = CoarseSpacing * 0.5;
+
+        for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
+        {
+            const ECubusDensityFace Face = static_cast<ECubusDensityFace>(FaceIndex);
+            if (!TransitionFaces.HasFinerNeighbour(Face, SafeSubdivisions))
+            {
+                continue;
+            }
+
+            const FTransitionFaceBasis Basis = GetTransitionFaceBasis(Face);
+            const double DistanceFromBoundary = FVector::DotProduct(
+                LocalSamplePosition - Basis.BoundaryOrigin,
+                Basis.Inward
+            );
+            if (DistanceFromBoundary < -UE_KINDA_SMALL_NUMBER || DistanceFromBoundary >= CoarseSpacing)
+            {
+                continue;
+            }
+
+            const double Weight = 1.0 - FMath::Clamp(DistanceFromBoundary / CoarseSpacing, 0.0, 1.0);
+            Result += Basis.Inward * (TransitionThickness * Weight);
+        }
+        return Result;
+    }
+
+    FVector SampleFieldGradient(
+        const ICubusDensityField& DensityField,
+        const FVector& GlobalCoordinate,
+        const float Step
+    )
+    {
+        const float SafeStep = FMath::Max(Step, 0.0001f);
+        const float NegativeX = SampleConsistentField(DensityField, GlobalCoordinate - FVector(SafeStep, 0.0, 0.0)).Density;
+        const float PositiveX = SampleConsistentField(DensityField, GlobalCoordinate + FVector(SafeStep, 0.0, 0.0)).Density;
+        const float NegativeY = SampleConsistentField(DensityField, GlobalCoordinate - FVector(0.0, SafeStep, 0.0)).Density;
+        const float PositiveY = SampleConsistentField(DensityField, GlobalCoordinate + FVector(0.0, SafeStep, 0.0)).Density;
+        const float NegativeZ = SampleConsistentField(DensityField, GlobalCoordinate - FVector(0.0, 0.0, SafeStep)).Density;
+        const float PositiveZ = SampleConsistentField(DensityField, GlobalCoordinate + FVector(0.0, 0.0, SafeStep)).Density;
+        return FVector(
+            PositiveX - NegativeX,
+            PositiveY - NegativeY,
+            PositiveZ - NegativeZ
+        ) / (2.0f * SafeStep);
+    }
+
     FInterpolatedVertex InterpolateEdge(
         const FCubusDensitySamplingBuffer& DensityBuffer,
         const FCubusDensitySample& SampleA,
@@ -544,7 +675,9 @@ namespace CubusDensityMesher
         const FIntVector& LocalSampleB,
         const FVector& ChunkMinimum,
         const float VoxelSize,
-        const float IsoLevel
+        const float IsoLevel,
+        const int32 SelfSubdivisions,
+        const FCubusDensityTransitionFaces& TransitionFaces
     )
     {
         const float DensityDelta =
@@ -600,8 +733,11 @@ namespace CubusDensityMesher
 
         Result.LocalPosition =
             ChunkMinimum +
-            LocalSamplePosition *
-            VoxelSize;
+            ApplyTransitionTransform(
+                LocalSamplePosition,
+                SelfSubdivisions,
+                TransitionFaces
+            ) * VoxelSize;
 
         Result.GlobalSamplePosition =
             GlobalSampleOrigin +
@@ -748,24 +884,10 @@ namespace CubusDensityMesher
             const FVector GlobalCoordinate =
                 GetGlobalCoordinate(FineCoordinate);
 
-            const bool bOnChunkBoundary =
-                FineCoordinate.X == 0 ||
-                FineCoordinate.X == FineChunkSize ||
-                FineCoordinate.Y == 0 ||
-                FineCoordinate.Y == FineChunkSize ||
-                FineCoordinate.Z == 0 ||
-                FineCoordinate.Z == FineChunkSize;
-
             FCubusDensitySample& AddedSample =
                 Samples.Add(
                     PackedCoordinate,
-                    bOnChunkBoundary
-                        ? SampleCanonicalBoundary(
-                            GlobalCoordinate
-                        )
-                        : DensityField.SampleContinuous(
-                            GlobalCoordinate
-                        )
+                    SampleConsistentField(DensityField, GlobalCoordinate)
                 );
 
             return AddedSample;
@@ -849,84 +971,6 @@ namespace CubusDensityMesher
         }
 
     private:
-        FCubusDensitySample SampleCanonicalBoundary(
-            const FVector& GlobalCoordinate
-        ) const
-        {
-            const FIntVector MinimumCoordinate(
-                FMath::FloorToInt(GlobalCoordinate.X),
-                FMath::FloorToInt(GlobalCoordinate.Y),
-                FMath::FloorToInt(GlobalCoordinate.Z)
-            );
-
-            const FVector Alpha(
-                GlobalCoordinate.X -
-                    static_cast<double>(MinimumCoordinate.X),
-                GlobalCoordinate.Y -
-                    static_cast<double>(MinimumCoordinate.Y),
-                GlobalCoordinate.Z -
-                    static_cast<double>(MinimumCoordinate.Z)
-            );
-
-            FCubusDensitySample Result;
-            Result.Density = 0.0f;
-            Result.MaterialId = 0;
-
-            float StrongestSolidWeight = -1.0f;
-
-            for (int32 Z = 0; Z <= 1; ++Z)
-            {
-                const float WeightZ = Z == 0
-                    ? 1.0f - static_cast<float>(Alpha.Z)
-                    : static_cast<float>(Alpha.Z);
-
-                for (int32 Y = 0; Y <= 1; ++Y)
-                {
-                    const float WeightY = Y == 0
-                        ? 1.0f - static_cast<float>(Alpha.Y)
-                        : static_cast<float>(Alpha.Y);
-
-                    for (int32 X = 0; X <= 1; ++X)
-                    {
-                        const float WeightX = X == 0
-                            ? 1.0f - static_cast<float>(Alpha.X)
-                            : static_cast<float>(Alpha.X);
-                        const float Weight = WeightX * WeightY * WeightZ;
-
-                        if (Weight <= 0.0f)
-                        {
-                            continue;
-                        }
-
-                        const FCubusDensitySample Corner =
-                            DensityField.Sample(
-                                MinimumCoordinate + FIntVector(X, Y, Z)
-                            );
-
-                        Result.Density += Corner.Density * Weight;
-
-                        if (Corner.MaterialId > 0 &&
-                            Weight > StrongestSolidWeight)
-                        {
-                            StrongestSolidWeight = Weight;
-                            Result.MaterialId = Corner.MaterialId;
-                        }
-                    }
-                }
-            }
-
-            if (Result.Density <= 0.0f)
-            {
-                Result.MaterialId = 0;
-            }
-            else
-            {
-                Result.MaterialId = FMath::Max(1, Result.MaterialId);
-            }
-
-            return Result;
-        }
-
         const ICubusDensityField& DensityField;
 
         FVector GlobalSampleOrigin =
@@ -1031,7 +1075,9 @@ namespace CubusDensityMesher
         const FIntVector& FineSampleB,
         const FVector& ChunkMinimum,
         const float CanonicalVoxelSize,
-        const float IsoLevel
+        const float IsoLevel,
+        const int32 SelfSubdivisions,
+        const FCubusDensityTransitionFaces& TransitionFaces
     )
     {
         const FCubusDensitySample SampleA =
@@ -1070,7 +1116,12 @@ namespace CubusDensityMesher
 
         FInterpolatedVertex Result;
         Result.LocalPosition =
-            ChunkMinimum + LocalSamplePosition * CanonicalVoxelSize;
+            ChunkMinimum +
+            ApplyTransitionTransform(
+                LocalSamplePosition,
+                SelfSubdivisions,
+                TransitionFaces
+            ) * CanonicalVoxelSize;
         Result.GlobalSamplePosition = GlobalSamplePosition;
         Result.Normal = (-InterpolatedGradient).GetSafeNormal();
         Result.MaterialId = ClampDensityMaterialId(
@@ -1253,6 +1304,200 @@ bool AddTriangle(
 
         return true;
     }
+
+
+    struct FTransitionPoint
+    {
+        FCubusDensitySample Sample;
+        FVector LocalGeometryPosition = FVector::ZeroVector;
+        FVector GlobalSamplePosition = FVector::ZeroVector;
+        FVector Gradient = FVector::ZeroVector;
+    };
+
+    FInterpolatedVertex InterpolateTransitionEdge(
+        const FTransitionPoint& PointA,
+        const FTransitionPoint& PointB,
+        const FVector& ChunkMinimum,
+        const float CanonicalVoxelSize,
+        const float IsoLevel
+    )
+    {
+        const float DensityDelta = PointB.Sample.Density - PointA.Sample.Density;
+        const float Alpha = FMath::IsNearlyZero(DensityDelta)
+            ? 0.5f
+            : FMath::Clamp(
+                (IsoLevel - PointA.Sample.Density) / DensityDelta,
+                0.0f,
+                1.0f
+            );
+
+        const bool bAIsSolid = PointA.Sample.IsSolid(IsoLevel);
+        FInterpolatedVertex Result;
+        Result.LocalPosition = ChunkMinimum +
+            FMath::Lerp(PointA.LocalGeometryPosition, PointB.LocalGeometryPosition, Alpha) * CanonicalVoxelSize;
+        Result.GlobalSamplePosition = FMath::Lerp(PointA.GlobalSamplePosition, PointB.GlobalSamplePosition, Alpha);
+        Result.Normal = (-FMath::Lerp(PointA.Gradient, PointB.Gradient, Alpha)).GetSafeNormal();
+        Result.MaterialId = ClampDensityMaterialId(
+            bAIsSolid ? PointA.Sample.MaterialId : PointB.Sample.MaterialId
+        );
+        SetSingleMaterialBlend(Result.MaterialBlend, Result.MaterialId);
+
+        if (Result.Normal.IsNearlyZero())
+        {
+            const FVector SolidToEmpty = bAIsSolid
+                ? PointB.LocalGeometryPosition - PointA.LocalGeometryPosition
+                : PointA.LocalGeometryPosition - PointB.LocalGeometryPosition;
+            Result.Normal = SolidToEmpty.GetSafeNormal();
+        }
+        if (Result.Normal.IsNearlyZero())
+        {
+            Result.Normal = FVector::UpVector;
+        }
+        return Result;
+    }
+
+    void BuildTransitionCells(
+        const ICubusDensityField& DensityField,
+        const FIntVector& ChunkCoordinate,
+        const float CanonicalVoxelSize,
+        const int32 SelfSubdivisions,
+        const float IsoLevel,
+        const FCubusDensityTransitionFaces& TransitionFaces,
+        FCubusMeshData& UnifiedMesh,
+        int32& InOutGeneratedTriangleCount
+    )
+    {
+        using namespace CubusTransvoxelTables;
+
+        const int32 Subdivisions = FCubusDensityLod::NormalizeSubdivisions(SelfSubdivisions);
+        const float CoarseSpacing = 1.0f / static_cast<float>(Subdivisions);
+        const float FineSpacing = CoarseSpacing * 0.5f;
+        const float TransitionThickness = CoarseSpacing * 0.5f;
+        const int32 FaceCellCount = Cubus::ChunkSize * Subdivisions;
+        const FVector ChunkGlobalOrigin = ToVector(ChunkCoordinate * Cubus::ChunkSize);
+        const float ChunkWorldSize = static_cast<float>(Cubus::ChunkSize) * CanonicalVoxelSize;
+        const FVector ChunkMinimum(-ChunkWorldSize * 0.5f, -ChunkWorldSize * 0.5f, -ChunkWorldSize * 0.5f);
+
+        /*
+         * Official Transvoxel transition-point numbering around the high-res
+         * face is perimeter-first plus centre:
+         *
+         *     6 -- 5 -- 4
+         *     |    |    |
+         *     7 -- 8 -- 3
+         *     |    |    |
+         *     0 -- 1 -- 2
+         *
+         * Low-resolution duplicate points are 9=0, A=2, B=6, C=4 and are
+         * displaced inward geometrically while retaining the coarse-corner
+         * scalar values. This is what lets the transition topology match both
+         * the fine boundary contour and the transformed coarse regular mesh.
+         */
+        static constexpr int32 HighPointGrid[9][2] =
+        {
+            {0, 0}, {1, 0}, {2, 0},
+            {2, 1}, {2, 2}, {1, 2},
+            {0, 2}, {0, 1}, {1, 1}
+        };
+        static constexpr int32 LowPointHighIndex[4] = { 0, 2, 6, 4 };
+
+        for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
+        {
+            const ECubusDensityFace Face = static_cast<ECubusDensityFace>(FaceIndex);
+            if (!TransitionFaces.HasFinerNeighbour(Face, Subdivisions))
+            {
+                continue;
+            }
+
+            const FTransitionFaceBasis Basis = GetTransitionFaceBasis(Face);
+            for (int32 VCell = 0; VCell < FaceCellCount; ++VCell)
+            {
+                for (int32 UCell = 0; UCell < FaceCellCount; ++UCell)
+                {
+                    const float U0 = static_cast<float>(UCell) * CoarseSpacing;
+                    const float V0 = static_cast<float>(VCell) * CoarseSpacing;
+                    FTransitionPoint Points[13];
+                    int32 CaseIndex = 0;
+
+                    for (int32 PointIndex = 0; PointIndex < 9; ++PointIndex)
+                    {
+                        const float U = U0 + static_cast<float>(HighPointGrid[PointIndex][0]) * FineSpacing;
+                        const float V = V0 + static_cast<float>(HighPointGrid[PointIndex][1]) * FineSpacing;
+                        FTransitionPoint& Point = Points[PointIndex];
+                        Point.LocalGeometryPosition = Basis.BoundaryOrigin + Basis.U * U + Basis.V * V;
+                        Point.GlobalSamplePosition = ChunkGlobalOrigin + Point.LocalGeometryPosition;
+                        Point.Sample = SampleConsistentField(DensityField, Point.GlobalSamplePosition);
+                        Point.Gradient = SampleFieldGradient(DensityField, Point.GlobalSamplePosition, FineSpacing);
+                        if (Point.Sample.IsSolid(IsoLevel))
+                        {
+                            CaseIndex |= 1 << PointIndex;
+                        }
+                    }
+
+                    if (CaseIndex == 0 || CaseIndex == 511)
+                    {
+                        continue;
+                    }
+
+                    for (int32 LowIndex = 0; LowIndex < 4; ++LowIndex)
+                    {
+                        const int32 HighIndex = LowPointHighIndex[LowIndex];
+                        Points[9 + LowIndex] = Points[HighIndex];
+                        Points[9 + LowIndex].LocalGeometryPosition += Basis.Inward * TransitionThickness;
+                    }
+
+                    const uint8 RawClass = TransitionCellClass[CaseIndex];
+                    const bool bReverseWinding = (RawClass & 0x80u) != 0;
+                    const FTransitionCellData& CellData = TransitionCellData[RawClass & 0x7Fu];
+                    const int32 VertexCount = CellData.GetVertexCount();
+                    FInterpolatedVertex CellVertices[12];
+
+                    for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+                    {
+                        const uint16 VertexData = TransitionVertexData[CaseIndex][VertexIndex];
+                        const uint8 EndpointCode = static_cast<uint8>(VertexData & 0x00FFu);
+                        const int32 PointA = (EndpointCode >> 4) & 0x0F;
+                        const int32 PointB = EndpointCode & 0x0F;
+                        if (PointA >= 13 || PointB >= 13)
+                        {
+                            ensureMsgf(false, TEXT("Invalid Transvoxel endpoint %d-%d for case %d"), PointA, PointB, CaseIndex);
+                            continue;
+                        }
+                        CellVertices[VertexIndex] = InterpolateTransitionEdge(
+                            Points[PointA],
+                            Points[PointB],
+                            ChunkMinimum,
+                            CanonicalVoxelSize,
+                            IsoLevel
+                        );
+                    }
+
+                    const int32 TriangleCount = CellData.GetTriangleCount();
+                    for (int32 TriangleIndex = 0; TriangleIndex < TriangleCount; ++TriangleIndex)
+                    {
+                        int32 A = CellData.VertexIndex[TriangleIndex * 3 + 0];
+                        int32 B = CellData.VertexIndex[TriangleIndex * 3 + 1];
+                        int32 C = CellData.VertexIndex[TriangleIndex * 3 + 2];
+                        if (A >= VertexCount || B >= VertexCount || C >= VertexCount)
+                        {
+                            ensureMsgf(false, TEXT("Invalid Transvoxel triangle indices for case %d"), CaseIndex);
+                            continue;
+                        }
+                        if (bReverseWinding)
+                        {
+                            Swap(B, C);
+                        }
+
+                        if (AddTriangle(UnifiedMesh, CellVertices[A], CellVertices[B], CellVertices[C]))
+                        {
+                            ++InOutGeneratedTriangleCount;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 void FCubusDensityMesher::BuildChunk(
@@ -1261,7 +1506,9 @@ void FCubusDensityMesher::BuildChunk(
     const float IsoLevel,
     TMap<int32, FCubusMeshData>& OutMaterialMeshes,
     int32& OutGeneratedTriangleCount,
-    const ICubusDensityField* SurfaceMaterialField
+    const ICubusDensityField* SurfaceMaterialField,
+    const ICubusDensityField* TransitionField,
+    const FCubusDensityTransitionFaces& TransitionFaces
 )
 {
     using namespace CubusDensityMesher;
@@ -1566,7 +1813,9 @@ void FCubusDensityMesher::BuildChunk(
                                     ],
                                     ChunkMinimum,
                                     VoxelSize,
-                                    IsoLevel
+                                    IsoLevel,
+                                    1,
+                                    TransitionFaces
                                 );
 
                             if (SurfaceMaterialField != nullptr)
@@ -1667,6 +1916,20 @@ void FCubusDensityMesher::BuildChunk(
         }
     }
 
+    if (TransitionField != nullptr)
+    {
+        BuildTransitionCells(
+            *TransitionField,
+            DensityBuffer.GetChunkCoordinate(),
+            VoxelSize,
+            1,
+            IsoLevel,
+            TransitionFaces,
+            UnifiedMesh,
+            OutGeneratedTriangleCount
+        );
+    }
+
     if (UnifiedMesh.IsEmpty())
     {
         OutMaterialMeshes.Remove(
@@ -1682,7 +1945,8 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
     const int32 SubdivisionsPerVoxel,
     const float IsoLevel,
     TMap<int32, FCubusMeshData>& OutMaterialMeshes,
-    int32& OutGeneratedTriangleCount
+    int32& OutGeneratedTriangleCount,
+    const FCubusDensityTransitionFaces& TransitionFaces
 )
 {
     using namespace CubusDensityMesher;
@@ -1701,7 +1965,10 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
             CanonicalVoxelSize,
             IsoLevel,
             OutMaterialMeshes,
-            OutGeneratedTriangleCount
+            OutGeneratedTriangleCount,
+            nullptr,
+            &DensityField,
+            TransitionFaces
         );
         return;
     }
@@ -1856,7 +2123,9 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
                                                 CornerCoordinates[CornerIndexB],
                                                 ChunkMinimum,
                                                 CanonicalVoxelSize,
-                                                IsoLevel
+                                                IsoLevel,
+                                                Subdivisions,
+                                                TransitionFaces
                                             );
 
                                         EdgeVertices[EdgeIndex]
@@ -1901,6 +2170,17 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
             }
         }
     }
+
+    BuildTransitionCells(
+        DensityField,
+        ChunkCoordinate,
+        CanonicalVoxelSize,
+        Subdivisions,
+        IsoLevel,
+        TransitionFaces,
+        UnifiedMesh,
+        OutGeneratedTriangleCount
+    );
 
     if (UnifiedMesh.IsEmpty())
     {

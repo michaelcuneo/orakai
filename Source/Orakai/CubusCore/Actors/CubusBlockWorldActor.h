@@ -26,9 +26,11 @@ struct FCubusStreamingChunkBuild
 
 	UE::Tasks::TTask<FCubusDensityMeshBuildResult> Task;
 
-	// Resolution captured by this worker. If LOD changes while the task is
-	// running, the result is discarded instead of publishing stale geometry.
+	// Resolution and six-face topology captured by this worker. If either
+	// changes while the task runs, the result is discarded rather than
+	// publishing a mesh with an obsolete seam contract.
 	int32 SubdivisionsPerVoxel = 1;
+	uint32 TransitionSignature = 0;
 };
 
 UCLASS(BlueprintType, Blueprintable, Config = GameUserSettings, ClassGroup = "Cubus", meta = (DisplayName = "Cubus Block World"))
@@ -77,6 +79,11 @@ public:
 
 	/** Canonical LOD0 voxel size used by world-space systems such as vegetation. */
 	float GetGeneratedVoxelSize() const { return GeneratedVoxelSize; }
+
+	FCubusDensityTransitionFaces BuildDensityTransitionFaces(
+		const FIntVector& ChunkCoordinate,
+		int32 SelfSubdivisions
+	) const;
 
 	bool IsWorldVegetationEnabled() const { return bEnableWorldVegetation; }
 

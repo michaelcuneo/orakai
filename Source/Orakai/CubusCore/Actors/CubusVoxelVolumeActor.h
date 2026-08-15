@@ -37,6 +37,7 @@ struct FCubusDensityMeshBuildInput
 
 	float VoxelSize			   = 100.0f;
 	int32 SubdivisionsPerVoxel = 1;
+	FCubusDensityTransitionFaces TransitionFaces;
 	float IsoLevel			   = 0.0f;
 
 	int64 WorldSeed = 1;

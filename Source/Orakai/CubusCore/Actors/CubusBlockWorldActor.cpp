@@ -1544,14 +1544,17 @@ int32 ACubusBlockWorldActor::ResolveDensitySubdivisions(const FIntVector& ChunkC
 		return 1;
 	}
 
-	const bool bHasTrackedChunk = LastTrackedChunk.X != MAX_int32 && LastTrackedChunk.Y != MAX_int32 && LastTrackedChunk.Z != MAX_int32;
+	const bool bHasTrackedChunk =
+		LastTrackedChunk.X != MAX_int32 &&
+		LastTrackedChunk.Y != MAX_int32 &&
+		LastTrackedChunk.Z != MAX_int32;
 
 	float TargetSpacing = DensityFarSampleSpacing;
+	int32 Distance = MAX_int32;
 
 	if (bHasTrackedChunk)
 	{
-		const int32 Distance = FCubusDensityLod::ChunkDistance(ChunkCoordinate, LastTrackedChunk);
-
+		Distance = FCubusDensityLod::ChunkDistance(ChunkCoordinate, LastTrackedChunk);
 		if (Distance <= DensityNearChunkRadius)
 		{
 			TargetSpacing = DensityNearSampleSpacing;
@@ -1560,20 +1563,61 @@ int32 ACubusBlockWorldActor::ResolveDensitySubdivisions(const FIntVector& ChunkC
 		{
 			TargetSpacing = DensityMiddleSampleSpacing;
 		}
+	}
 
-		/*
-		 * Bootstrap collision must never wait for the expensive visual LOD.
-		 * The canonical 80 cm support mesh is enough to place the pawn safely;
-		 * once released, UpdateDensityLods() schedules the normal 20 cm near
-		 * mesh asynchronously. Generated density remains the same field.
-		 */
-		if (bPawnHeldForStreaming && ChunkCoordinate == LastTrackedChunk)
+	int32 Resolved = FCubusDensityLod::ResolveSubdivisionsForSpacing(
+		GeneratedVoxelSize,
+		TargetSpacing
+	);
+
+	/*
+	 * The support chunk intentionally starts at canonical resolution for fast
+	 * collision. Its immediate ring is capped at 2x during bootstrap so no
+	 * temporary 1x<->4x face can ever exist. After release the normal 4/2/1
+	 * rings are restored.
+	 */
+	if (bPawnHeldForStreaming && bHasTrackedChunk)
+	{
+		if (Distance == 0)
 		{
-			TargetSpacing = GeneratedVoxelSize;
+			return 1;
+		}
+		if (Distance == 1)
+		{
+			Resolved = FMath::Min(Resolved, 2);
 		}
 	}
 
-	return FCubusDensityLod::ResolveSubdivisionsForSpacing(GeneratedVoxelSize, TargetSpacing);
+	return Resolved;
+}
+
+FCubusDensityTransitionFaces ACubusBlockWorldActor::BuildDensityTransitionFaces(
+	const FIntVector& ChunkCoordinate,
+	const int32 SelfSubdivisions
+) const
+{
+	FCubusDensityTransitionFaces Result;
+	for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
+	{
+		const ECubusDensityFace Face = static_cast<ECubusDensityFace>(FaceIndex);
+		const FIntVector NeighbourCoordinate =
+			ChunkCoordinate + FCubusDensityTransitionFaces::GetOffset(Face);
+		const int32 NeighbourSubdivisions = ResolveDensitySubdivisions(NeighbourCoordinate);
+
+		/* Adjacent streamed tiers must differ by no more than one power-of-two step. */
+		ensureMsgf(
+			NeighbourSubdivisions <= SelfSubdivisions * 2 || SelfSubdivisions <= NeighbourSubdivisions * 2,
+			TEXT("Unsupported Cubus density LOD jump %dx <-> %dx at (%d,%d,%d) face %d"),
+			SelfSubdivisions,
+			NeighbourSubdivisions,
+			ChunkCoordinate.X,
+			ChunkCoordinate.Y,
+			ChunkCoordinate.Z,
+			FaceIndex
+		);
+		Result.Set(Face, NeighbourSubdivisions);
+	}
+	return Result;
 }
 
 void ACubusBlockWorldActor::UpdateDensityLods()
@@ -1584,6 +1628,7 @@ void ACubusBlockWorldActor::UpdateDensityLods()
 		return;
 	}
 
+	TArray<FIntVector> ChangedCoordinates;
 	for (const auto& Entry : ChunksByCoordinate)
 	{
 		ACubusVoxelVolumeActor* ChunkActor = Entry.Value.Get();
@@ -1594,19 +1639,41 @@ void ACubusBlockWorldActor::UpdateDensityLods()
 
 		if (ChunkActor->ConfigureDensityResolution(ResolveDensitySubdivisions(Entry.Key)))
 		{
-			/*
-			 * Streamed density LOD changes use the existing worker pipeline.
-			 * The old path pushed them into the synchronous dirty queue, which
-			 * could freeze the game thread immediately after spawn.
-			 */
-			if (bEnableRuntimeStreaming && ChunkActor->GetEffectiveRenderMode() == ECubusVoxelRenderMode::Density)
+			ChangedCoordinates.Add(Entry.Key);
+		}
+	}
+
+	for (const FIntVector& ChangedCoordinate : ChangedCoordinates)
+	{
+		auto InvalidateCoordinate = [this](const FIntVector& Coordinate)
+		{
+			ACubusVoxelVolumeActor* Chunk = FindChunk(Coordinate);
+			if (!IsValid(Chunk))
 			{
-				StreamingChunksReady.Remove(Entry.Key);
+				return;
+			}
+
+			if (bEnableRuntimeStreaming && Chunk->GetEffectiveRenderMode() == ECubusVoxelRenderMode::Density)
+			{
+				StreamingChunksReady.Remove(Coordinate);
 			}
 			else
 			{
-				QueueChunkForRebuild(Entry.Key);
+				QueueChunkForRebuild(Coordinate);
 			}
+		};
+
+		/*
+		 * A face neighbour can keep the same own LOD while gaining/losing a
+		 * transition face. Rebuild both sides whenever one resolution changes.
+		 */
+		InvalidateCoordinate(ChangedCoordinate);
+		for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
+		{
+			const ECubusDensityFace Face = static_cast<ECubusDensityFace>(FaceIndex);
+			InvalidateCoordinate(
+				ChangedCoordinate + FCubusDensityTransitionFaces::GetOffset(Face)
+			);
 		}
 	}
 }
@@ -1684,6 +1751,7 @@ void ACubusBlockWorldActor::QueueStreamingChunkBuilds()
 		Build.Coordinate = Coordinate;
 		Build.Chunk		 = Chunk;
 		Build.SubdivisionsPerVoxel = BuildInput.SubdivisionsPerVoxel;
+		Build.TransitionSignature = BuildInput.TransitionFaces.GetSignature(BuildInput.SubdivisionsPerVoxel);
 
 		Build.Task = UE::Tasks::Launch(TEXT("CubusStreamingDensityMesh"),
 									   [BuildInput]() { return ACubusVoxelVolumeActor::BuildDensityMeshData(BuildInput); });
@@ -1793,8 +1861,15 @@ void ACubusBlockWorldActor::ProcessCompletedStreamingChunkBuilds()
 		const bool bResolutionStillCurrent =
 			IsValid(Chunk) &&
 			Chunk->GetDensitySubdivisionsPerVoxel() == Build.SubdivisionsPerVoxel;
+		const FCubusDensityTransitionFaces CurrentTransitionFaces =
+			bResolutionStillCurrent
+				? BuildDensityTransitionFaces(Build.Coordinate, Build.SubdivisionsPerVoxel)
+				: FCubusDensityTransitionFaces();
+		const bool bTopologyStillCurrent =
+			bResolutionStillCurrent &&
+			CurrentTransitionFaces.GetSignature(Build.SubdivisionsPerVoxel) == Build.TransitionSignature;
 
-		if (IsValid(Chunk) && bStillRequired && bResolutionStillCurrent)
+		if (IsValid(Chunk) && bStillRequired && bTopologyStillCurrent)
 		{
 			if (Chunk->BuildStagedVolumeFromDensityMesh(Result))
 			{

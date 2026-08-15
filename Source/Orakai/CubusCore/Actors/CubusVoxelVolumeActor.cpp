@@ -676,6 +676,14 @@ FCubusDensityMeshBuildInput ACubusVoxelVolumeActor::CaptureDensityMeshBuildInput
 
 	Input.SubdivisionsPerVoxel = DensitySubdivisionsPerVoxel;
 
+	if (IsValid(OwningBlockWorld.Get()))
+	{
+		Input.TransitionFaces = OwningBlockWorld->BuildDensityTransitionFaces(
+			ChunkCoordinate,
+			Input.SubdivisionsPerVoxel
+		);
+	}
+
 	Input.IsoLevel = 0.0f;
 
 	if (IsValid(OwningBlockWorld.Get()))
@@ -712,6 +720,7 @@ FCubusDensityMeshBuildResult ACubusVoxelVolumeActor::BuildDensityMeshData(const 
 	const FCubusTerrainDensityField DensityField(Input.DensitySettings);
 
 	const int32 Subdivisions = FCubusDensityLod::NormalizeSubdivisions(Input.SubdivisionsPerVoxel);
+	const FCubusDensityEditField EditedDensityField(DensityField, Input.DensityEdits);
 
 	if (Subdivisions <= 1)
 	{
@@ -766,21 +775,29 @@ FCubusDensityMeshBuildResult ACubusVoxelVolumeActor::BuildDensityMeshData(const 
 		 */
 		DensityBuffer.ApplyEdits(Input.DensityEdits);
 
-		FCubusDensityMesher::BuildChunk(DensityBuffer, Input.VoxelSize, Input.IsoLevel, Result.MaterialMeshes,
-										Result.GeneratedTriangleCount);
+		FCubusDensityMesher::BuildChunk(
+			DensityBuffer,
+			Input.VoxelSize,
+			Input.IsoLevel,
+			Result.MaterialMeshes,
+			Result.GeneratedTriangleCount,
+			nullptr,
+			&EditedDensityField,
+			Input.TransitionFaces
+		);
 	}
 	else
 	{
-		/*
-		 * Fine adaptive density still needs continuous edit interpolation.
-		 *
-		 * Keep the existing path intact for when density subdivision is
-		 * re-enabled later.
-		 */
-		const FCubusDensityEditField EditedDensityField(DensityField, Input.DensityEdits);
-
-		FCubusDensityMesher::BuildAdaptiveChunk(EditedDensityField, Input.ChunkCoordinate, Input.VoxelSize, Subdivisions, Input.IsoLevel,
-												Result.MaterialMeshes, Result.GeneratedTriangleCount);
+		FCubusDensityMesher::BuildAdaptiveChunk(
+			EditedDensityField,
+			Input.ChunkCoordinate,
+			Input.VoxelSize,
+			Subdivisions,
+			Input.IsoLevel,
+			Result.MaterialMeshes,
+			Result.GeneratedTriangleCount,
+			Input.TransitionFaces
+		);
 	}
 
 	Result.BuildTimeMilliseconds = (FPlatformTime::Seconds() - BuildStartTime) * 1000.0;

@@ -2,6 +2,73 @@
 
 #include "CoreMinimal.h"
 
+enum class ECubusDensityFace : uint8
+{
+    NegativeX = 0,
+    PositiveX,
+    NegativeY,
+    PositiveY,
+    NegativeZ,
+    PositiveZ,
+    Count
+};
+
+/**
+ * Snapshot of the target density resolution on all six neighbouring faces.
+ * A transition cell is owned by the coarser chunk whenever a face neighbour
+ * has exactly twice its subdivision count.
+ */
+struct ORAKAI_API FCubusDensityTransitionFaces
+{
+    int32 NeighbourSubdivisions[6] = { 0, 0, 0, 0, 0, 0 };
+
+    int32 Get(const ECubusDensityFace Face) const
+    {
+        return NeighbourSubdivisions[static_cast<int32>(Face)];
+    }
+
+    void Set(const ECubusDensityFace Face, const int32 Subdivisions)
+    {
+        NeighbourSubdivisions[static_cast<int32>(Face)] = Subdivisions;
+    }
+
+    bool HasFinerNeighbour(const ECubusDensityFace Face, const int32 SelfSubdivisions) const
+    {
+        return Get(Face) == SelfSubdivisions * 2;
+    }
+
+    uint32 GetSignature(const int32 SelfSubdivisions) const
+    {
+        uint32 Hash = 2166136261u;
+        auto Mix = [&Hash](const uint32 Value)
+        {
+            Hash ^= Value;
+            Hash *= 16777619u;
+        };
+
+        Mix(static_cast<uint32>(SelfSubdivisions));
+        for (const int32 Value : NeighbourSubdivisions)
+        {
+            Mix(static_cast<uint32>(Value));
+        }
+        return Hash;
+    }
+
+    static FIntVector GetOffset(const ECubusDensityFace Face)
+    {
+        switch (Face)
+        {
+        case ECubusDensityFace::NegativeX: return FIntVector(-1, 0, 0);
+        case ECubusDensityFace::PositiveX: return FIntVector(1, 0, 0);
+        case ECubusDensityFace::NegativeY: return FIntVector(0, -1, 0);
+        case ECubusDensityFace::PositiveY: return FIntVector(0, 1, 0);
+        case ECubusDensityFace::NegativeZ: return FIntVector(0, 0, -1);
+        case ECubusDensityFace::PositiveZ: return FIntVector(0, 0, 1);
+        default: return FIntVector::ZeroValue;
+        }
+    }
+};
+
 /**
  * Density-LOD scale rules shared by streaming, chunks and meshing.
  *

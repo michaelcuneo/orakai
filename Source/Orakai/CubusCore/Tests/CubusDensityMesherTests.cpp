@@ -118,6 +118,32 @@ namespace CubusDensityMesherTests
         }
     };
 
+    class FContinuousSphereField final : public ICubusDensityField
+    {
+    public:
+        FContinuousSphereField(const FVector& InCentre, const float InRadius)
+            : Centre(InCentre), Radius(InRadius)
+        {
+        }
+
+        virtual FCubusDensitySample Sample(const FIntVector& Coordinate) const override
+        {
+            return SampleContinuous(FVector(Coordinate.X, Coordinate.Y, Coordinate.Z));
+        }
+
+        virtual FCubusDensitySample SampleContinuous(const FVector& Coordinate) const override
+        {
+            FCubusDensitySample Result;
+            Result.Density = Radius - static_cast<float>(FVector::Distance(Coordinate, Centre));
+            Result.MaterialId = Result.Density > 0.0f ? 3 : 0;
+            return Result;
+        }
+
+    private:
+        FVector Centre = FVector::ZeroVector;
+        float Radius = 10.0f;
+    };
+
     int32 CountVertices(
         const TMap<int32, FCubusMeshData>& MaterialMeshes
     )
@@ -187,6 +213,67 @@ namespace CubusDensityMesherTests
                         )
                     )
                 );
+            }
+        }
+    }
+
+    FString QuantizedVertexKey(const FVector& Position)
+    {
+        return FString::Printf(
+            TEXT("%d,%d,%d"),
+            FMath::RoundToInt(Position.X * 10000.0),
+            FMath::RoundToInt(Position.Y * 10000.0),
+            FMath::RoundToInt(Position.Z * 10000.0)
+        );
+    }
+
+    void AddBoundarySegments(
+        const TMap<int32, FCubusMeshData>& MaterialMeshes,
+        const FIntVector& ChunkCoordinate,
+        const int32 Axis,
+        const double BoundaryPosition,
+        TSet<FString>& OutSegments
+    )
+    {
+        const FVector ChunkWorldOrigin(
+            static_cast<double>(ChunkCoordinate.X * Cubus::ChunkSize),
+            static_cast<double>(ChunkCoordinate.Y * Cubus::ChunkSize),
+            static_cast<double>(ChunkCoordinate.Z * Cubus::ChunkSize)
+        );
+
+        for (const TPair<int32, FCubusMeshData>& Pair : MaterialMeshes)
+        {
+            const FCubusMeshData& Mesh = Pair.Value;
+            for (int32 TriangleIndex = 0; TriangleIndex + 2 < Mesh.Triangles.Num(); TriangleIndex += 3)
+            {
+                const FVector Positions[3] =
+                {
+                    ChunkWorldOrigin + Mesh.Vertices[Mesh.Triangles[TriangleIndex + 0]],
+                    ChunkWorldOrigin + Mesh.Vertices[Mesh.Triangles[TriangleIndex + 1]],
+                    ChunkWorldOrigin + Mesh.Vertices[Mesh.Triangles[TriangleIndex + 2]]
+                };
+                static constexpr int32 EdgePairs[3][2] = { {0,1}, {1,2}, {2,0} };
+                for (const int32* Edge : EdgePairs)
+                {
+                    const FVector& A = Positions[Edge[0]];
+                    const FVector& B = Positions[Edge[1]];
+                    if (!FMath::IsNearlyEqual(A[Axis], BoundaryPosition, 0.0001) ||
+                        !FMath::IsNearlyEqual(B[Axis], BoundaryPosition, 0.0001))
+                    {
+                        continue;
+                    }
+                    FString KeyA = QuantizedVertexKey(A);
+                    FString KeyB = QuantizedVertexKey(B);
+                    if (KeyA == KeyB)
+                    {
+                        continue;
+                    }
+                    if (KeyB < KeyA)
+                    {
+                        Swap(KeyA, KeyB);
+                    }
+                    OutSegments.Add(KeyA + TEXT("|") + KeyB);
+                }
             }
         }
     }
@@ -474,100 +561,102 @@ bool FCubusAdaptiveDensityResolutionTest::RunTest(
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCubusMixedDensityLodBoundaryTest,
-    "Orakai.Cubus.Density.LOD.MixedBoundaryLock",
+    "Orakai.Cubus.Density.LOD.WatertightTransitions",
     EAutomationTestFlags::EditorContext |
     EAutomationTestFlags::EngineFilter
 )
 
-bool FCubusMixedDensityLodBoundaryTest::RunTest(
-    const FString& Parameters
-)
+bool FCubusMixedDensityLodBoundaryTest::RunTest(const FString& Parameters)
 {
     (void)Parameters;
     using namespace CubusDensityMesherTests;
 
-    const FWavyHeightField Field;
-    TMap<int32, FCubusMeshData> FineMeshes;
-    TMap<int32, FCubusMeshData> CoarseMeshes;
-    int32 FineTriangleCount = 0;
-    int32 CoarseTriangleCount = 0;
-
-    FCubusDensityMesher::BuildAdaptiveChunk(
-        Field,
-        FIntVector::ZeroValue,
-        100.0f,
-        4,
-        0.0f,
-        FineMeshes,
-        FineTriangleCount
-    );
-
-    FCubusDensityMesher::BuildAdaptiveChunk(
-        Field,
-        FIntVector(1, 0, 0),
-        100.0f,
-        1,
-        0.0f,
-        CoarseMeshes,
-        CoarseTriangleCount
-    );
-
-    TestTrue(
-        TEXT("Both LODs contain the shared height-field surface"),
-        FineTriangleCount > 0 && CoarseTriangleCount > 0
-    );
-
-    int32 FineBoundaryVertexCount = 0;
-
-    for (const TPair<int32, FCubusMeshData>& Pair : FineMeshes)
+    const int32 CoarseSubdivisions[] = { 1, 2 };
+    for (const int32 CoarseSubdivisionsValue : CoarseSubdivisions)
     {
-        for (const FVector& Vertex : Pair.Value.Vertices)
+        const int32 FineSubdivisions = CoarseSubdivisionsValue * 2;
+        for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
         {
-            if (!FMath::IsNearlyEqual(Vertex.X, 1600.0, 0.001))
+            const ECubusDensityFace Face = static_cast<ECubusDensityFace>(FaceIndex);
+            const FIntVector FineChunkCoordinate = FCubusDensityTransitionFaces::GetOffset(Face);
+            const int32 Axis = FaceIndex / 2;
+            const bool bPositive = (FaceIndex & 1) != 0;
+            const double BoundaryPosition = bPositive ? 16.0 : -16.0;
+
+            FVector SphereCentre = FVector::ZeroVector;
+            SphereCentre[Axis] = BoundaryPosition;
+            const FContinuousSphereField Field(SphereCentre, 10.0f);
+
+            FCubusDensityTransitionFaces CoarseFaces;
+            CoarseFaces.Set(Face, FineSubdivisions);
+
+            TMap<int32, FCubusMeshData> CoarseMeshes;
+            TMap<int32, FCubusMeshData> FineMeshes;
+            int32 CoarseTriangleCount = 0;
+            int32 FineTriangleCount = 0;
+
+            FCubusDensityMesher::BuildAdaptiveChunk(
+                Field,
+                FIntVector::ZeroValue,
+                1.0f,
+                CoarseSubdivisionsValue,
+                0.0f,
+                CoarseMeshes,
+                CoarseTriangleCount,
+                CoarseFaces
+            );
+            FCubusDensityMesher::BuildAdaptiveChunk(
+                Field,
+                FineChunkCoordinate,
+                1.0f,
+                FineSubdivisions,
+                0.0f,
+                FineMeshes,
+                FineTriangleCount
+            );
+
+            const FString Context = FString::Printf(
+                TEXT("%dx->%dx face %d"),
+                CoarseSubdivisionsValue,
+                FineSubdivisions,
+                FaceIndex
+            );
+            TestTrue(*FString::Printf(TEXT("%s coarse mesh intersects transition"), *Context), CoarseTriangleCount > 0);
+            TestTrue(*FString::Printf(TEXT("%s fine mesh intersects transition"), *Context), FineTriangleCount > 0);
+
+            TSet<FString> CoarseSegments;
+            TSet<FString> FineSegments;
+            AddBoundarySegments(
+                CoarseMeshes,
+                FIntVector::ZeroValue,
+                Axis,
+                BoundaryPosition,
+                CoarseSegments
+            );
+            AddBoundarySegments(
+                FineMeshes,
+                FineChunkCoordinate,
+                Axis,
+                BoundaryPosition,
+                FineSegments
+            );
+
+            TestTrue(*FString::Printf(TEXT("%s emits shared-boundary contour segments"), *Context), CoarseSegments.Num() > 0);
+            bool bSegmentsMatch = CoarseSegments.Num() == FineSegments.Num();
+            if (bSegmentsMatch)
             {
-                continue;
+                for (const FString& Segment : CoarseSegments)
+                {
+                    if (!FineSegments.Contains(Segment))
+                    {
+                        bSegmentsMatch = false;
+                        break;
+                    }
+                }
             }
-
-            ++FineBoundaryVertexCount;
-
-            const float WorldSampleY =
-                static_cast<float>(
-                    (Vertex.Y + 1600.0) / 100.0
-                );
-            const int32 MinimumY = FMath::FloorToInt(WorldSampleY);
-            const float Alpha =
-                WorldSampleY -
-                static_cast<float>(MinimumY);
-            const float BoundaryHeight = FMath::Lerp(
-                FWavyHeightField::HeightAt(
-                    static_cast<float>(MinimumY)
-                ),
-                FWavyHeightField::HeightAt(
-                    static_cast<float>(MinimumY + 1)
-                ),
-                Alpha
-            );
-            const double ExpectedLocalZ =
-                (
-                    static_cast<double>(BoundaryHeight) -
-                    static_cast<double>(Cubus::ChunkSize) * 0.5
-                ) * 100.0;
-
-            TestTrue(
-                TEXT("Fine boundary vertices lock to the canonical coarse contour"),
-                FMath::IsNearlyEqual(
-                    Vertex.Z,
-                    ExpectedLocalZ,
-                    0.05
-                )
-            );
+            TestTrue(*FString::Printf(TEXT("%s boundary segments are position/topology identical"), *Context), bSegmentsMatch);
         }
     }
-
-    TestTrue(
-        TEXT("The fine chunk emits vertices on the mixed-LOD boundary"),
-        FineBoundaryVertexCount > 0
-    );
 
     return true;
 }
