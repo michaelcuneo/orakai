@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Trigger v25 source patch from the already-installed workflow definition.
 
 def replace_once(path: str, old: str, new: str) -> None:
     p = Path(path)
