@@ -32,15 +32,13 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     Settings.MountainBlend = FMath::Clamp(Settings.MountainBlend, 0.001f, 1.0f);
     Settings.MountainElevationScale = FMath::Clamp(Settings.MountainElevationScale, 1.0f, 4.0f);
 
-    // RegionFrequency is an author-facing regional-detail frequency. The
-    // slower tectonic field makes complete mountain systems span kilometres.
+    // The tectonic carrier remains deliberately slow so complete mountain
+    // systems are connected over kilometre scales.
     const float TectonicFrequency = FMath::Max(
         0.000001f,
         Settings.RegionFrequency * 0.10f
     );
 
-    // One kilometre-scale warp is shared by every landform. It is intentionally
-    // low-frequency: it bends ranges and valleys without creating local spikes.
     const float FormWarpFrequency = FMath::Max(
         0.000001f,
         TectonicFrequency * 0.65f
@@ -68,8 +66,8 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float TerrainX = WorldX + WarpX;
     const float TerrainY = WorldY + WarpY;
 
-    // Mountain ranges follow warped zero-crossings in a tectonic field. A
-    // zero contour is a connected spine, unlike a thresholded noise blob.
+    // Mountain ranges follow warped tectonic zero contours rather than isolated
+    // threshold blobs, keeping the macro structure connected.
     const float TectonicSignal = SampleFbm(
         TerrainX + 10427.0f,
         TerrainY - 8633.0f,
@@ -189,9 +187,6 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         0.42f
     );
 
-    // Natural ground uses several scales, but they are composed into bounded
-    // broad/fine relief below. This prevents unrelated positive detail layers
-    // from lining up into a narrow needle while retaining visible roughness.
     const float SurfacePatch = FMath::Clamp(
         0.5f + 0.5f * SampleFbm(
             TerrainX + 24793.0f,
@@ -241,10 +236,6 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
             3
         ) * 2.0f - 1.0f;
 
-    // A single high-frequency ridged field used to be added at full ridge
-    // amplitude, and another ridged field modulated the range uplift. Blend a
-    // lower-frequency shoulder into both instead: summits remain recognisable
-    // ridges, but their support widens before they reach full height.
     const float LocalRidgeFine = SampleRidgedFbm(
         TerrainX + 911.0f,
         TerrainY + 1511.0f,
@@ -295,9 +286,68 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     );
     Result.Ridge = FMath::Max(LocalRidge, MajorRidge * RangeCore);
 
-    // The broad channel establishes a continuous valley. A finer channel is
-    // allowed only in selected catchments, producing tributaries instead of
-    // equally strong contour bands everywhere.
+    /*
+     * Playable-scale massifs bridge the enormous tectonic carrier and the
+     * metre-scale ridge detail. At the default RegionFrequency this changes on
+     * hundreds-of-voxels scales, so an ordinary streamed area can contain a
+     * whole mountain mass instead of only one tiny part of a 4,000-voxel wave.
+     */
+    const float MesoscaleFrequency = FMath::Max(
+        Settings.RegionFrequency * 0.85f,
+        TectonicFrequency * 5.0f
+    );
+    const float MassifBroad = SampleRidgedFbm(
+        TerrainX * 0.84f - TerrainY * 0.54f + 22391.0f,
+        TerrainX * 0.54f + TerrainY * 0.84f - 16417.0f,
+        MesoscaleFrequency,
+        3
+    );
+    const float MassifFine = SampleRidgedFbm(
+        TerrainX * 0.63f + TerrainY * 0.78f - 17311.0f,
+        TerrainY * 0.63f - TerrainX * 0.78f + 25793.0f,
+        MesoscaleFrequency * 1.85f,
+        3
+    );
+    const float MassifCarrier = FMath::Clamp(
+        FoothillBelt * 0.82f + RangeCore * 0.55f,
+        0.0f,
+        1.0f
+    );
+    Result.MassifWeight = FMath::Clamp(
+        (MassifBroad * 0.72f + MassifFine * 0.28f) * MassifCarrier,
+        0.0f,
+        1.0f
+    );
+    Result.Ridge = FMath::Max(Result.Ridge, MassifFine * Result.MassifWeight);
+
+    // A smooth signed regional front creates a real mountain-front step. The
+    // edge mask is also passed into the 3D density geology stage for cliffs.
+    const float EscarpmentSignal = SampleFbm(
+        TerrainX * 0.91f + TerrainY * 0.41f + 31991.0f,
+        TerrainY * 0.91f - TerrainX * 0.41f - 11813.0f,
+        Settings.RegionFrequency * 1.15f,
+        3,
+        2.03f,
+        0.50f
+    );
+    const float EscarpmentPlateau = SmoothStep(-0.18f, 0.18f, EscarpmentSignal);
+    const float EscarpmentEdge = 1.0f - SmoothStep(
+        0.055f,
+        0.28f,
+        FMath::Abs(EscarpmentSignal)
+    );
+    const float EscarpmentCarrier = FMath::Clamp(
+        MassifCarrier * (0.42f + MassifBroad * 0.58f),
+        0.0f,
+        1.0f
+    );
+    Result.Escarpment = FMath::Clamp(
+        EscarpmentEdge * EscarpmentCarrier,
+        0.0f,
+        1.0f
+    );
+
+    // Main trunk and tributary valley hierarchy.
     const float MainDrainage = SampleChannelMask(
         TerrainX - 1379.0f,
         TerrainY + 733.0f,
@@ -324,9 +374,47 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
             0.5f
         )
     );
-    Result.Drainage = FMath::Max(
-        MainDrainage,
-        Tributary * Catchment * 0.78f
+    const float TributaryDrainage = Tributary * Catchment * 0.78f;
+    Result.Drainage = FMath::Max(MainDrainage, TributaryDrainage);
+
+    const float MainValleyShoulder = FMath::Pow(
+        FMath::Clamp(MainDrainage, 0.0f, 1.0f),
+        0.68f
+    );
+    const float MainValleyFloor = FMath::Pow(
+        FMath::Clamp(MainDrainage, 0.0f, 1.0f),
+        1.70f
+    );
+    const float TributaryValley = FMath::Pow(
+        FMath::Clamp(TributaryDrainage, 0.0f, 1.0f),
+        1.35f
+    );
+    Result.ValleyCarve = FMath::Clamp(
+        FMath::Max(MainValleyShoulder, TributaryValley * 0.74f),
+        0.0f,
+        1.0f
+    );
+
+    // Broad glacial-style bowls/cirques are gated to mountain mass and kept
+    // away from the strongest trunk valley floor.
+    const float CirqueField = FMath::Clamp(
+        0.5f + 0.5f * SampleFbm(
+            TerrainX * 0.72f - TerrainY * 0.69f + 27103.0f,
+            TerrainX * 0.69f + TerrainY * 0.72f - 33791.0f,
+            FMath::Max(Settings.RegionFrequency * 2.35f, Settings.ValleyFrequency * 0.72f),
+            3,
+            2.01f,
+            0.48f
+        ),
+        0.0f,
+        1.0f
+    );
+    Result.Cirque = FMath::Clamp(
+        SmoothStep(0.58f, 0.82f, CirqueField) *
+        FMath::Max(Result.MountainWeight, Result.MassifWeight) *
+        (1.0f - MainValleyFloor * 0.70f),
+        0.0f,
+        1.0f
     );
 
     const float RillA = SampleChannelMask(
@@ -406,9 +494,6 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         1.0f
     );
 
-    // Keep slow soil movement separate from the higher-frequency layers. The
-    // latter share one bounded budget so detail cannot accidentally add four
-    // positive amplitudes at the same column.
     const float BroadSurfaceRelief =
         SoilUndulation * Settings.DetailAmplitude * 0.70f * UndulationStrength;
     const float RawFineSurfaceRelief =
@@ -426,15 +511,6 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         FineSurfaceReliefLimit
     );
 
-    // Range height comes mostly from the broad core/foothill masks. Smoothed
-    // major ridges vary the summit without multiplying a razor-thin crest to
-    // several times RidgeAmplitude. Local crests are deliberately subordinate.
-    /*
-     * Mountain altitude must come from the broad range mass, not from sharper
-     * ridge detail. Scaling only this kilometre-scale uplift creates a real
-     * lowland -> foothill -> alpine vertical hierarchy without reintroducing
-     * the unsupported needle peaks removed in generation v12.
-     */
     const float RangeUplift =
         Settings.RidgeAmplitude * Settings.MountainElevationScale *
         (
@@ -442,6 +518,24 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
             RangeCore * (1.08f + MajorRidge * 0.92f)
         ) *
         (0.82f + PeakRhythm * 0.38f);
+    const float MassifUplift =
+        Settings.RidgeAmplitude * Settings.MountainElevationScale * 0.72f *
+        Result.MassifWeight *
+        (0.72f + PeakRhythm * 0.28f);
+    const float EscarpmentLift =
+        (EscarpmentPlateau * 2.0f - 1.0f) *
+        Settings.RidgeAmplitude * 0.68f *
+        EscarpmentCarrier;
+    const float MainValleyCut =
+        Settings.ValleyDepth * ValleyStrength *
+        (MainValleyFloor * 0.92f +
+         FMath::Max(0.0f, MainValleyShoulder - MainValleyFloor) * 0.48f);
+    const float TributaryValleyCut =
+        Settings.ValleyDepth * ValleyStrength * TributaryValley * 0.52f;
+    const float CirqueCut =
+        Settings.ValleyDepth *
+        FMath::Lerp(0.52f, 0.90f, Result.MountainWeight) *
+        Result.Cirque;
     const float LocalCrestRelief =
         LocalRidge * Settings.RidgeAmplitude * RidgeStrength * Erosion * 0.52f;
     const float Continent =
@@ -455,8 +549,12 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         BroadSurfaceRelief +
         FineSurfaceRelief +
         RangeUplift * Erosion +
+        MassifUplift * Erosion +
+        EscarpmentLift +
         LocalCrestRelief -
-        ValleyFloor * Settings.ValleyDepth * ValleyStrength;
+        MainValleyCut -
+        TributaryValleyCut -
+        CirqueCut;
 
     return Result;
 }
@@ -526,9 +624,6 @@ float FCubusTerrainForm::SampleRidgedFbm(
             )
         );
 
-        // Squaring a ridge response makes its last few percent collapse into
-        // a needle. A gentler exponent keeps a defined crest but gives it a
-        // physically useful shoulder at metre-scale density resolutions.
         Ridge = FMath::Pow(FMath::Clamp(Ridge, 0.0f, 1.0f), 1.35f);
         Ridge *= FMath::Lerp(0.45f, 1.0f, PreviousRidge);
         Sum += Ridge * Weight;
