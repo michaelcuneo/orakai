@@ -4,7 +4,6 @@
 #include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"
 #include "CubusCore/Generation/CubusDensityField.h"
 #include "CubusCore/Meshing/CubusDensityLod.h"
-#include "CubusCore/Meshing/CubusMarchingCubesTables.h"
 #include "CubusCore/Meshing/CubusTransvoxelTables.h"
 
 namespace CubusDensityMesher
@@ -101,6 +100,46 @@ namespace CubusDensityMesher
     FVector ToVector(const FIntVector& Value)
     {
         return FVector(Value.X, Value.Y, Value.Z);
+    }
+
+    constexpr int32 TransvoxelPointToOrakaiCorner[8] = { 0, 1, 3, 2, 4, 5, 7, 6 };
+
+    int32 ToTransvoxelRegularCase(const int32 OrakaiCaseIndex)
+    {
+        int32 Result = 0;
+        for (int32 Point = 0; Point < 8; ++Point)
+        {
+            const int32 Corner = TransvoxelPointToOrakaiCorner[Point];
+            if ((OrakaiCaseIndex & (1 << Corner)) != 0) Result |= 1 << Point;
+        }
+        return Result;
+    }
+
+    int32 FindOrakaiEdge(const int32 A, const int32 B)
+    {
+        for (int32 Edge = 0; Edge < 12; ++Edge)
+        {
+            const int32 EA = EdgeCornerIndices[Edge][0];
+            const int32 EB = EdgeCornerIndices[Edge][1];
+            if ((EA == A && EB == B) || (EA == B && EB == A)) return Edge;
+        }
+        return INDEX_NONE;
+    }
+
+    int32 GetRegularTriangleEdge(const int32 OrakaiCaseIndex, const int32 Entry)
+    {
+        using namespace CubusTransvoxelTables;
+        if (Entry < 0) return -1;
+        const int32 C = ToTransvoxelRegularCase(OrakaiCaseIndex);
+        const FRegularCellData& Data = RegularCellData[RegularCellClass[C]];
+        if (Entry >= Data.GetTriangleCount() * 3) return -1;
+        const int32 V = Data.VertexIndex[Entry];
+        if (V < 0 || V >= Data.GetVertexCount()) return -1;
+        const uint8 Code = static_cast<uint8>(RegularVertexData[C][V] & 0xFFu);
+        const int32 PA = (Code >> 4) & 0xF;
+        const int32 PB = Code & 0xF;
+        if (PA >= 8 || PB >= 8) return -1;
+        return FindOrakaiEdge(TransvoxelPointToOrakaiCorner[PA], TransvoxelPointToOrakaiCorner[PB]);
     }
 
     int32 ClampDensityMaterialId(const int32 MaterialId)
@@ -1651,8 +1690,8 @@ void FCubusDensityMesher::BuildChunk(
                 }
 
                 if (
-                    CubusMarchingCubesTables::
-                        GetTriangleEdge(
+
+                        GetRegularTriangleEdge(
                             CaseIndex,
                             0
                         ) < 0
@@ -1680,8 +1719,8 @@ void FCubusDensityMesher::BuildChunk(
                 )
                 {
                     if (
-                        CubusMarchingCubesTables::
-                            GetTriangleEdge(
+
+                            GetRegularTriangleEdge(
                                 CaseIndex,
                                 TriangleEdgeIndex
                             ) < 0
@@ -1702,8 +1741,8 @@ void FCubusDensityMesher::BuildChunk(
                     )
                     {
                         const int32 EdgeIndex =
-                            CubusMarchingCubesTables::
-                                GetTriangleEdge(
+
+                                GetRegularTriangleEdge(
                                     CaseIndex,
                                     TriangleEdgeIndex +
                                         VertexIndex
@@ -2060,7 +2099,7 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
                                 }
                             }
 
-                            if (CubusMarchingCubesTables::GetTriangleEdge(
+                            if (GetRegularTriangleEdge(
                                 CaseIndex,
                                 0
                             ) < 0)
@@ -2077,7 +2116,7 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
                                 TriangleEdgeIndex += 3
                             )
                             {
-                                if (CubusMarchingCubesTables::GetTriangleEdge(
+                                if (GetRegularTriangleEdge(
                                     CaseIndex,
                                     TriangleEdgeIndex
                                 ) < 0)
@@ -2091,7 +2130,7 @@ void FCubusDensityMesher::BuildAdaptiveChunk(
                                 for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
                                 {
                                     const int32 EdgeIndex =
-                                        CubusMarchingCubesTables::GetTriangleEdge(
+                                        GetRegularTriangleEdge(
                                             CaseIndex,
                                             TriangleEdgeIndex + VertexIndex
                                         );

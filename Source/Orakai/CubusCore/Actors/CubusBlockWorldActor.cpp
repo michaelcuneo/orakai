@@ -1606,7 +1606,7 @@ FCubusDensityTransitionFaces ACubusBlockWorldActor::BuildDensityTransitionFaces(
 
 		/* Adjacent streamed tiers must differ by no more than one power-of-two step. */
 		ensureMsgf(
-			NeighbourSubdivisions <= SelfSubdivisions * 2 || SelfSubdivisions <= NeighbourSubdivisions * 2,
+			NeighbourSubdivisions <= SelfSubdivisions * 2 && SelfSubdivisions <= NeighbourSubdivisions * 2,
 			TEXT("Unsupported Cubus density LOD jump %dx <-> %dx at (%d,%d,%d) face %d"),
 			SelfSubdivisions,
 			NeighbourSubdivisions,
