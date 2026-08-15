@@ -117,6 +117,45 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
             TectonicDistance
         )) * RangeContinuity;
 
+    /*
+     * Regional highland provinces are independent of the tectonic spine.
+     *
+     * Previously almost every new v20 landform multiplied FoothillBelt or
+     * RangeCore. A player outside that legacy mask therefore saw the old world
+     * even though a completely fresh density cache was being generated. The
+     * province field now decides whether a broad region is elevated or basinal;
+     * tectonic zero contours remain the strongest connected range spines inside
+     * those provinces instead of being the global on/off switch.
+     */
+    const float ProvinceRidge = SampleRidgedFbm(
+        TerrainX * 0.74f - TerrainY * 0.67f + 41891.0f,
+        TerrainX * 0.67f + TerrainY * 0.74f - 27617.0f,
+        Settings.RegionFrequency * 0.46f,
+        4
+    );
+    const float ProvinceWarp = FMath::Clamp(
+        0.5f + 0.5f * SampleFbm(
+            TerrainX * 0.58f + TerrainY * 0.81f - 33461.0f,
+            TerrainY * 0.58f - TerrainX * 0.81f + 19603.0f,
+            Settings.RegionFrequency * 0.73f,
+            3,
+            2.03f,
+            0.50f
+        ),
+        0.0f,
+        1.0f
+    );
+    const float HighlandProvince = SmoothStep(
+        0.26f,
+        0.67f,
+        ProvinceRidge * 0.78f + ProvinceWarp * 0.22f
+    );
+    const float BasinProvince = SmoothStep(
+        0.30f,
+        0.72f,
+        (1.0f - ProvinceRidge) * (0.72f + (1.0f - ProvinceWarp) * 0.28f)
+    ) * (1.0f - FoothillBelt * 0.55f);
+
     const float RegionSignal = SampleFbm(
         TerrainX - 11717.0f,
         TerrainY + 23431.0f,
@@ -132,12 +171,25 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     );
 
     FCubusTerrainFormSample Result;
-    Result.MountainCore = RangeCore;
-    Result.FoothillWeight = FMath::Max(FoothillBelt, RangeCore);
+    Result.MountainCore = FMath::Clamp(
+        FMath::Max(RangeCore, HighlandProvince * 0.42f),
+        0.0f,
+        1.0f
+    );
+    Result.FoothillWeight = FMath::Clamp(
+        FMath::Max(FMath::Max(FoothillBelt, RangeCore), HighlandProvince * 0.72f),
+        0.0f,
+        1.0f
+    );
     Result.PlainsWeight =
-        (1.0f - PlainsExit) * (1.0f - Result.FoothillWeight);
+        (1.0f - PlainsExit) *
+        (1.0f - Result.FoothillWeight) *
+        FMath::Lerp(1.0f, 0.35f, BasinProvince);
     Result.MountainWeight = FMath::Clamp(
-        RangeCore + FoothillBelt * 0.48f,
+        FMath::Max(
+            RangeCore + FoothillBelt * 0.48f,
+            HighlandProvince * 0.78f
+        ),
         0.0f,
         1.0f
     );
@@ -284,17 +336,16 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         0.0f,
         1.0f
     );
-    Result.Ridge = FMath::Max(LocalRidge, MajorRidge * RangeCore);
+    Result.Ridge = FMath::Max(LocalRidge, MajorRidge * FMath::Max(RangeCore, HighlandProvince * 0.48f));
 
     /*
-     * Playable-scale massifs bridge the enormous tectonic carrier and the
-     * metre-scale ridge detail. At the default RegionFrequency this changes on
-     * hundreds-of-voxels scales, so an ordinary streamed area can contain a
-     * whole mountain mass instead of only one tiny part of a 4,000-voxel wave.
+     * Meso-scale massifs are now driven by the highland province as well as
+     * the old tectonic belt. This makes them visible in ordinary streamed
+     * neighbourhoods without spraying mountain noise across genuine basins.
      */
     const float MesoscaleFrequency = FMath::Max(
-        Settings.RegionFrequency * 0.85f,
-        TectonicFrequency * 5.0f
+        Settings.RegionFrequency * 1.35f,
+        TectonicFrequency * 7.0f
     );
     const float MassifBroad = SampleRidgedFbm(
         TerrainX * 0.84f - TerrainY * 0.54f + 22391.0f,
@@ -305,39 +356,53 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float MassifFine = SampleRidgedFbm(
         TerrainX * 0.63f + TerrainY * 0.78f - 17311.0f,
         TerrainY * 0.63f - TerrainX * 0.78f + 25793.0f,
-        MesoscaleFrequency * 1.85f,
+        MesoscaleFrequency * 1.72f,
         3
     );
-    const float MassifCarrier = FMath::Clamp(
+    const float LegacyMassifCarrier = FMath::Clamp(
         FoothillBelt * 0.82f + RangeCore * 0.55f,
         0.0f,
         1.0f
     );
+    const float MassifCarrier = FMath::Clamp(
+        FMath::Max(LegacyMassifCarrier, HighlandProvince * 0.92f),
+        0.0f,
+        1.0f
+    );
     Result.MassifWeight = FMath::Clamp(
-        (MassifBroad * 0.72f + MassifFine * 0.28f) * MassifCarrier,
+        (MassifBroad * 0.68f + MassifFine * 0.32f) * MassifCarrier,
         0.0f,
         1.0f
     );
     Result.Ridge = FMath::Max(Result.Ridge, MassifFine * Result.MassifWeight);
 
-    // A smooth signed regional front creates a real mountain-front step. The
-    // edge mask is also passed into the 3D density geology stage for cliffs.
+    // A regional front follows both massif structure and the boundary of a
+    // highland province. It therefore exists where mountain country meets a
+    // basin even if the legacy tectonic zero-contour is somewhere else.
     const float EscarpmentSignal = SampleFbm(
         TerrainX * 0.91f + TerrainY * 0.41f + 31991.0f,
         TerrainY * 0.91f - TerrainX * 0.41f - 11813.0f,
-        Settings.RegionFrequency * 1.15f,
+        Settings.RegionFrequency * 1.55f,
         3,
         2.03f,
         0.50f
     );
-    const float EscarpmentPlateau = SmoothStep(-0.18f, 0.18f, EscarpmentSignal);
+    const float EscarpmentPlateau = SmoothStep(-0.16f, 0.16f, EscarpmentSignal);
     const float EscarpmentEdge = 1.0f - SmoothStep(
-        0.055f,
-        0.28f,
+        0.045f,
+        0.25f,
         FMath::Abs(EscarpmentSignal)
     );
+    const float ProvinceFront = 1.0f - SmoothStep(
+        0.12f,
+        0.42f,
+        FMath::Abs(HighlandProvince - 0.46f)
+    );
     const float EscarpmentCarrier = FMath::Clamp(
-        MassifCarrier * (0.42f + MassifBroad * 0.58f),
+        FMath::Max(
+            MassifCarrier * (0.38f + MassifBroad * 0.62f),
+            ProvinceFront * 0.78f
+        ),
         0.0f,
         1.0f
     );
@@ -377,26 +442,27 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float TributaryDrainage = Tributary * Catchment * 0.78f;
     Result.Drainage = FMath::Max(MainDrainage, TributaryDrainage);
 
+    // Wide shoulders establish readable valleys from a distance while the
+    // stronger floor term retains a narrower incised channel at LOD0.
     const float MainValleyShoulder = FMath::Pow(
         FMath::Clamp(MainDrainage, 0.0f, 1.0f),
-        0.68f
+        0.52f
     );
     const float MainValleyFloor = FMath::Pow(
         FMath::Clamp(MainDrainage, 0.0f, 1.0f),
-        1.70f
+        1.48f
     );
     const float TributaryValley = FMath::Pow(
         FMath::Clamp(TributaryDrainage, 0.0f, 1.0f),
-        1.35f
+        1.18f
     );
     Result.ValleyCarve = FMath::Clamp(
-        FMath::Max(MainValleyShoulder, TributaryValley * 0.74f),
+        FMath::Max(MainValleyShoulder, TributaryValley * 0.78f),
         0.0f,
         1.0f
     );
 
-    // Broad glacial-style bowls/cirques are gated to mountain mass and kept
-    // away from the strongest trunk valley floor.
+    // Broad glacial-style bowls/cirques follow the new highland envelope too.
     const float CirqueField = FMath::Clamp(
         0.5f + 0.5f * SampleFbm(
             TerrainX * 0.72f - TerrainY * 0.69f + 27103.0f,
@@ -410,8 +476,8 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         1.0f
     );
     Result.Cirque = FMath::Clamp(
-        SmoothStep(0.58f, 0.82f, CirqueField) *
-        FMath::Max(Result.MountainWeight, Result.MassifWeight) *
+        SmoothStep(0.54f, 0.80f, CirqueField) *
+        FMath::Max(FMath::Max(Result.MountainWeight, Result.MassifWeight), HighlandProvince * 0.72f) *
         (1.0f - MainValleyFloor * 0.70f),
         0.0f,
         1.0f
@@ -518,26 +584,33 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
             RangeCore * (1.08f + MajorRidge * 0.92f)
         ) *
         (0.82f + PeakRhythm * 0.38f);
+    const float HighlandUplift =
+        Settings.RidgeAmplitude * Settings.MountainElevationScale * 1.18f *
+        FMath::Pow(HighlandProvince, 1.24f) *
+        (0.66f + MassifBroad * 0.52f);
     const float MassifUplift =
-        Settings.RidgeAmplitude * Settings.MountainElevationScale * 0.72f *
+        Settings.RidgeAmplitude * Settings.MountainElevationScale * 0.96f *
         Result.MassifWeight *
         (0.72f + PeakRhythm * 0.28f);
     const float EscarpmentLift =
         (EscarpmentPlateau * 2.0f - 1.0f) *
-        Settings.RidgeAmplitude * 0.68f *
+        Settings.RidgeAmplitude * 0.92f *
         EscarpmentCarrier;
+    const float BasinCut =
+        Settings.ValleyDepth * 1.28f * BasinProvince *
+        (0.76f + (1.0f - HighlandProvince) * 0.24f);
     const float MainValleyCut =
         Settings.ValleyDepth * ValleyStrength *
-        (MainValleyFloor * 0.92f +
-         FMath::Max(0.0f, MainValleyShoulder - MainValleyFloor) * 0.48f);
+        (MainValleyFloor * 1.08f +
+         FMath::Max(0.0f, MainValleyShoulder - MainValleyFloor) * 0.64f);
     const float TributaryValleyCut =
-        Settings.ValleyDepth * ValleyStrength * TributaryValley * 0.52f;
+        Settings.ValleyDepth * ValleyStrength * TributaryValley * 0.66f;
     const float CirqueCut =
         Settings.ValleyDepth *
-        FMath::Lerp(0.52f, 0.90f, Result.MountainWeight) *
+        FMath::Lerp(0.58f, 1.02f, Result.MountainWeight) *
         Result.Cirque;
     const float LocalCrestRelief =
-        LocalRidge * Settings.RidgeAmplitude * RidgeStrength * Erosion * 0.52f;
+        LocalRidge * Settings.RidgeAmplitude * RidgeStrength * Erosion * 0.58f;
     const float Continent =
         MacroRelief * 0.68f +
         RegionalRelief * 0.32f;
@@ -549,9 +622,11 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         BroadSurfaceRelief +
         FineSurfaceRelief +
         RangeUplift * Erosion +
+        HighlandUplift * Erosion +
         MassifUplift * Erosion +
         EscarpmentLift +
         LocalCrestRelief -
+        BasinCut -
         MainValleyCut -
         TributaryValleyCut -
         CirqueCut;
