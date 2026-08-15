@@ -5,6 +5,7 @@ on:
       - agent/density-meshing
     paths:
       - '.github/agent/overhaul_density_v29.py'
+      - '.github/workflows/agent-overhaul-density-v29.yml'
   workflow_dispatch:
 
 permissions:
