@@ -11,9 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 22: regional highland and basin provinces now reshape the
-    // density terrain independently of the legacy tectonic mountain mask.
-    static constexpr uint32 CurrentGenerationVersion = 22;
+    // Bumped to 23: temperate mountain-valley geomorphology replaces the
+    // exaggerated v22 province uplift with connected ranges, restrained
+    // highlands, broad trunk valleys, tributaries, passes and sparse cirques.
+    static constexpr uint32 CurrentGenerationVersion = 23;
 
     int64 World = 1;
     int32 Terrain = 0;
