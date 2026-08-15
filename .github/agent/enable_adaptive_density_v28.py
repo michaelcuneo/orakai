@@ -1,6 +1,7 @@
 from pathlib import Path
 import subprocess
 
+# Trigger adaptive density v28 migration.
 BASE = "09e5b4b203e60188d28c0d2b64bab54485c49491"
 
 # Revert the failed v27 mesh-detail experiment while preserving the v26
