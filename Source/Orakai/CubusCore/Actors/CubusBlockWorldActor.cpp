@@ -1438,6 +1438,7 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 
 	FCubusTerrainFormSettings StreamingTerrainSettings;
 	StreamingTerrainSettings.BaseHeight = static_cast<float>(TerrainBaseHeight);
+	StreamingTerrainSettings.VoxelSizeCm = GeneratedVoxelSize;
 	StreamingTerrainSettings.ContinentAmplitude = TerrainContinentAmplitude;
 	StreamingTerrainSettings.ContinentFrequency = TerrainContinentFrequency;
 	StreamingTerrainSettings.HillAmplitude = TerrainHillAmplitude;
@@ -1556,6 +1557,17 @@ int32 ACubusBlockWorldActor::ResolveDensitySubdivisions(const FIntVector& ChunkC
 		{
 			TargetSpacing = DensityMiddleSampleSpacing;
 		}
+
+		/*
+		 * Bootstrap collision must never wait for the expensive visual LOD.
+		 * The canonical 80 cm support mesh is enough to place the pawn safely;
+		 * once released, UpdateDensityLods() schedules the normal 20 cm near
+		 * mesh asynchronously. Generated density remains the same field.
+		 */
+		if (bPawnHeldForStreaming && ChunkCoordinate == LastTrackedChunk)
+		{
+			TargetSpacing = GeneratedVoxelSize;
+		}
 	}
 
 	return FCubusDensityLod::ResolveSubdivisionsForSpacing(GeneratedVoxelSize, TargetSpacing);
@@ -1579,7 +1591,19 @@ void ACubusBlockWorldActor::UpdateDensityLods()
 
 		if (ChunkActor->ConfigureDensityResolution(ResolveDensitySubdivisions(Entry.Key)))
 		{
-			QueueChunkForRebuild(Entry.Key);
+			/*
+			 * Streamed density LOD changes use the existing worker pipeline.
+			 * The old path pushed them into the synchronous dirty queue, which
+			 * could freeze the game thread immediately after spawn.
+			 */
+			if (bEnableRuntimeStreaming && ChunkActor->GetEffectiveRenderMode() == ECubusVoxelRenderMode::Density)
+			{
+				StreamingChunksReady.Remove(Entry.Key);
+			}
+			else
+			{
+				QueueChunkForRebuild(Entry.Key);
+			}
 		}
 	}
 }
@@ -1595,7 +1619,35 @@ void ACubusBlockWorldActor::QueueStreamingChunkBuilds()
 
 	int32 QueuedCount = 0;
 
-	for (const FIntVector& Coordinate : RequiredChunkCoordinates)
+	/*
+	 * TSet iteration order is deliberately unspecified. Startup previously
+	 * handed the only density worker to an arbitrary neighbour while the pawn
+	 * waited. Always schedule the support chunk first, then expand outward.
+	 */
+	TArray<FIntVector> BuildCandidates = RequiredChunkCoordinates.Array();
+	const FIntVector PriorityCentre = LastTrackedChunk;
+	BuildCandidates.Sort([PriorityCentre](const FIntVector& A, const FIntVector& B)
+	{
+		const int32 DistanceA = FCubusDensityLod::ChunkDistance(A, PriorityCentre);
+		const int32 DistanceB = FCubusDensityLod::ChunkDistance(B, PriorityCentre);
+		if (DistanceA != DistanceB)
+		{
+			return DistanceA < DistanceB;
+		}
+		const int32 VerticalA = FMath::Abs(A.Z - PriorityCentre.Z);
+		const int32 VerticalB = FMath::Abs(B.Z - PriorityCentre.Z);
+		if (VerticalA != VerticalB)
+		{
+			return VerticalA < VerticalB;
+		}
+		if (A.Y != B.Y)
+		{
+			return A.Y < B.Y;
+		}
+		return A.X < B.X;
+	});
+
+	for (const FIntVector& Coordinate : BuildCandidates)
 	{
 		if (QueuedCount >= AvailableSlots)
 		{
@@ -1628,6 +1680,7 @@ void ACubusBlockWorldActor::QueueStreamingChunkBuilds()
 
 		Build.Coordinate = Coordinate;
 		Build.Chunk		 = Chunk;
+		Build.SubdivisionsPerVoxel = BuildInput.SubdivisionsPerVoxel;
 
 		Build.Task = UE::Tasks::Launch(TEXT("CubusStreamingDensityMesh"),
 									   [BuildInput]() { return ACubusVoxelVolumeActor::BuildDensityMeshData(BuildInput); });
@@ -1682,14 +1735,25 @@ void ACubusBlockWorldActor::ProcessInitialStreaming()
 		return;
 	}
 
-	if (!AreInitialChunksReady())
+	const bool bHasSupportCoordinate =
+		LastTrackedChunk.X != MAX_int32 &&
+		LastTrackedChunk.Y != MAX_int32 &&
+		LastTrackedChunk.Z != MAX_int32;
+	if (!bHasSupportCoordinate || !IsInitialChunkReady(LastTrackedChunk))
 	{
 		return;
 	}
 
+	/*
+	 * Spawn readiness means the support surface is safe, not that every
+	 * surrounding visual chunk has finished. The rest continues streaming
+	 * after the pawn is released.
+	 */
 	bInitialSpawnAreaReady = true;
 
-	UE_LOG(LogTemp, Display, TEXT("Cubus initial spawn area ready: %d chunks"), InitialRequiredCoordinates.Num());
+	UE_LOG(LogTemp, Display,
+		TEXT("Cubus spawn support ready at (%d, %d, %d); surrounding chunks continue streaming"),
+		LastTrackedChunk.X, LastTrackedChunk.Y, LastTrackedChunk.Z);
 
 	UpdateRuntimeStreaming(true);
 }
@@ -1723,8 +1787,11 @@ void ACubusBlockWorldActor::ProcessCompletedStreamingChunkBuilds()
 		 * outside the current streaming set.
 		 */
 		const bool bStillRequired = RequiredChunkCoordinates.Contains(Build.Coordinate);
+		const bool bResolutionStillCurrent =
+			IsValid(Chunk) &&
+			Chunk->GetDensitySubdivisionsPerVoxel() == Build.SubdivisionsPerVoxel;
 
-		if (IsValid(Chunk) && bStillRequired)
+		if (IsValid(Chunk) && bStillRequired && bResolutionStillCurrent)
 		{
 			if (Chunk->BuildStagedVolumeFromDensityMesh(Result))
 			{
@@ -2426,9 +2493,23 @@ void ACubusBlockWorldActor::TryReleasePawnToTerrain()
 
 	const float ChunkWorldSize = static_cast<float>(Cubus::ChunkSize) * FMath::Max(1.0f, GeneratedVoxelSize);
 
-	const FVector TraceStart(HeldPawnLocation.X, HeldPawnLocation.Y, HeldPawnLocation.Z + ChunkWorldSize * 4.0f);
-
-	const FVector TraceEnd(HeldPawnLocation.X, HeldPawnLocation.Y, HeldPawnLocation.Z - ChunkWorldSize * 8.0f);
+	/*
+	 * Physical terrain may be hundreds or thousands of metres above/below the
+	 * level-authored pawn. Trace through the support chunk we actually built,
+	 * rather than a small fixed window around the pawn's obsolete Z.
+	 */
+	const ACubusVoxelVolumeActor* SupportChunk = FindChunk(LastTrackedChunk);
+	const double SupportCentreZ = IsValid(SupportChunk)
+		? SupportChunk->GetActorLocation().Z
+		: static_cast<double>(LastTrackedChunk.Z) * static_cast<double>(ChunkWorldSize);
+	const FVector TraceStart(
+		HeldPawnLocation.X,
+		HeldPawnLocation.Y,
+		SupportCentreZ + static_cast<double>(ChunkWorldSize));
+	const FVector TraceEnd(
+		HeldPawnLocation.X,
+		HeldPawnLocation.Y,
+		SupportCentreZ - static_cast<double>(ChunkWorldSize));
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CubusSpawnSurfaceTrace), false, PlayerPawn);
 
@@ -2470,7 +2551,9 @@ void ACubusBlockWorldActor::TryReleasePawnToTerrain()
 
 	if (!bHitTerrain)
 	{
-		const FIntVector HeldChunkCoordinate = WorldLocationToChunkCoordinate(HeldPawnLocation);
+		// Recovery follows the deterministic terrain support coordinate. The
+		// held pawn's original Z is not meaningful in a kilometre-relief world.
+		const FIntVector HeldChunkCoordinate = LastTrackedChunk;
 
 		const FCubusChunkStoreContext StoreContext{WorldSeed, FCubusGenerationSeeds::CurrentGenerationVersion};
 

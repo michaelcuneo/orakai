@@ -189,6 +189,7 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 
 	SurfaceCache.Reserve(1600);
 	ColumnCache.Reserve(1600);
+	SurfaceMaterialCache.Reserve(1600);
 	BiomeClimateCache.Reserve(96);
 	BiomeTopographicClimateCache.Reserve(32);
 	BiomeMacroHeightCache.Reserve(384);
@@ -286,7 +287,10 @@ FCubusDensitySample FCubusTerrainDensityField::SampleContinuous(const FVector& G
 	const float DepthBelowSurface = Column.SurfaceSampleZ - static_cast<float>(GlobalSampleCoordinate.Z);
 	if (DepthBelowSurface <= Settings.SurfaceMaterialDepth)
 	{
-		Result.MaterialId = Column.SurfaceMaterialId;
+		Result.MaterialId = GetCachedSurfaceMaterialData(
+			static_cast<float>(GlobalSampleCoordinate.X),
+			static_cast<float>(GlobalSampleCoordinate.Y)
+		).SurfaceMaterialId;
 	}
 	else if (DepthBelowSurface >= Settings.RockMaterialDepth)
 	{
@@ -316,7 +320,7 @@ float FCubusTerrainDensityField::SampleSurfaceVoxelHeight(const float WorldX, co
 
 FCubusBiomeSample FCubusTerrainDensityField::SampleSurfaceBiome(const float WorldX, const float WorldY) const
 {
-	return GetColumnData(WorldX + 0.5f, WorldY + 0.5f).BiomeSample;
+	return GetCachedSurfaceMaterialData(WorldX + 0.5f, WorldY + 0.5f).BiomeSample;
 }
 
 FIntPoint FCubusTerrainDensityField::MakeCoordinateCacheKey(const float WorldX, const float WorldY)
@@ -446,6 +450,38 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	);
 	Column.RockExposure = CliffExposure * LandformExposure * DrainageProtection;
 
+
+	ColumnCache.Add(Key, Column);
+	return ColumnCache.FindChecked(Key);
+}
+
+const FCubusTerrainDensityField::FSurfaceMaterialData& FCubusTerrainDensityField::GetCachedSurfaceMaterialData(
+	const float WorldSampleX,
+	const float WorldSampleY
+) const
+{
+	/*
+	 * Material/ecology classification is intentionally canonical-rate. Fine
+	 * 20 cm density samples still evaluate the true continuous geometry, but
+	 * neighbouring samples share the same 80 cm ecological decision. Biome
+	 * geography varies at metre-to-kilometre scales, so no meaningful visual
+	 * information is lost by refusing to classify it 16x per canonical cell.
+	 */
+	const FIntPoint Key(FMath::RoundToInt(WorldSampleX), FMath::RoundToInt(WorldSampleY));
+	if (const FSurfaceMaterialData* Existing = SurfaceMaterialCache.Find(Key))
+	{
+		return *Existing;
+	}
+
+	const float CanonicalSampleX = static_cast<float>(Key.X);
+	const float CanonicalSampleY = static_cast<float>(Key.Y);
+	const FSurfaceData Surface = GetCachedSurfaceData(CanonicalSampleX, CanonicalSampleY);
+	const FColumnData& Column = GetColumnData(CanonicalSampleX, CanonicalSampleY);
+	const float WorldX = CanonicalSampleX - 0.5f;
+	const float WorldY = CanonicalSampleY - 0.5f;
+	const float TerrainX = WorldX + static_cast<float>(Settings.TerrainOffsetX);
+	const float TerrainY = WorldY + static_cast<float>(Settings.TerrainOffsetY);
+
 	FCubusBiomeTerrainContext BiomeTerrainContext;
 	BiomeTerrainContext.Drainage = Column.FormSample.Drainage;
 	BiomeTerrainContext.RockExposure = Column.RockExposure;
@@ -463,8 +499,9 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	BiomeTerrainContext.bHasTopographicClimateSample = true;
 	BiomeTerrainContext.TopographicClimateSample = GetInterpolatedBiomeTopographicClimate(WorldX, WorldY);
 
+	FSurfaceMaterialData MaterialData;
 	const FCubusBiomeClimateContext Climate = GetInterpolatedBiomeClimate(WorldX, WorldY);
-	Column.BiomeSample = FCubusBiomeField::Sample(
+	MaterialData.BiomeSample = FCubusBiomeField::Sample(
 		WorldX,
 		WorldY,
 		Column.SurfaceVoxelHeight,
@@ -477,21 +514,14 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
 	if (LandmarkSample.IsInside())
 	{
-		Column.SurfaceMaterialId = FMath::Max(1, Settings.LandmarkSettings.SurfaceMaterialId);
+		MaterialData.SurfaceMaterialId = FMath::Max(1, Settings.LandmarkSettings.SurfaceMaterialId);
 	}
 	else
 	{
-		Column.SurfaceMaterialId = Column.Slope >= Settings.RockSlopeThreshold
+		MaterialData.SurfaceMaterialId = Column.Slope >= Settings.RockSlopeThreshold
 			? Settings.RockMaterialId
-			: (Settings.BiomeSettings.bEnabled ? Column.BiomeSample.SurfaceMaterialId : Settings.SurfaceMaterialId);
+			: (Settings.BiomeSettings.bEnabled ? MaterialData.BiomeSample.SurfaceMaterialId : Settings.SurfaceMaterialId);
 
-		/*
-		 * Snow is an alpine altitude band. Climate may describe the ecology,
-		 * but it is never allowed to put snow on low ground. The structural
-		 * floor scales with the authored mountain amplitude so legacy worlds
-		 * carrying the old 34 m default cannot accidentally become snowy
-		 * lowlands after the mountain vertical scale is increased.
-		 */
 		const float StructuralSnowFloor =
 			Settings.BaseHeight + FMath::Max(64.0f, Settings.RidgeAmplitude * 4.0f);
 		const float ConfiguredSnowLine = Settings.BiomeSettings.bEnabled
@@ -506,14 +536,14 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 
 		if (Column.SurfaceVoxelHeight >= SnowLine && SnowRetention >= 0.30f)
 		{
-			Column.SurfaceMaterialId = Settings.BiomeSettings.bEnabled
+			MaterialData.SurfaceMaterialId = Settings.BiomeSettings.bEnabled
 				? Settings.BiomeSnowMaterialId
 				: Settings.SnowMaterialId;
 		}
 	}
 
-	ColumnCache.Add(Key, Column);
-	return ColumnCache.FindChecked(Key);
+	SurfaceMaterialCache.Add(Key, MaterialData);
+	return SurfaceMaterialCache.FindChecked(Key);
 }
 
 const FCubusBiomeClimateContext& FCubusTerrainDensityField::GetCachedBiomeClimateCell(

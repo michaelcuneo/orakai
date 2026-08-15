@@ -25,6 +25,10 @@ struct FCubusStreamingChunkBuild
 	TWeakObjectPtr<ACubusVoxelVolumeActor> Chunk;
 
 	UE::Tasks::TTask<FCubusDensityMeshBuildResult> Task;
+
+	// Resolution captured by this worker. If LOD changes while the task is
+	// running, the result is discarded instead of publishing stale geometry.
+	int32 SubdivisionsPerVoxel = 1;
 };
 
 UCLASS(BlueprintType, Blueprintable, Config = GameUserSettings, ClassGroup = "Cubus", meta = (DisplayName = "Cubus Block World"))

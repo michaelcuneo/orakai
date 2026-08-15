@@ -172,6 +172,10 @@ private:
         float StrataTilt = 0.0f;
         float RockExposure = 0.0f;
         FCubusTerrainFormSample FormSample;
+    };
+
+    struct FSurfaceMaterialData
+    {
         FCubusBiomeSample BiomeSample;
         int32 SurfaceMaterialId = 1;
     };
@@ -190,6 +194,10 @@ private:
 
     mutable TMap<FIntPoint, FSurfaceData> SurfaceCache;
     mutable TMap<FIntPoint, FColumnData> ColumnCache;
+    // Ecology/materials do not need the 20 cm geometry lattice. One canonical
+    // material classification per XY cell is sufficient and avoids thousands
+    // of expensive climate/community evaluations per adaptive chunk.
+    mutable TMap<FIntPoint, FSurfaceMaterialData> SurfaceMaterialCache;
     mutable TMap<FIntPoint, FCubusBiomeClimateContext> BiomeClimateCache;
     mutable TMap<FIntPoint, FCubusBiomeTopographicClimateContext> BiomeTopographicClimateCache;
     mutable TMap<FIntPoint, float> BiomeMacroHeightCache;
@@ -199,6 +207,7 @@ private:
     const FSurfaceData& GetCachedSurfaceData(float WorldX, float WorldY) const;
     float GetCachedSurfaceVoxelHeight(float WorldX, float WorldY) const;
     const FColumnData& GetColumnData(float WorldX, float WorldY) const;
+    const FSurfaceMaterialData& GetCachedSurfaceMaterialData(float WorldX, float WorldY) const;
     const FCubusBiomeClimateContext& GetCachedBiomeClimateCell(const FIntPoint& CellCoordinate) const;
     FCubusBiomeClimateContext GetInterpolatedBiomeClimate(float WorldX, float WorldY) const;
     float GetCachedBiomeMacroHeight(float WorldX, float WorldY) const;
