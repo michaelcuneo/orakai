@@ -27,6 +27,11 @@ bool FCubusVegetationHabitatQuantizationTest::RunTest(const FString& Parameters)
     Sample.GroundwaterPotential = FCubusVegetationHabitatSample::QuantizeUnit(0.58f);
     Sample.SolarExposure = FCubusVegetationHabitatSample::QuantizeUnit(0.81f);
     Sample.Erosion = FCubusVegetationHabitatSample::QuantizeUnit(0.42f);
+    Sample.ColdAirPooling = FCubusVegetationHabitatSample::QuantizeUnit(0.64f);
+    Sample.Disturbance = FCubusVegetationHabitatSample::QuantizeUnit(0.31f);
+    Sample.CanopyPotential = FCubusVegetationHabitatSample::QuantizeUnit(0.77f);
+    Sample.SoilCoarseness = FCubusVegetationHabitatSample::QuantizeUnit(0.58f);
+    Sample.WaterHoldingCapacity = FCubusVegetationHabitatSample::QuantizeUnit(0.69f);
     Sample.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(37.0f);
 
     TestTrue(TEXT("Moisture survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetMoisture(), 0.73f, 0.005f));
@@ -38,6 +43,11 @@ bool FCubusVegetationHabitatQuantizationTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Groundwater survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetGroundwaterPotential(), 0.58f, 0.005f));
     TestTrue(TEXT("Solar exposure survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSolarExposure(), 0.81f, 0.005f));
     TestTrue(TEXT("Erosion survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetErosion(), 0.42f, 0.005f));
+    TestTrue(TEXT("Cold-air pooling survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetColdAirPooling(), 0.64f, 0.005f));
+    TestTrue(TEXT("Disturbance survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetDisturbance(), 0.31f, 0.005f));
+    TestTrue(TEXT("Canopy potential survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetCanopyPotential(), 0.77f, 0.005f));
+    TestTrue(TEXT("Soil coarseness survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSoilCoarseness(), 0.58f, 0.005f));
+    TestTrue(TEXT("Water holding survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetWaterHoldingCapacity(), 0.69f, 0.005f));
     TestTrue(TEXT("Slope survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSlopeDegrees(), 37.0f, 0.5f));
     return true;
 }

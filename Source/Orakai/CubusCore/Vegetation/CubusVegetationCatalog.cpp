@@ -69,6 +69,11 @@ namespace
         const float Groundwater = SmoothRangeSuitability(Sample.GetGroundwaterPotential(), Habitat.MinimumGroundwaterPotential, Habitat.MaximumGroundwaterPotential, Softness);
         const float Solar = SmoothRangeSuitability(Sample.GetSolarExposure(), Habitat.MinimumSolarExposure, Habitat.MaximumSolarExposure, Softness);
         const float Erosion = SmoothRangeSuitability(Sample.GetErosion(), Habitat.MinimumErosion, Habitat.MaximumErosion, Softness);
+        const float ColdPool = SmoothRangeSuitability(Sample.GetColdAirPooling(), Habitat.MinimumColdAirPooling, Habitat.MaximumColdAirPooling, Softness);
+        const float Disturbance = SmoothRangeSuitability(Sample.GetDisturbance(), Habitat.MinimumDisturbance, Habitat.MaximumDisturbance, Softness);
+        const float Canopy = SmoothRangeSuitability(Sample.GetCanopyPotential(), Habitat.MinimumCanopyPotential, Habitat.MaximumCanopyPotential, Softness);
+        const float Coarseness = SmoothRangeSuitability(Sample.GetSoilCoarseness(), Habitat.MinimumSoilCoarseness, Habitat.MaximumSoilCoarseness, Softness);
+        const float WaterHolding = SmoothRangeSuitability(Sample.GetWaterHoldingCapacity(), Habitat.MinimumWaterHoldingCapacity, Habitat.MaximumWaterHoldingCapacity, Softness);
 
         const float MaximumSlope = FMath::Clamp(Habitat.MaximumSlopeDegrees, 0.1f, 90.0f);
         const float SlopeSuitability = 1.0f - FMath::SmoothStep(
@@ -82,9 +87,10 @@ namespace
         const float Product = FMath::Max(
             0.0f,
             Moisture * Temperature * Soil * Drainage * River * Rock * Exposure * Fertility *
-            Elevation * TreeLine * Saturation * Groundwater * Solar * Erosion * SlopeSuitability
+            Elevation * TreeLine * Saturation * Groundwater * Solar * Erosion *
+            ColdPool * Disturbance * Canopy * Coarseness * WaterHolding * SlopeSuitability
         );
-        return FMath::Pow(Product, 1.0f / 15.0f);
+        return FMath::Pow(Product, 1.0f / 20.0f);
     }
 }
 

@@ -187,6 +187,7 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 
 	SurfaceCache.Reserve(1600);
 	ColumnCache.Reserve(1600);
+	BiomeClimateCache.Reserve(256);
 }
 
 FCubusDensitySample FCubusTerrainDensityField::Sample(const FIntVector& GlobalSampleCoordinate) const
@@ -286,7 +287,17 @@ const FCubusTerrainDensityField::FSurfaceData& FCubusTerrainDensityField::GetCac
 		const float TerrainY = WorldY + static_cast<float>(Settings.TerrainOffsetY);
 		Surface.FormSample = FCubusTerrainForm::Sample(TerrainX, TerrainY, TerrainFormSettings);
 		const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
-		Surface.SurfaceVoxelHeight = ApplyRiverLowering(Surface.FormSample.Height + LandmarkSample.HeightOffset, WorldX, WorldY);
+		const float UncarvedSurfaceHeight = Surface.FormSample.Height + LandmarkSample.HeightOffset;
+		if (HydrologySettings.bEnabled)
+		{
+			Surface.HydrologySample = FCubusHydrologyField::Sample(WorldX, WorldY, HydrologySettings);
+			Surface.bHasHydrologySample = true;
+			Surface.SurfaceVoxelHeight = ApplyRiverLowering(UncarvedSurfaceHeight, Surface.HydrologySample);
+		}
+		else
+		{
+			Surface.SurfaceVoxelHeight = UncarvedSurfaceHeight;
+		}
 	}
 
 	SurfaceCache.Add(Key, Surface);
@@ -373,12 +384,30 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	);
 	Column.RockExposure = CliffExposure * LandformExposure * DrainageProtection;
 
+	FCubusBiomeTerrainContext BiomeTerrainContext;
+	BiomeTerrainContext.Drainage = Column.FormSample.Drainage;
+	BiomeTerrainContext.RockExposure = Column.RockExposure;
+	BiomeTerrainContext.MountainCore = Column.FormSample.MountainCore;
+	BiomeTerrainContext.FoothillWeight = Column.FormSample.FoothillWeight;
+	BiomeTerrainContext.Ridge = Column.FormSample.Ridge;
+	BiomeTerrainContext.Gradient = Column.Gradient;
+	BiomeTerrainContext.bHasTerrainFormSample = true;
+	BiomeTerrainContext.TerrainFormSample = Column.FormSample;
+	BiomeTerrainContext.bHasHydrologySample = Surface.bHasHydrologySample;
+	BiomeTerrainContext.HydrologySample = Surface.HydrologySample;
+	BiomeTerrainContext.bHasSubstrateSample = true;
+	BiomeTerrainContext.SubstrateHardness = Column.RockHardness;
+	BiomeTerrainContext.FractureDensity = Column.Fracture;
+
+	const FCubusBiomeClimateContext Climate = GetInterpolatedBiomeClimate(WorldX, WorldY);
 	Column.BiomeSample = FCubusBiomeField::Sample(
 		WorldX,
 		WorldY,
 		Column.SurfaceVoxelHeight,
 		Column.Slope,
-		Settings.BiomeSettings
+		Settings.BiomeSettings,
+		BiomeTerrainContext,
+		&Climate
 	);
 
 	const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
@@ -421,6 +450,46 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 
 	ColumnCache.Add(Key, Column);
 	return ColumnCache.FindChecked(Key);
+}
+
+const FCubusBiomeClimateContext& FCubusTerrainDensityField::GetCachedBiomeClimateCell(
+    const FIntPoint& CellCoordinate
+) const
+{
+    if (const FCubusBiomeClimateContext* Existing = BiomeClimateCache.Find(CellCoordinate))
+    {
+        return *Existing;
+    }
+
+    const float WorldX = static_cast<float>(CellCoordinate.X) * BiomeClimateCacheCellSize;
+    const float WorldY = static_cast<float>(CellCoordinate.Y) * BiomeClimateCacheCellSize;
+    BiomeClimateCache.Add(
+        CellCoordinate,
+        FCubusBiomeField::SampleClimate(WorldX, WorldY, Settings.BiomeSettings)
+    );
+    return BiomeClimateCache.FindChecked(CellCoordinate);
+}
+
+FCubusBiomeClimateContext FCubusTerrainDensityField::GetInterpolatedBiomeClimate(
+    const float WorldX,
+    const float WorldY
+) const
+{
+    const float GridX = WorldX / BiomeClimateCacheCellSize;
+    const float GridY = WorldY / BiomeClimateCacheCellSize;
+    const int32 CellX = FMath::FloorToInt(GridX);
+    const int32 CellY = FMath::FloorToInt(GridY);
+    const float AlphaX = GridX - static_cast<float>(CellX);
+    const float AlphaY = GridY - static_cast<float>(CellY);
+
+    /* Copy immediately: later TMap inserts may rehash and invalidate references. */
+    const FCubusBiomeClimateContext C00 = GetCachedBiomeClimateCell(FIntPoint(CellX, CellY));
+    const FCubusBiomeClimateContext C10 = GetCachedBiomeClimateCell(FIntPoint(CellX + 1, CellY));
+    const FCubusBiomeClimateContext C01 = GetCachedBiomeClimateCell(FIntPoint(CellX, CellY + 1));
+    const FCubusBiomeClimateContext C11 = GetCachedBiomeClimateCell(FIntPoint(CellX + 1, CellY + 1));
+    const FCubusBiomeClimateContext Bottom = FCubusBiomeField::LerpClimate(C00, C10, AlphaX);
+    const FCubusBiomeClimateContext Top = FCubusBiomeField::LerpClimate(C01, C11, AlphaX);
+    return FCubusBiomeField::LerpClimate(Bottom, Top, AlphaY);
 }
 
 FCubusTerrainDensityField::FTerrainRegionWeights FCubusTerrainDensityField::SampleTerrainRegions(const float WorldX, const float WorldY) const
@@ -503,7 +572,17 @@ float FCubusTerrainDensityField::ApplyRiverLowering(const float SurfaceHeight, c
 		return SurfaceHeight;
 	}
 
-	const FCubusHydrologySample Hydrology = FCubusHydrologyField::Sample(WorldX, WorldY, HydrologySettings);
+	return ApplyRiverLowering(
+		SurfaceHeight,
+		FCubusHydrologyField::Sample(WorldX, WorldY, HydrologySettings)
+	);
+}
+
+float FCubusTerrainDensityField::ApplyRiverLowering(
+	const float SurfaceHeight,
+	const FCubusHydrologySample& Hydrology
+) const
+{
 	if (!Hydrology.IsChannel())
 	{
 		return SurfaceHeight;

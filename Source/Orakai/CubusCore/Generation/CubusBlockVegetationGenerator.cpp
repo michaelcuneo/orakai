@@ -102,6 +102,11 @@ namespace CubusBlockVegetationGenerator
         Habitat.GroundwaterPotential = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.GroundwaterPotential);
         Habitat.SolarExposure = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.SolarExposure);
         Habitat.Erosion = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Erosion);
+        Habitat.ColdAirPooling = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.ColdAirPooling);
+        Habitat.Disturbance = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Disturbance);
+        Habitat.CanopyPotential = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.CanopyPotential);
+        Habitat.SoilCoarseness = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.SoilCoarseness);
+        Habitat.WaterHoldingCapacity = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.WaterHoldingCapacity);
         Habitat.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(
             FMath::RadiansToDegrees(FMath::Atan(BiomeSample.Slope))
         );
@@ -138,6 +143,12 @@ namespace CubusBlockVegetationGenerator
         const float Groundwater = FMath::Clamp(BiomeSample.GroundwaterPotential, 0.0f, 1.0f);
         const float Solar = FMath::Clamp(BiomeSample.SolarExposure, 0.0f, 1.0f);
         const float Erosion = FMath::Clamp(BiomeSample.Erosion, 0.0f, 1.0f);
+        const float ColdPool = FMath::Clamp(BiomeSample.ColdAirPooling, 0.0f, 1.0f);
+        const float Disturbance = FMath::Clamp(BiomeSample.Disturbance, 0.0f, 1.0f);
+        const float Canopy = FMath::Clamp(BiomeSample.CanopyPotential, 0.0f, 1.0f);
+        const float CanopyOpen = 1.0f - Canopy;
+        const float Coarseness = FMath::Clamp(BiomeSample.SoilCoarseness, 0.0f, 1.0f);
+        const float WaterHolding = FMath::Clamp(BiomeSample.WaterHoldingCapacity, 0.0f, 1.0f);
         const float Alpine = FMath::Clamp(BiomeSample.AlpineInfluence, 0.0f, 1.0f);
         const float Nival = FMath::Clamp(BiomeSample.NivalInfluence, 0.0f, 1.0f);
         const float SlopeDegrees = FMath::RadiansToDegrees(FMath::Atan(BiomeSample.Slope));
@@ -156,6 +167,8 @@ namespace CubusBlockVegetationGenerator
             RangeSuitability(Temperature, 0.28f, 0.88f) *
             FMath::Lerp(0.25f, 1.0f, Soil) *
             FMath::Lerp(0.35f, 1.0f, Fertility) *
+            FMath::Lerp(0.55f, 1.10f, WaterHolding) *
+            FMath::Lerp(1.0f, 0.52f, Coarseness) *
             FMath::Lerp(1.0f, 0.35f, Exposure) *
             FMath::Lerp(1.0f, 0.30f, Rock) *
             RangeSuitability(Saturation, 0.02f, 0.82f) *
@@ -189,7 +202,11 @@ namespace CubusBlockVegetationGenerator
             BiomeSample.RockyWeight * ConiferHabitat * 0.28f;
         const float TreeHabitat = FMath::Clamp(Result.BroadleafScore + Result.ConiferScore, 0.0f, 1.25f);
         Result.TreeDensity = FMath::Clamp(
-            TreeBase * FMath::Lerp(0.55f, 1.30f, EcologyStrength) * TreeHabitat,
+            TreeBase *
+            FMath::Lerp(0.55f, 1.30f, EcologyStrength) *
+            TreeHabitat *
+            FMath::Lerp(0.48f, 1.18f, Canopy) *
+            FMath::Lerp(1.0f, 0.42f, Disturbance),
             0.0f,
             1.0f
         );
@@ -198,7 +215,8 @@ namespace CubusBlockVegetationGenerator
             FMath::Max(FMath::SmoothStep(0.25f, 0.78f, River), FMath::SmoothStep(0.52f, 0.82f, Groundwater)) *
             FMath::SmoothStep(0.48f, 0.82f, Moisture) *
             FMath::SmoothStep(0.42f, 0.76f, Saturation) *
-            FMath::Lerp(0.55f, 1.0f, Fertility) * VeryGentle * (1.0f - Nival);
+            FMath::Lerp(0.55f, 1.0f, Fertility) *
+            FMath::Lerp(0.72f, 1.08f, WaterHolding) * VeryGentle * (1.0f - Nival);
         Result.ReedDensity = FMath::Clamp(
             Settings.WetlandReedDensity * (0.35f + BiomeSample.WetlandWeight) * ReedHabitat,
             0.0f,
@@ -211,6 +229,7 @@ namespace CubusBlockVegetationGenerator
             RangeSuitability(Temperature, 0.0f, 0.58f) *
             FMath::Lerp(0.55f, 1.0f, Exposure) *
             FMath::Lerp(0.45f, 1.0f, FMath::Max(Rock, BiomeSample.RockyWeight)) *
+            FMath::Lerp(0.82f, 1.12f, Coarseness) *
             (1.0f - River * 0.8f);
         Result.AlpineDensity = FMath::Clamp(
             Settings.RockyAlpineDensity * (0.25f + BiomeSample.RockyWeight) * AlpineHabitat,
@@ -220,12 +239,15 @@ namespace CubusBlockVegetationGenerator
 
         const float GroundBase = Settings.PlainsGroundCoverDensity *
             (BiomeSample.PlainsWeight + BiomeSample.ForestWeight * 0.35f + BiomeSample.RockyWeight * 0.16f);
+        const float ModerateDisturbance = 1.0f - FMath::Clamp(FMath::Abs(Disturbance - 0.45f) / 0.55f, 0.0f, 1.0f);
         const float ShrubHabitat =
             RangeSuitability(Moisture, 0.12f, 0.76f) *
             FMath::Lerp(0.75f, 1.15f, Exposure) *
             FMath::Lerp(0.82f, 1.12f, Solar) *
             FMath::Lerp(1.1f, 0.62f, Soil) *
             FMath::Lerp(1.0f, 0.58f, Erosion) *
+            FMath::Lerp(0.76f, 1.14f, CanopyOpen) *
+            FMath::Lerp(0.86f, 1.10f, ModerateDisturbance) *
             (1.0f - River * 0.72f) * (1.0f - Nival) *
             (1.0f - FMath::SmoothStep(38.0f, 52.0f, SlopeDegrees));
         const float GrassHabitat =
@@ -234,6 +256,9 @@ namespace CubusBlockVegetationGenerator
             FMath::Lerp(0.48f, 1.0f, Fertility) *
             FMath::Lerp(1.0f, 0.55f, Rock) *
             FMath::Lerp(1.0f, 0.66f, Erosion) *
+            FMath::Lerp(0.58f, 1.12f, CanopyOpen) *
+            FMath::Lerp(0.92f, 1.06f, ColdPool) *
+            FMath::Lerp(0.82f, 1.08f, WaterHolding) *
             (1.0f - Nival) * Gentle;
 
         const float ShrubFraction = FMath::Clamp(Settings.PlainsShrubFraction, 0.0f, 1.0f);

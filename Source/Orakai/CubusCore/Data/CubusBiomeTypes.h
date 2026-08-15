@@ -175,6 +175,30 @@ struct ORAKAI_API FCubusBiomeDefinition
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MaximumOrganicMatter = 1.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Substrate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumSubstrateHardness = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Substrate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumSubstrateHardness = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Substrate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumFractureDensity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Substrate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumFractureDensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumSoilCoarseness = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumSoilCoarseness = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumWaterHoldingCapacity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumWaterHoldingCapacity = 1.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MinimumErosion = 0.0f;
 

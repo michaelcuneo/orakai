@@ -96,6 +96,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes", meta = (ClampMin = "0.000001", UIMin = "0.0001", UIMax = "0.05"))
     float BiomeFrequency = 0.004f;
 
+    /** Long-term moisture-bearing wind direction in terrain XY space. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes|Climate")
+    FVector2D BiomePrevailingWindDirection = FVector2D(0.82f, 0.57f);
+
+    /** Representative warm/sun-facing downslope direction used by the ecology model. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes|Climate")
+    FVector2D BiomeSolarDirection = FVector2D(-0.42f, -0.91f);
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
     float ForestThreshold = 0.0f;
 

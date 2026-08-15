@@ -123,6 +123,36 @@ struct FCubusVegetationHabitatEnvelope
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MaximumErosion = 1.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumColdAirPooling = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumColdAirPooling = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Disturbance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumDisturbance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Disturbance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumDisturbance = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumCanopyPotential = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumCanopyPotential = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumSoilCoarseness = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumSoilCoarseness = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumWaterHoldingCapacity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumWaterHoldingCapacity = 1.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat", meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))
     float MaximumSlopeDegrees = 90.0f;
 

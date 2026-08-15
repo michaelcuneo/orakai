@@ -156,6 +156,8 @@ private:
     {
         float SurfaceVoxelHeight = 0.0f;
         FCubusTerrainFormSample FormSample;
+        bool bHasHydrologySample = false;
+        FCubusHydrologySample HydrologySample;
     };
 
     struct FColumnData
@@ -178,15 +180,19 @@ private:
     FCubusHydrologySettings HydrologySettings;
 
     static constexpr float CoordinateCacheScale = 20.0f;
+    static constexpr float BiomeClimateCacheCellSize = 4.0f;
 
     mutable TMap<FIntPoint, FSurfaceData> SurfaceCache;
     mutable TMap<FIntPoint, FColumnData> ColumnCache;
+    mutable TMap<FIntPoint, FCubusBiomeClimateContext> BiomeClimateCache;
 
     static FIntPoint MakeCoordinateCacheKey(float WorldX, float WorldY);
 
     const FSurfaceData& GetCachedSurfaceData(float WorldX, float WorldY) const;
     float GetCachedSurfaceVoxelHeight(float WorldX, float WorldY) const;
     const FColumnData& GetColumnData(float WorldX, float WorldY) const;
+    const FCubusBiomeClimateContext& GetCachedBiomeClimateCell(const FIntPoint& CellCoordinate) const;
+    FCubusBiomeClimateContext GetInterpolatedBiomeClimate(float WorldX, float WorldY) const;
 
     FTerrainRegionWeights SampleTerrainRegions(float WorldX, float WorldY) const;
 
@@ -197,6 +203,7 @@ private:
     float SampleValleyMask(float WorldX, float WorldY) const;
     float SampleRiverDistance(float WorldX, float WorldY) const;
     float ApplyRiverLowering(float SurfaceHeight, float WorldX, float WorldY) const;
+    float ApplyRiverLowering(float SurfaceHeight, const FCubusHydrologySample& Hydrology) const;
 
     float SampleGeologicalDensity(const FVector& GlobalSampleCoordinate, const FColumnData& Column, float BaseTerrainDensity) const;
     float SampleCaveDensity(const FVector& GlobalSampleCoordinate, float SurfaceVoxelHeight, float SurfaceSlope) const;

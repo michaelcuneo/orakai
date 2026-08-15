@@ -36,6 +36,11 @@ struct FCubusVegetationHabitatSample
     uint8 GroundwaterPotential = 0;
     uint8 SolarExposure = 128;
     uint8 Erosion = 0;
+    uint8 ColdAirPooling = 0;
+    uint8 Disturbance = 0;
+    uint8 CanopyPotential = 0;
+    uint8 SoilCoarseness = 128;
+    uint8 WaterHoldingCapacity = 128;
     uint8 SlopeDegrees = 0;
 
     static uint8 QuantizeUnit(const float Value)
@@ -67,6 +72,11 @@ struct FCubusVegetationHabitatSample
     float GetGroundwaterPotential() const { return DecodeUnit(GroundwaterPotential); }
     float GetSolarExposure() const { return DecodeUnit(SolarExposure); }
     float GetErosion() const { return DecodeUnit(Erosion); }
+    float GetColdAirPooling() const { return DecodeUnit(ColdAirPooling); }
+    float GetDisturbance() const { return DecodeUnit(Disturbance); }
+    float GetCanopyPotential() const { return DecodeUnit(CanopyPotential); }
+    float GetSoilCoarseness() const { return DecodeUnit(SoilCoarseness); }
+    float GetWaterHoldingCapacity() const { return DecodeUnit(WaterHoldingCapacity); }
     float GetSlopeDegrees() const { return DecodeUnit(SlopeDegrees) * 90.0f; }
 };
 

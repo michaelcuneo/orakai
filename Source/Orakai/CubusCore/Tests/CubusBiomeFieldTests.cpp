@@ -95,6 +95,56 @@ bool FCubusBiomeClimateFieldTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusBiomeGeologyClimateTest,
+    "Orakai.Cubus.Generation.BiomeGeologyClimate",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusBiomeGeologyClimateTest::RunTest(const FString& Parameters)
+{
+    (void)Parameters;
+
+    FCubusBiomeFieldSettings Settings;
+    Settings.bEnabled = true;
+    Settings.BiomeOffsetX = 441;
+    Settings.BiomeOffsetY = -917;
+    Settings.PrevailingWindDirection = FVector2D(1.0f, 0.0f);
+    Settings.SolarDirection = FVector2D(0.0f, -1.0f);
+
+    FCubusBiomeTerrainContext HardRock;
+    HardRock.Gradient = FVector2D(1.0f, 0.0f);
+    HardRock.MountainCore = 0.8f;
+    HardRock.Ridge = 0.5f;
+    HardRock.bHasSubstrateSample = true;
+    HardRock.SubstrateHardness = 0.92f;
+    HardRock.FractureDensity = 0.68f;
+
+    FCubusBiomeTerrainContext SoftRock = HardRock;
+    SoftRock.SubstrateHardness = 0.18f;
+    SoftRock.FractureDensity = 0.16f;
+
+    const FCubusBiomeSample Hard = FCubusBiomeField::Sample(96.0f, 32.0f, 24.0f, 0.35f, Settings, HardRock);
+    const FCubusBiomeSample Soft = FCubusBiomeField::Sample(96.0f, 32.0f, 24.0f, 0.35f, Settings, SoftRock);
+    TestTrue(TEXT("Hard fractured substrate produces coarser soil"), Hard.SoilCoarseness > Soft.SoilCoarseness);
+    TestTrue(TEXT("Water holding capacity remains normalized"), Hard.WaterHoldingCapacity >= 0.0f && Hard.WaterHoldingCapacity <= 1.0f);
+    TestTrue(TEXT("Substrate hardness reaches the biome sample"), FMath::IsNearlyEqual(Hard.SubstrateHardness, 0.92f, 0.001f));
+
+    FCubusBiomeFieldSettings LeeSettings = Settings;
+    LeeSettings.PrevailingWindDirection = FVector2D(-1.0f, 0.0f);
+    const FCubusBiomeSample Windward = FCubusBiomeField::Sample(96.0f, 32.0f, 24.0f, 0.35f, Settings, HardRock);
+    const FCubusBiomeSample Leeward = FCubusBiomeField::Sample(96.0f, 32.0f, 24.0f, 0.35f, LeeSettings, HardRock);
+    TestTrue(TEXT("Configured prevailing wind changes topographic exposure"),
+        !FMath::IsNearlyEqual(Windward.WindExposure, Leeward.WindExposure, 0.001f));
+
+    const FCubusBiomeClimateContext ClimateA = FCubusBiomeField::SampleClimate(96.0f, 32.0f, Settings);
+    const FCubusBiomeClimateContext ClimateB = FCubusBiomeField::SampleClimate(100.0f, 32.0f, Settings);
+    const FCubusBiomeClimateContext ClimateMid = FCubusBiomeField::LerpClimate(ClimateA, ClimateB, 0.5f);
+    TestTrue(TEXT("Prepared climate interpolation stays bounded"),
+        ClimateMid.ParentMaterial >= 0.0f && ClimateMid.ParentMaterial <= 1.0f);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCubusBiomeEcologicalNicheTest,
     "Orakai.Cubus.Generation.BiomeEcologicalNiches",
     EAutomationTestFlags::EditorContext |

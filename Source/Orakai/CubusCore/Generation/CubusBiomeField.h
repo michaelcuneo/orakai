@@ -16,6 +16,9 @@ struct ORAKAI_API FCubusBiomeFieldSettings
     float RockySlopeThreshold    = 1.15f;
     float RockyMinimumWorldZ     = 48.0f; // Legacy asset compatibility only.
 
+    FVector2D PrevailingWindDirection = FVector2D(0.82f, 0.57f);
+    FVector2D SolarDirection = FVector2D(-0.42f, -0.91f);
+
     int32 PlainsSurfaceMaterialId  = 1;
     int32 ForestSurfaceMaterialId  = 7;
     int32 RockySurfaceMaterialId   = 3;
@@ -67,6 +70,10 @@ struct ORAKAI_API FCubusBiomeTerrainContext
 
     bool bHasHydrologySample = false;
     FCubusHydrologySample HydrologySample;
+
+    bool bHasSubstrateSample = false;
+    float SubstrateHardness = 0.5f;
+    float FractureDensity = 0.0f;
 };
 
 /** Continuous environmental state and ecological community blend for one world column. */
@@ -124,6 +131,10 @@ struct ORAKAI_API FCubusBiomeSample
     float SoilDepth = 0.5f;
     float SoilMoisture = 0.5f;
     float SoilPermeability = 0.5f;
+    float SoilCoarseness = 0.5f;
+    float WaterHoldingCapacity = 0.5f;
+    float SubstrateHardness = 0.5f;
+    float FractureDensity = 0.0f;
     float OrganicMatter = 0.5f;
     float Fertility = 0.5f;
     float RockExposure = 0.0f;
@@ -152,13 +163,26 @@ public:
         const FCubusHydrologySettings& HydrologySettings
     );
 
+    static FCubusBiomeClimateContext SampleClimate(
+        float WorldX,
+        float WorldY,
+        const FCubusBiomeFieldSettings& Settings
+    );
+
+    static FCubusBiomeClimateContext LerpClimate(
+        const FCubusBiomeClimateContext& A,
+        const FCubusBiomeClimateContext& B,
+        float Alpha
+    );
+
     static FCubusBiomeSample Sample(
         float WorldX,
         float WorldY,
         float SurfaceWorldZ,
         float Slope,
         const FCubusBiomeFieldSettings& Settings,
-        const FCubusBiomeTerrainContext& TerrainContext = FCubusBiomeTerrainContext()
+        const FCubusBiomeTerrainContext& TerrainContext = FCubusBiomeTerrainContext(),
+        const FCubusBiomeClimateContext* ClimateContext = nullptr
     );
 
     static float SampleRiverDistance(float WorldX, float WorldY, const FCubusBiomeFieldSettings& Settings);

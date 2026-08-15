@@ -11,9 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 16: vegetation species and placement ecology now consume the v2
-    // elevation, treeline, hydrology, solar-exposure and erosion habitat fields.
-    static constexpr uint32 CurrentGenerationVersion = 16;
+    // Bumped to 17: biomes now reuse authoritative terrain/hydrology, interpolate
+    // slow climate fields, consume real substrate geology and retain the richer
+    // disturbance/canopy/substrate habitat through vegetation species selection.
+    static constexpr uint32 CurrentGenerationVersion = 17;
 
     int64 World = 1;
     int32 Terrain = 0;
