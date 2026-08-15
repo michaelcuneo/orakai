@@ -166,6 +166,10 @@ private:
         float SurfaceSampleZ = 1.0f;
         float Slope = 0.0f;
         FVector2D Gradient = FVector2D::ZeroVector;
+        float Curvature = 0.0f;
+        float Convexity = 0.0f;
+        float Concavity = 0.0f;
+        float Talus = 0.0f;
         float RockHardness = 0.5f;
         float Fracture = 0.0f;
         float StrataTilt = 0.0f;

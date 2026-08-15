@@ -11,10 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 26: restore exact LOD0/coarse sample alignment and add
-    // independent regional orogenic ranges so tall/snow-capable mountains are
-    // spatially distributed instead of depending on the kilometre-scale spine.
-    static constexpr uint32 CurrentGenerationVersion = 26;
+    // Bumped to 27: add resolvable branching ridges/headwater erosion plus
+    // curvature-aware talus, cliff ribs, bedding alcoves and shallow 3D undercuts
+    // to make the 80 cm density surface read as naturally eroded terrain.
+    static constexpr uint32 CurrentGenerationVersion = 27;
 
     int64 World = 1;
     int32 Terrain = 0;
