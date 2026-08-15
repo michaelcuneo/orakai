@@ -52,6 +52,10 @@ struct ORAKAI_API FCubusTerrainFormSample
     float FoothillWeight = 0.0f;
     float Drainage = 0.0f;
     float Ridge = 0.0f;
+    float MassifWeight = 0.0f;
+    float Escarpment = 0.0f;
+    float ValleyCarve = 0.0f;
+    float Cirque = 0.0f;
     float SurfaceRoughness = 0.0f;
     float ErosionRills = 0.0f;
 };
@@ -60,11 +64,10 @@ struct ORAKAI_API FCubusTerrainFormSample
  * Deterministic multi-scale terrain form.
  *
  * Kilometre-scale warped plate boundaries establish mountain ranges and
- * foothills. Smaller ridged multifractal detail then forms peaks inside those
- * ranges, while a separate main-channel/tributary field cuts broad valleys.
- * Heterogeneous soil undulation, broken ground and gated erosion rills add
- * local variation without applying the same high-frequency noise everywhere.
- * Fine relief is restrained on valley floors so drainage remains legible.
+ * foothills. Playable-scale massifs, escarpments, trunk/tributary valleys and
+ * cirques then make those ranges readable inside an ordinary streamed area.
+ * Smaller ridged multifractal detail forms peaks and erosion texture without
+ * replacing the macro landforms with generic noise.
  */
 class ORAKAI_API FCubusTerrainForm
 {
