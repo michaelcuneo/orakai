@@ -11,10 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 25: coarse terrain LOD now samples the exact absolute canonical
-    // density coordinates used by LOD0; the old half-tile XYZ offset created a
-    // false elevated mountain/snow ring at the outer terrain tiers.
-    static constexpr uint32 CurrentGenerationVersion = 25;
+    // Bumped to 26: restore exact LOD0/coarse sample alignment and add
+    // independent regional orogenic ranges so tall/snow-capable mountains are
+    // spatially distributed instead of depending on the kilometre-scale spine.
+    static constexpr uint32 CurrentGenerationVersion = 26;
 
     int64 World = 1;
     int32 Terrain = 0;

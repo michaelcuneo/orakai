@@ -155,6 +155,42 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         1.0f
     );
 
+    /*
+     * Distributed regional ranges.
+     *
+     * The tectonic carrier above has a ~4000-voxel wavelength at defaults. It
+     * gives continent-scale structure, but it cannot be the only source of tall
+     * relief or ordinary play windows will often see alpine peaks only far away.
+     * This independent warped zero-crossing hierarchy is regional/playable scale
+     * and remains entirely world-coordinate based, never player/radius based.
+     */
+    const float DistributedRangeFrequency = FMath::Max(
+        Settings.RegionFrequency * 0.72f,
+        TectonicFrequency * 5.5f
+    );
+    const float DistributedRangeSignal = SampleFbm(
+        TerrainX * 0.67f - TerrainY * 0.74f + 53117.0f,
+        TerrainX * 0.74f + TerrainY * 0.67f - 41729.0f,
+        DistributedRangeFrequency,
+        3,
+        1.97f,
+        0.52f
+    );
+    const float DistributedRangeDistance = FMath::Abs(DistributedRangeSignal);
+    const float DistributedRangeContinuitySignal = SampleFbm(
+        TerrainX * 0.89f + TerrainY * 0.46f - 36251.0f,
+        TerrainY * 0.89f - TerrainX * 0.46f + 28793.0f,
+        DistributedRangeFrequency * 0.42f,
+        3,
+        2.03f,
+        0.50f
+    );
+    const float DistributedRangeContinuity = SmoothStep(-0.24f, 0.34f, DistributedRangeContinuitySignal);
+    const float DistributedRangeCore =
+        (1.0f - SmoothStep(0.075f, 0.19f, DistributedRangeDistance)) * DistributedRangeContinuity;
+    const float DistributedFoothillBelt =
+        (1.0f - SmoothStep(0.12f, 0.43f, DistributedRangeDistance)) * DistributedRangeContinuity;
+
     const float RegionSignal = SampleFbm(
         TerrainX - 11717.0f,
         TerrainY + 23431.0f,
@@ -171,12 +207,15 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
 
     FCubusTerrainFormSample Result;
     Result.MountainCore = FMath::Clamp(
-        FMath::Max(RangeCore, HighlandProvince * 0.22f),
+        FMath::Max(FMath::Max(RangeCore, DistributedRangeCore * 0.92f), HighlandProvince * 0.22f),
         0.0f,
         1.0f
     );
     Result.FoothillWeight = FMath::Clamp(
-        FMath::Max(FMath::Max(FoothillBelt, RangeCore), HighlandProvince * 0.56f),
+        FMath::Max(
+            FMath::Max(FMath::Max(FoothillBelt, DistributedFoothillBelt * 0.90f), FMath::Max(RangeCore, DistributedRangeCore * 0.92f)),
+            HighlandProvince * 0.56f
+        ),
         0.0f,
         1.0f
     );
@@ -186,7 +225,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         FMath::Lerp(1.0f, 0.76f, BasinProvince);
     Result.MountainWeight = FMath::Clamp(
         FMath::Max(
-            RangeCore + FoothillBelt * 0.48f,
+            FMath::Max(RangeCore + FoothillBelt * 0.48f, DistributedRangeCore * 0.92f + DistributedFoothillBelt * 0.44f),
             HighlandProvince * 0.58f
         ),
         0.0f,
@@ -349,7 +388,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     );
     Result.Ridge = FMath::Max(
         LocalRidge,
-        MajorRidge * FMath::Max(RangeCore, HighlandProvince * 0.34f)
+        MajorRidge * FMath::Max(FMath::Max(RangeCore, DistributedRangeCore * 0.88f), HighlandProvince * 0.34f)
     );
 
     /*
@@ -374,7 +413,10 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         3
     );
     const float LegacyMassifCarrier = FMath::Clamp(
-        FoothillBelt * 0.78f + RangeCore * 0.52f,
+        FMath::Max(
+            FoothillBelt * 0.78f + RangeCore * 0.52f,
+            DistributedFoothillBelt * 0.74f + DistributedRangeCore * 0.50f
+        ),
         0.0f,
         1.0f
     );
@@ -607,7 +649,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
      * most alpine elevation; massifs articulate the range; passes reduce ridge
      * height locally; valleys and cirques remove material where expected.
      */
-    const float RangeUplift =
+    const float PrimaryRangeUplift =
         Settings.RidgeAmplitude * Settings.MountainElevationScale *
         (
             FoothillBelt * 0.56f +
@@ -615,6 +657,15 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         ) *
         (0.78f + PeakRhythm * 0.30f) *
         (0.72f + PassRhythm * 0.30f);
+    const float DistributedRangeUplift =
+        Settings.RidgeAmplitude * Settings.MountainElevationScale *
+        (
+            DistributedFoothillBelt * 0.50f +
+            DistributedRangeCore * (0.86f + MajorRidge * 0.62f)
+        ) *
+        (0.78f + PeakRhythm * 0.28f) *
+        (0.74f + PassRhythm * 0.28f);
+    const float RangeUplift = FMath::Max(PrimaryRangeUplift, DistributedRangeUplift);
     const float HighlandUplift =
         Settings.RidgeAmplitude * Settings.MountainElevationScale * 0.42f *
         FMath::Pow(HighlandProvince, 1.35f) *

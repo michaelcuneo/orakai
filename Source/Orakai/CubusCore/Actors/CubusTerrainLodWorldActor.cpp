@@ -756,14 +756,16 @@ FCubusTerrainLodTileBuildResult ACubusTerrainLodWorldActor::BuildTile(const FCub
 								static_cast<double>(Input.TileCoordinate.Z * Cubus::ChunkSize));
 
 	/*
-	 * Coarse tiles must be a lower-resolution view of the exact same absolute
-	 * density field as LOD0. No centring offset belongs here: the component is
-	 * already placed at TileCoordinate * ChunkSize * stride in world space.
-	 * Offsetting source X/Y sampled a different landscape in every LOD tier;
-	 * offsetting Z lifted the outer rings by half a coarse tile (1008 canonical
-	 * voxels at stride 64), producing the false mountain/snow horizon ring.
+	 * Preserve the LOD0 sample/render convention exactly. Density samples are
+	 * indexed from the chunk minimum, while the procedural mesh is centred on
+	 * its actor. LOD0 therefore evaluates density 16 canonical voxels ahead of
+	 * rendered world position. For coarse stride S, subtracting 16*(S-1) keeps
+	 * that same +16 offset instead of introducing a tier-dependent height shift.
 	 */
-	const FVector SourceOrigin = LogicalOrigin * static_cast<double>(SafeStride);
+	const double AlignmentOffset = static_cast<double>(Cubus::ChunkSize) * 0.5 * static_cast<double>(SafeStride - 1);
+
+	const FVector SourceOrigin =
+		LogicalOrigin * static_cast<double>(SafeStride) - FVector(AlignmentOffset, AlignmentOffset, AlignmentOffset);
 
 	const FCubusScaledDensityField ScaledField(SourceField, LogicalOrigin, SourceOrigin, static_cast<float>(SafeStride));
 
