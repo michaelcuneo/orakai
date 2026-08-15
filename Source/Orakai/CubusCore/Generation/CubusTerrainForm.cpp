@@ -344,36 +344,6 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         1.0f
     );
 
-    // Secondary ridge branches are broad enough to survive an 80 cm density
-    // lattice. Two rotated fields make dendritic spurs rather than parallel ribs.
-    const float BranchFrequency = FMath::Max(
-        Settings.RegionFrequency * 2.15f,
-        TectonicFrequency * 9.0f
-    );
-    const float BranchRidgeA = SampleRidgedFbm(
-        TerrainX * 0.79f - TerrainY * 0.61f + 34781.0f,
-        TerrainX * 0.61f + TerrainY * 0.79f - 20117.0f,
-        BranchFrequency,
-        3
-    );
-    const float BranchRidgeB = SampleRidgedFbm(
-        TerrainX * 0.47f + TerrainY * 0.88f - 26339.0f,
-        TerrainY * 0.47f - TerrainX * 0.88f + 38177.0f,
-        BranchFrequency * 1.22f,
-        3
-    );
-    const float BranchCarrier = FMath::Clamp(
-        FMath::Max(
-            FoothillBelt * 0.62f + RangeCore * 0.48f,
-            DistributedFoothillBelt * 0.78f + DistributedRangeCore * 0.58f
-        ),
-        0.0f,
-        1.0f
-    );
-    const float BranchNetwork =
-        SmoothStep(0.38f, 0.76f, FMath::Max(BranchRidgeA, BranchRidgeB * 0.92f)) *
-        BranchCarrier;
-
     const float MajorRidgeFine = SampleRidgedFbm(
         TerrainX * 0.91f - TerrainY * 0.41f + 15401.0f,
         TerrainX * 0.41f + TerrainY * 0.91f - 12011.0f,
@@ -417,7 +387,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         1.0f
     );
     Result.Ridge = FMath::Max(
-        FMath::Max(LocalRidge, BranchNetwork * 0.90f),
+        LocalRidge,
         MajorRidge * FMath::Max(FMath::Max(RangeCore, DistributedRangeCore * 0.88f), HighlandProvince * 0.34f)
     );
 
@@ -596,28 +566,6 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         RillB,
         SmoothStep(0.36f, 0.64f, SurfacePatch)
     );
-    const float HeadwaterA = SampleChannelMask(
-        TerrainX * 0.86f - TerrainY * 0.51f + 4297.0f,
-        TerrainX * 0.51f + TerrainY * 0.86f - 16831.0f,
-        Settings.ValleyFrequency * 2.55f,
-        FMath::Max(0.012f, Settings.ValleyWidth * 0.30f),
-        FMath::Max(0.04f, Settings.ValleyFalloff * 0.28f)
-    );
-    const float HeadwaterB = SampleChannelMask(
-        TerrainX * 0.55f + TerrainY * 0.84f - 13327.0f,
-        TerrainY * 0.55f - TerrainX * 0.84f + 21493.0f,
-        Settings.ValleyFrequency * 2.95f,
-        FMath::Max(0.010f, Settings.ValleyWidth * 0.24f),
-        FMath::Max(0.035f, Settings.ValleyFalloff * 0.24f)
-    );
-    const float HeadwaterNotches = FMath::Clamp(
-        FMath::Max(HeadwaterA, HeadwaterB * 0.86f) *
-        Catchment *
-        FMath::Max(Result.MountainWeight, Result.MassifWeight) *
-        (1.0f - MainValleyFloor * 0.82f),
-        0.0f,
-        1.0f
-    );
 
     const float ContinentStrength =
         0.30f * Result.PlainsWeight +
@@ -743,12 +691,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         FMath::Lerp(0.52f, 0.82f, Result.MountainWeight) *
         Result.Cirque;
     const float LocalCrestRelief =
-        LocalRidge * Settings.RidgeAmplitude * RidgeStrength * Erosion * 0.34f;
-    const float BranchCrestRelief =
-        BranchNetwork * Settings.RidgeAmplitude * RidgeStrength * Erosion * 0.24f;
-    const float HeadwaterCut =
-        Settings.ValleyDepth * 0.22f * HeadwaterNotches *
-        FMath::Lerp(0.72f, 1.0f, BranchNetwork);
+        LocalRidge * Settings.RidgeAmplitude * RidgeStrength * Erosion * 0.38f;
     const float Continent =
         MacroRelief * 0.68f +
         RegionalRelief * 0.32f;
@@ -763,12 +706,10 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         HighlandUplift * Erosion +
         MassifUplift * Erosion +
         EscarpmentLift +
-        LocalCrestRelief +
-        BranchCrestRelief -
+        LocalCrestRelief -
         BasinCut -
         MainValleyCut -
         TributaryValleyCut -
-        HeadwaterCut -
         CirqueCut;
 
     return Result;

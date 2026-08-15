@@ -33,15 +33,31 @@ bool FCubusDensityLodScaleTest::RunTest(
         4
     );
     TestEqual(
-        TEXT("10 cm density uses ten samples per canonical voxel"),
+        TEXT("Runtime refinement is capped at four subdivisions"),
         FCubusDensityLod::ResolveSubdivisionsForSpacing(100.0f, 10.0f),
-        10
+        4
     );
 
     TestEqual(
-        TEXT("Fine density does not change the canonical voxel size"),
-        FCubusDensityLod::GetSampleSpacing(100.0f, 10),
-        10.0f
+        TEXT("80 cm canonical terrain resolves 20 cm near spacing"),
+        FCubusDensityLod::ResolveSubdivisionsForSpacing(80.0f, 20.0f),
+        4
+    );
+    TestEqual(
+        TEXT("80 cm canonical terrain resolves 40 cm middle spacing"),
+        FCubusDensityLod::ResolveSubdivisionsForSpacing(80.0f, 40.0f),
+        2
+    );
+    TestEqual(
+        TEXT("80 cm canonical terrain keeps 80 cm far spacing"),
+        FCubusDensityLod::ResolveSubdivisionsForSpacing(80.0f, 80.0f),
+        1
+    );
+
+    TestEqual(
+        TEXT("Fine density changes mesh spacing, not canonical voxel identity"),
+        FCubusDensityLod::GetSampleSpacing(80.0f, 4),
+        20.0f
     );
 
     TestEqual(

@@ -11,10 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 27: add resolvable branching ridges/headwater erosion plus
-    // curvature-aware talus, cliff ribs, bedding alcoves and shallow 3D undercuts
-    // to make the 80 cm density surface read as naturally eroded terrain.
-    static constexpr uint32 CurrentGenerationVersion = 27;
+    // Bumped to 28: retire the under-resolved v27 mesh-detail experiment and
+    // re-enable bounded adaptive density sampling. The procedural field remains
+    // canonical; near/middle/far meshes only change sample spacing.
+    static constexpr uint32 CurrentGenerationVersion = 28;
 
     int64 World = 1;
     int32 Terrain = 0;

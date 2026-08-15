@@ -336,29 +336,6 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	Column.Gradient = FVector2D(GradientX, GradientY);
 	Column.Slope = Column.Gradient.Size();
 
-	// Discrete surface Laplacian: negative values are convex shoulders/ridges,
-	// positive values are concave hollows where colluvium/talus accumulates.
-	Column.Curvature =
-		HeightPositiveX + HeightNegativeX + HeightPositiveY + HeightNegativeY -
-		Column.SurfaceVoxelHeight * 4.0f;
-	Column.Convexity = SmoothStep(0.08f, 1.25f, -Column.Curvature);
-	Column.Concavity = SmoothStep(0.08f, 1.25f, Column.Curvature);
-	const float TalusSlopeBand =
-		SmoothStep(0.28f, 0.72f, Column.Slope) *
-		(1.0f - SmoothStep(1.05f, 1.80f, Column.Slope));
-	const float TalusLandform = FMath::Clamp(
-		Column.FormSample.FoothillWeight * 0.55f +
-		Column.FormSample.MassifWeight * 0.55f +
-		Column.FormSample.Cirque * 0.40f,
-		0.0f,
-		1.0f
-	);
-	Column.Talus = FMath::Clamp(
-		TalusSlopeBand * FMath::Lerp(0.28f, 1.0f, Column.Concavity) * TalusLandform,
-		0.0f,
-		1.0f
-	);
-
 	const float WorldX = WorldSampleX - 0.5f;
 	const float WorldY = WorldSampleY - 0.5f;
 	const float TerrainX = WorldX + static_cast<float>(Settings.TerrainOffsetX);
@@ -397,22 +374,10 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 		Settings.GeologyCliffSlopeFull,
 		Column.Slope
 	);
-	const float StructuralExposure = FMath::Clamp(
-		FMath::Max(
-			Column.FormSample.Escarpment * 0.96f,
-			FMath::Max(
-				Column.FormSample.Cirque * 0.74f + Column.FormSample.MassifWeight * 0.26f,
-				Column.FormSample.Ridge * 0.52f
-			)
-		),
-		0.0f,
-		1.0f
-	);
 	const float LandformExposure = FMath::Clamp(
-		Column.FormSample.MountainCore * 0.58f +
-		Column.FormSample.FoothillWeight * 0.30f +
-		Column.FormSample.MassifWeight * 0.44f +
-		StructuralExposure * 0.62f,
+		Column.FormSample.MountainCore * 0.82f +
+		Column.FormSample.FoothillWeight * 0.46f +
+		Column.FormSample.Ridge * 0.32f,
 		0.0f,
 		1.0f
 	);
@@ -421,15 +386,7 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 		0.0f,
 		1.0f
 	);
-	const float CurvatureExposure =
-		FMath::Lerp(0.78f, 1.18f, Column.Convexity) *
-		FMath::Lerp(1.0f, 0.78f, Column.Concavity);
-	Column.RockExposure = FMath::Clamp(
-		FMath::Max(CliffExposure, StructuralExposure * 0.58f) *
-		LandformExposure * DrainageProtection * CurvatureExposure,
-		0.0f,
-		1.0f
-	);
+	Column.RockExposure = CliffExposure * LandformExposure * DrainageProtection;
 
 	FCubusBiomeTerrainContext BiomeTerrainContext;
 	BiomeTerrainContext.Drainage = Column.FormSample.Drainage;
@@ -838,24 +795,8 @@ float FCubusTerrainDensityField::SampleGeologicalDensity(
 	const float BaseTerrainDensity
 ) const
 {
-	const float StructuralCliff = FMath::Clamp(
-		FMath::Max(
-			Column.FormSample.Escarpment * 0.96f,
-			FMath::Max(
-				Column.FormSample.Cirque * 0.78f,
-				Column.FormSample.MassifWeight * 0.38f + Column.FormSample.Ridge * 0.28f
-			)
-		),
-		0.0f,
-		1.0f
-	);
-	const float GeomorphologyCarrier = FMath::Clamp(
-		FMath::Max(Column.RockExposure, FMath::Max(StructuralCliff * 0.72f, Column.Talus * 0.62f)),
-		0.0f,
-		1.0f
-	);
 	const float DistanceFromSurface = FMath::Abs(BaseTerrainDensity);
-	if (DistanceFromSurface >= Settings.GeologySurfaceBand || GeomorphologyCarrier <= KINDA_SMALL_NUMBER)
+	if (DistanceFromSurface >= Settings.GeologySurfaceBand || Column.RockExposure <= KINDA_SMALL_NUMBER)
 	{
 		return BaseTerrainDensity;
 	}
@@ -909,33 +850,8 @@ float FCubusTerrainDensityField::SampleGeologicalDensity(
 		Settings.GeologyMassFrequency * 0.53f
 	);
 	const float RockMass =
-		(MassRidge - 0.48f) * Settings.GeologyMassStrength * 0.72f +
-		MassNoise * Settings.GeologyMassStrength * 0.24f;
-
-	const float CliffRibSignal = SampleRidgedNoise(
-		Along + Across * 0.13f + 18457.0f,
-		WorldZ * 0.34f - Across * 0.07f - 9271.0f,
-		Settings.GeologyMassFrequency * 0.70f
-	);
-	const float CliffRib = SmoothStep(0.42f, 0.84f, CliffRibSignal) * StructuralCliff;
-	const float CliffRibDisplacement =
-		Settings.GeologyMassStrength * 0.82f * CliffRib * Hardness;
-
-	const float AlcoveNoise = FMath::Clamp(
-		0.5f + 0.5f * SampleNoise3D(
-			WorldX - 14321.0f,
-			WorldY + 7817.0f,
-			WorldZ + 4261.0f,
-			Settings.GeologyMassFrequency * 0.62f
-		),
-		0.0f,
-		1.0f
-	);
-	const float AlcoveMask =
-		SmoothStep(0.64f, 0.88f, AlcoveNoise) *
-		StructuralCliff *
-		FMath::Lerp(1.0f, 0.58f, Column.Convexity);
-	const float AlcoveCut = Settings.GeologyUndercutStrength * 0.78f * AlcoveMask;
+		(MassRidge - 0.48f) * Settings.GeologyMassStrength +
+		MassNoise * Settings.GeologyMassStrength * 0.32f;
 
 	const float FractureVolume = SampleRidgedNoise3D(
 		WorldX + 12011.0f,
@@ -949,11 +865,9 @@ float FCubusTerrainDensityField::SampleGeologicalDensity(
 		Settings.GeologyFractureStrength;
 
 	const float ShelfDisplacement = Settings.GeologyShelfStrength * ShelfBand * Hardness;
-	const float UndercutDisplacement =
-		Settings.GeologyUndercutStrength * UndercutBand *
-		FMath::Lerp(1.15f, 0.65f, Column.RockHardness);
+	const float UndercutDisplacement = Settings.GeologyUndercutStrength * UndercutBand * FMath::Lerp(1.15f, 0.65f, Column.RockHardness);
 	const float OverhangCarrier = FMath::Clamp(
-		ShelfBand * 0.52f + MassRidge * 0.28f + CliffRib * 0.38f,
+		ShelfBand * 0.62f + MassRidge * 0.38f,
 		0.0f,
 		1.0f
 	);
@@ -961,42 +875,17 @@ float FCubusTerrainDensityField::SampleGeologicalDensity(
 		Settings.GeologyOverhangStrength *
 		OverhangCarrier *
 		Column.RockHardness *
-		SmoothStep(0.18f, 0.72f, FMath::Max(Column.RockExposure, StructuralCliff));
-
-	const float TalusPattern = FMath::Clamp(
-		0.5f + 0.5f * SampleNoise2D(
-			Across + 3271.0f,
-			Along - 11887.0f,
-			Settings.GeologyMassFrequency * 1.35f
-		),
-		0.0f,
-		1.0f
-	);
-	const float TalusDisplacement =
-		Settings.GeologyMassStrength * 0.62f *
-		Column.Talus *
-		FMath::Lerp(0.42f, 1.0f, TalusPattern);
-
-	const float BedrockCarrier = FMath::Clamp(
-		FMath::Max(Column.RockExposure, StructuralCliff * 0.62f),
-		0.0f,
-		1.0f
-	);
-	const float BedrockDisplacement =
-		ShelfDisplacement +
-		RockMass +
-		CliffRibDisplacement +
-		OverhangDisplacement -
-		UndercutDisplacement -
-		AlcoveCut -
-		FractureCut +
-		RockWarp * FMath::Lerp(0.28f, 0.72f, StructuralCliff);
+		SmoothStep(0.18f, 0.72f, Column.RockExposure);
 
 	const float GeologicalDisplacement =
-		BedrockDisplacement * BedrockCarrier +
-		TalusDisplacement;
+		ShelfDisplacement +
+		RockMass +
+		OverhangDisplacement -
+		UndercutDisplacement -
+		FractureCut +
+		RockWarp;
 
-	return BaseTerrainDensity + GeologicalDisplacement * SurfaceBandMask;
+	return BaseTerrainDensity + GeologicalDisplacement * Column.RockExposure * SurfaceBandMask;
 }
 
 float FCubusTerrainDensityField::SampleCaveDensity(
