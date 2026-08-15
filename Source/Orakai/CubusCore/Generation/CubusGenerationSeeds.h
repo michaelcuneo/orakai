@@ -11,9 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 20: the density terrain zero-crossing now contains playable-scale
-    // massifs, mountain-front escarpments, broad/incised valley systems and cirques.
-    static constexpr uint32 CurrentGenerationVersion = 20;
+    // Bumped to 21 to force a clean post-geomorphology density namespace. v20
+    // may already contain baselines produced during the terrain-shape rollout,
+    // so it is not trusted as a cache identity for the final geometry pass.
+    static constexpr uint32 CurrentGenerationVersion = 21;
 
     int64 World = 1;
     int32 Terrain = 0;
