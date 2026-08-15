@@ -1,0 +1,74 @@
+name: Retry density geomorphology v20
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Correct indentation-aware patcher and apply v20
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/agent/density_geomorphology_v20.py')
+          text = p.read_text(encoding='utf-8')
+          old = '''def replace_once(path, old, new):
+    p = Path(path)
+    text = p.read_text(encoding='utf-8')
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f'expected one anchor in {path}, found {count}: {old[:160]!r}')
+    p.write_text(text.replace(old, new, 1), encoding='utf-8')
+'''
+          new = '''def _tabs_for_leading_spaces(value):
+    lines = []
+    for line in value.splitlines(keepends=True):
+        stripped = line.lstrip(' ')
+        leading = len(line) - len(stripped)
+        if leading and leading % 4 == 0:
+            line = '\\t' * (leading // 4) + stripped
+        lines.append(line)
+    return ''.join(lines)
+
+
+def replace_once(path, old, new):
+    p = Path(path)
+    text = p.read_text(encoding='utf-8')
+    count = text.count(old)
+    if count == 1:
+        p.write_text(text.replace(old, new, 1), encoding='utf-8')
+        return
+    tab_old = _tabs_for_leading_spaces(old)
+    tab_new = _tabs_for_leading_spaces(new)
+    tab_count = text.count(tab_old)
+    if tab_count != 1:
+        raise RuntimeError(f'expected one anchor in {path}, found spaces={count} tabs={tab_count}: {old[:160]!r}')
+    p.write_text(text.replace(tab_old, tab_new, 1), encoding='utf-8')
+'''
+          if old not in text:
+              raise RuntimeError('missing replace_once helper')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python3 .github/agent/density_geomorphology_v20.py
+          git diff --check
+          grep -n 'CurrentGenerationVersion = 20' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
+          grep -n 'MassifUplift' Source/Orakai/CubusCore/Generation/CubusTerrainForm.cpp
+          grep -n 'MainValleyCut' Source/Orakai/CubusCore/Generation/CubusTerrainForm.cpp
+          grep -n 'EscarpmentLift' Source/Orakai/CubusCore/Generation/CubusTerrainForm.cpp
+          grep -n 'StructuralCliff' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
+          grep -n 'CliffButtress' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
+          grep -n 'AlcoveCut' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Source/Orakai/CubusCore/Generation/CubusTerrainForm.h Source/Orakai/CubusCore/Generation/CubusTerrainForm.cpp Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h Source/Orakai/CubusCore/Tests/CubusTerrainFormTests.cpp
+          git commit -m 'Make density terrain visibly geomorphic'
+          git push origin HEAD:agent/density-meshing
