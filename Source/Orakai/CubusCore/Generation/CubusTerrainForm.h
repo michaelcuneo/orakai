@@ -7,6 +7,10 @@
  *
  * Terrain form is deliberately independent of Actors/UObjects so the same
  * deterministic sample can be used on worker threads by either renderer.
+ *
+ * v30 defaults are authored in real-world metric scale. The legacy amplitude
+ * and frequency fields remain available for compatibility, but the physical
+ * model is authoritative when bUsePhysicalWorldScale is true.
  */
 struct ORAKAI_API FCubusTerrainFormSettings
 {
@@ -37,8 +41,32 @@ struct ORAKAI_API FCubusTerrainFormSettings
     float MountainThreshold = 0.30f;
     float MountainBlend = 0.20f;
 
-    /** Broad vertical scale for mountain systems; does not amplify local ridge detail. */
+    /** Broad vertical scale for the legacy terrain path. */
     float MountainElevationScale = 2.60f;
+
+    /** Physical size of one canonical voxel. Runtime density sets this from the owning world. */
+    float VoxelSizeCm = 80.0f;
+
+    /** Use real-world metric landform dimensions instead of legacy raw frequencies/amplitudes. */
+    bool bUsePhysicalWorldScale = true;
+
+    // Horizontal geomorphology scale.
+    float ClimateProvinceScaleKm = 80.0f;
+    float MountainSystemSpacingKm = 16.0f;
+    float MajorValleySpacingKm = 12.0f;
+    float MassifScaleKm = 4.5f;
+    float TributaryValleyScaleKm = 3.0f;
+    float RollingHillScaleMeters = 1200.0f;
+    float BroadReliefScaleMeters = 320.0f;
+    float LocalReliefScaleMeters = 110.0f;
+
+    // Vertical geomorphology scale. These are real metres, converted once to canonical voxels.
+    float RegionalReliefMeters = 420.0f;
+    float MountainReliefMeters = 1450.0f;
+    float ValleyReliefMeters = 360.0f;
+    float RollingHillReliefMeters = 150.0f;
+    float BroadReliefMeters = 34.0f;
+    float LocalReliefMeters = 8.0f;
 };
 
 /** Useful diagnostics accompanying one natural-terrain height sample. */
@@ -63,11 +91,10 @@ struct ORAKAI_API FCubusTerrainFormSample
 /**
  * Deterministic multi-scale terrain form.
  *
- * Kilometre-scale warped plate boundaries establish mountain ranges and
- * foothills. Playable-scale massifs, escarpments, trunk/tributary valleys and
- * cirques then make those ranges readable inside an ordinary streamed area.
- * Smaller ridged multifractal detail forms peaks and erosion texture without
- * replacing the macro landforms with generic noise.
+ * The physical path is explicitly hierarchical: regional relief -> mountain
+ * systems -> massifs -> major valleys -> tributaries -> hills -> broad/local
+ * relief. Named sizes are converted from metres using the canonical voxel size,
+ * so changing voxel resolution does not silently change the world's geography.
  */
 class ORAKAI_API FCubusTerrainForm
 {
