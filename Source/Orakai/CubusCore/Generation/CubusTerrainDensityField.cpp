@@ -320,7 +320,9 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	}
 
 	FColumnData Column;
-	const FSurfaceData& Surface = GetCachedSurfaceData(WorldSampleX, WorldSampleY);
+	// Copy before neighbour probes: GetCachedSurfaceVoxelHeight() can insert
+	// into SurfaceCache and rehash its TMap, invalidating references.
+	const FSurfaceData Surface = GetCachedSurfaceData(WorldSampleX, WorldSampleY);
 	Column.SurfaceVoxelHeight = Surface.SurfaceVoxelHeight;
 	Column.SurfaceSampleZ = Column.SurfaceVoxelHeight + 1.0f;
 	Column.FormSample = Surface.FormSample;

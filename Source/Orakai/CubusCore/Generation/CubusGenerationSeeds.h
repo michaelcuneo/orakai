@@ -11,10 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 24: legacy cellular mesa landmarks no longer stamp arbitrary
-    // height offsets into otherwise coherent mountain-valley terrain. Large
-    // natural features now come from the shared geomorphology hierarchy.
-    static constexpr uint32 CurrentGenerationVersion = 24;
+    // Bumped to 25: coarse terrain LOD now samples the exact absolute canonical
+    // density coordinates used by LOD0; the old half-tile XYZ offset created a
+    // false elevated mountain/snow ring at the outer terrain tiers.
+    static constexpr uint32 CurrentGenerationVersion = 25;
 
     int64 World = 1;
     int32 Terrain = 0;
