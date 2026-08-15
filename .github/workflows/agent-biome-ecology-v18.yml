@@ -1,39 +1,8 @@
-name: Run biome ecology v18 refinement
+name: Archived biome ecology v18 patch
 on:
-  push:
-    branches:
-      - agent/density-meshing
-permissions:
-  contents: write
+  workflow_dispatch:
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  archived:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/density-meshing
-          fetch-depth: 0
-      - name: Apply biome ecology v18 refinement
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('.github/agent/biome_ecology_v18.py')
-          text = p.read_text(encoding='utf-8')
-          text = text.replace('                RangeSuitability(Result.SolarExposure, Definition.MinimumSolarExposure, Definition.MaximumSolarExposure, Softness) *', '      RangeSuitability(Result.SolarExposure, Definition.MinimumSolarExposure, Definition.MaximumSolarExposure, Softness) *')
-          text = text.replace('                RangeSuitability(Result.Fertility, Definition.MinimumFertility, Definition.MaximumFertility, Softness) *', '      RangeSuitability(Result.Fertility, Definition.MinimumFertility, Definition.MaximumFertility, Softness) *')
-          p.write_text(text, encoding='utf-8')
-          PY
-          python3 .github/agent/biome_ecology_v18.py
-          git diff --check
-          grep -n 'CurrentGenerationVersion = 18' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
-          grep -n 'BiomeClimateCacheCellSize = 8.0f' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h
-          grep -n 'BiomeTopographicClimateCacheCellSize = 16.0f' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h
-          grep -n 'WindwardMontaneForest' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
-          grep -n 'LeewardSteppe' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Source/Orakai/CubusCore/Data/CubusBiomeTypes.h Source/Orakai/CubusCore/Generation/CubusBiomeField.h Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp
-          git commit -m 'Add regional biome climate horizons'
-          git push origin HEAD:agent/density-meshing
+      - run: echo "Biome ecology v18 patch already applied."
