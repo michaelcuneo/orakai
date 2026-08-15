@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# One-shot cleanup for the generated v29 geology function.
 path = Path('Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp')
 text = path.read_text()
 start = text.index('float FCubusTerrainDensityField::SampleGeologicalDensity(')
