@@ -11,10 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 23: temperate mountain-valley geomorphology replaces the
-    // exaggerated v22 province uplift with connected ranges, restrained
-    // highlands, broad trunk valleys, tributaries, passes and sparse cirques.
-    static constexpr uint32 CurrentGenerationVersion = 23;
+    // Bumped to 24: legacy cellular mesa landmarks no longer stamp arbitrary
+    // height offsets into otherwise coherent mountain-valley terrain. Large
+    // natural features now come from the shared geomorphology hierarchy.
+    static constexpr uint32 CurrentGenerationVersion = 24;
 
     int64 World = 1;
     int32 Terrain = 0;
