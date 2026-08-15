@@ -180,11 +180,18 @@ private:
     FCubusHydrologySettings HydrologySettings;
 
     static constexpr float CoordinateCacheScale = 20.0f;
-    static constexpr float BiomeClimateCacheCellSize = 4.0f;
+    // Climate noise is extremely low-frequency; 8 voxels preserves its shape while
+    // reducing FBM lattice nodes substantially versus the previous 4-voxel grid.
+    static constexpr float BiomeClimateCacheCellSize = 8.0f;
+    // Long-range horizon work is much more expensive, so it is evaluated sparsely.
+    static constexpr float BiomeTopographicClimateCacheCellSize = 16.0f;
+    static constexpr float BiomeMacroHeightCacheScale = 4.0f;
 
     mutable TMap<FIntPoint, FSurfaceData> SurfaceCache;
     mutable TMap<FIntPoint, FColumnData> ColumnCache;
     mutable TMap<FIntPoint, FCubusBiomeClimateContext> BiomeClimateCache;
+    mutable TMap<FIntPoint, FCubusBiomeTopographicClimateContext> BiomeTopographicClimateCache;
+    mutable TMap<FIntPoint, float> BiomeMacroHeightCache;
 
     static FIntPoint MakeCoordinateCacheKey(float WorldX, float WorldY);
 
@@ -193,6 +200,9 @@ private:
     const FColumnData& GetColumnData(float WorldX, float WorldY) const;
     const FCubusBiomeClimateContext& GetCachedBiomeClimateCell(const FIntPoint& CellCoordinate) const;
     FCubusBiomeClimateContext GetInterpolatedBiomeClimate(float WorldX, float WorldY) const;
+    float GetCachedBiomeMacroHeight(float WorldX, float WorldY) const;
+    const FCubusBiomeTopographicClimateContext& GetCachedBiomeTopographicClimateCell(const FIntPoint& CellCoordinate) const;
+    FCubusBiomeTopographicClimateContext GetInterpolatedBiomeTopographicClimate(float WorldX, float WorldY) const;
 
     FTerrainRegionWeights SampleTerrainRegions(float WorldX, float WorldY) const;
 

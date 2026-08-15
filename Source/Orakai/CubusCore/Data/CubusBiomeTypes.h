@@ -14,6 +14,18 @@ enum class ECubusBiomeKind : uint8
     Wetland
 };
 
+/** Broad, slow-varying climate province independent of local slope and drainage. */
+UENUM(BlueprintType)
+enum class ECubusClimateProvince : uint8
+{
+    HumidCool,
+    HumidTemperate,
+    TemperateTransition,
+    ContinentalInterior,
+    DryWarm,
+    DryCool
+};
+
 /** Structural elevation zone derived from sea level, treeline and the alpine/nival scale. */
 UENUM(BlueprintType)
 enum class ECubusElevationZone : uint8
@@ -162,6 +174,24 @@ struct ORAKAI_API FCubusBiomeDefinition
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MaximumSolarExposure = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate|Topography", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumOrographicLift = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate|Topography", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumOrographicLift = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate|Topography", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumRainShadow = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate|Topography", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumRainShadow = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate|Topography", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumSolarOcclusion = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate|Topography", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumSolarOcclusion = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MinimumFertility = 0.0f;

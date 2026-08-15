@@ -5,6 +5,30 @@
 
 namespace
 {
+    ECubusClimateProvince ResolveClimateProvince(const FCubusBiomeClimateContext& Climate)
+    {
+        const float Moisture = FMath::Clamp(
+            Climate.MoistureTransport * 0.68f + (0.5f + Climate.ProvinceMoisture * 0.5f) * 0.32f,
+            0.0f,
+            1.0f
+        );
+        const float Temperature = FMath::Clamp(0.5f + Climate.ProvinceTemperature * 0.5f, 0.0f, 1.0f);
+
+        if (Moisture >= 0.64f)
+        {
+            return Temperature < 0.44f ? ECubusClimateProvince::HumidCool : ECubusClimateProvince::HumidTemperate;
+        }
+        if (Moisture <= 0.36f)
+        {
+            return Temperature >= 0.52f ? ECubusClimateProvince::DryWarm : ECubusClimateProvince::DryCool;
+        }
+        if (Climate.Continentality >= 0.62f)
+        {
+            return ECubusClimateProvince::ContinentalInterior;
+        }
+        return ECubusClimateProvince::TemperateTransition;
+    }
+
     ECubusElevationZone ResolveElevationZone(const float ElevationNormalized)
     {
         if (ElevationNormalized < 0.18f) return ECubusElevationZone::Lowland;
@@ -137,6 +161,16 @@ FCubusBiomeClimateContext FCubusBiomeField::SampleClimate(
     Result.ProvinceTemperature = SampleFbm(WarpedX - 8111.0f, WarpedY + 3203.0f, ClimateProvinceFrequency * 0.78f, 4, 0.52f);
     Result.RegionalTemperature = SampleFbm(WarpedX + 14831.0f, WarpedY - 10427.0f, ClimateRegionalFrequency * 0.82f, 3, 0.50f);
     Result.LocalTemperature = SampleFbm(WarpedX - 2791.0f, WarpedY - 15317.0f, ClimateLocalFrequency * 0.72f, 2, 0.45f);
+    Result.MoistureTransport = FMath::Clamp(
+        0.5f + SampleFbm(WarpedX + 34817.0f, WarpedY - 28411.0f, ClimateProvinceFrequency * 0.54f, 3, 0.52f) * 0.5f,
+        0.0f,
+        1.0f
+    );
+    Result.Continentality = FMath::Clamp(
+        0.5f + SampleFbm(WarpedX - 26339.0f, WarpedY + 31847.0f, ClimateProvinceFrequency * 0.43f, 3, 0.52f) * 0.5f,
+        0.0f,
+        1.0f
+    );
     Result.CommunityPatch[0] = FMath::Clamp(0.5f + SampleFbm(WarpedX + 17011.0f, WarpedY - 9017.0f, Settings.Frequency * 0.95f, 2, 0.48f) * 0.5f, 0.0f, 1.0f);
     Result.CommunityPatch[1] = FMath::Clamp(0.5f + SampleFbm(WarpedX - 2477.0f, WarpedY + 19421.0f, Settings.Frequency * 1.25f, 2, 0.48f) * 0.5f, 0.0f, 1.0f);
     Result.CommunityPatch[2] = FMath::Clamp(0.5f + SampleFbm(WarpedX + 29831.0f, WarpedY + 4711.0f, Settings.Frequency * 1.55f, 2, 0.46f) * 0.5f, 0.0f, 1.0f);
@@ -163,6 +197,8 @@ FCubusBiomeClimateContext FCubusBiomeField::LerpClimate(
     Result.ProvinceTemperature = FMath::Lerp(A.ProvinceTemperature, B.ProvinceTemperature, T);
     Result.RegionalTemperature = FMath::Lerp(A.RegionalTemperature, B.RegionalTemperature, T);
     Result.LocalTemperature = FMath::Lerp(A.LocalTemperature, B.LocalTemperature, T);
+    Result.MoistureTransport = FMath::Lerp(A.MoistureTransport, B.MoistureTransport, T);
+    Result.Continentality = FMath::Lerp(A.Continentality, B.Continentality, T);
     for (int32 Index = 0; Index < 4; ++Index)
     {
         Result.CommunityPatch[Index] = FMath::Lerp(A.CommunityPatch[Index], B.CommunityPatch[Index], T);
@@ -237,6 +273,9 @@ FCubusBiomeSample FCubusBiomeField::Sample(
     const FCubusBiomeClimateContext Climate = ClimateContext != nullptr
         ? *ClimateContext
         : SampleClimate(WorldX, WorldY, Settings);
+    Result.ClimateProvince = ResolveClimateProvince(Climate);
+    Result.ClimateMoistureTransport = Climate.MoistureTransport;
+    Result.ClimateContinentality = Climate.Continentality;
 
     const bool bHasHydrology = Settings.bGenerateRivers && Settings.HydrologySettings.bEnabled;
     const FCubusHydrologySample Hydrology = bHasHydrology
@@ -312,24 +351,63 @@ FCubusBiomeSample FCubusBiomeField::Sample(
     Result.AspectRadians = GradientLength > KINDA_SMALL_NUMBER
         ? FMath::Atan2(UphillDirection.Y, UphillDirection.X)
         : 0.0f;
-    Result.SolarExposure = FMath::Clamp(
+    const FCubusBiomeTopographicClimateContext TopographicClimate = TerrainContext.bHasTopographicClimateSample
+        ? TerrainContext.TopographicClimateSample
+        : FCubusBiomeTopographicClimateContext();
+    Result.OrographicLift = FMath::Clamp(
+        TerrainContext.bHasTopographicClimateSample
+            ? TopographicClimate.OrographicLift
+            : Windwardness * (Ecology.FoothillWeight * 0.46f + Ecology.MountainCore * 0.34f),
+        0.0f,
+        1.0f
+    );
+    Result.HorizonRainShadow = FMath::Clamp(
+        TerrainContext.bHasTopographicClimateSample ? TopographicClimate.RainShadow : 0.0f,
+        0.0f,
+        1.0f
+    );
+    Result.SolarOcclusion = FMath::Clamp(
+        TerrainContext.bHasTopographicClimateSample ? TopographicClimate.SolarOcclusion : 0.0f,
+        0.0f,
+        1.0f
+    );
+    Result.SkyViewFactor = FMath::Clamp(
+        TerrainContext.bHasTopographicClimateSample ? TopographicClimate.SkyViewFactor : 1.0f,
+        0.0f,
+        1.0f
+    );
+
+    const float AspectSolarExposure = FMath::Clamp(
         0.50f + SolarFacing * 0.36f * SlopeAspectStrength + (1.0f - TopographicExposure) * 0.08f,
         0.0f,
         1.0f
     );
+    Result.SolarExposure = FMath::Clamp(
+        AspectSolarExposure * FMath::Lerp(1.0f, 0.42f, Result.SolarOcclusion) *
+        FMath::Lerp(0.88f, 1.04f, Result.SkyViewFactor),
+        0.0f,
+        1.0f
+    );
     Result.WindExposure = FMath::Clamp(
-        TopographicExposure * FMath::Lerp(0.62f, 1.16f, Windwardness),
+        TopographicExposure * FMath::Lerp(0.62f, 1.16f, Windwardness) *
+        FMath::Lerp(0.82f, 1.08f, Result.SkyViewFactor),
         0.0f,
         1.0f
     );
     Result.WindShelter = 1.0f - Result.WindExposure;
-    Result.RainShadow = FMath::Clamp(
+    const float LocalRainShadow = FMath::Clamp(
         (1.0f - Windwardness) * (Ecology.FoothillWeight * 0.34f + Ecology.MountainCore * 0.58f),
         0.0f,
         1.0f
     );
+    Result.RainShadow = FMath::Clamp(
+        LocalRainShadow * 0.48f + Result.HorizonRainShadow * 0.78f,
+        0.0f,
+        1.0f
+    );
     Result.Exposure = FMath::Clamp(
-        Result.WindExposure * 0.74f + Result.SolarExposure * 0.10f + Result.RockExposure * 0.16f,
+        Result.WindExposure * 0.68f + Result.SolarExposure * 0.08f +
+        Result.RockExposure * 0.16f + Result.SkyViewFactor * 0.08f,
         0.0f,
         1.0f
     );
@@ -478,7 +556,9 @@ FCubusBiomeSample FCubusBiomeField::Sample(
         1.0f
     );
 
-    const float OrographicMoisture = Windwardness * Ecology.FoothillWeight * 0.13f;
+    const float OrographicMoisture = Result.OrographicLift * FMath::Lerp(0.08f, 0.22f, Climate.MoistureTransport);
+    const float RegionalTransportMoisture = (Climate.MoistureTransport - 0.5f) * 0.18f;
+    const float ContinentalDrying = (Climate.Continentality - 0.5f) * 0.10f;
     const float DrainageMoisture = Result.FlowConvergence * 0.12f + Result.RiverInfluence * 0.24f;
     const float ExposureDrying = Result.WindExposure * 0.10f + Result.SolarExposure * 0.06f + Result.RockExposure * 0.07f;
     Result.Moisture = FMath::Clamp(
@@ -486,10 +566,12 @@ FCubusBiomeSample FCubusBiomeField::Sample(
         Climate.ProvinceMoisture * 0.26f +
         Climate.RegionalMoisture * 0.18f +
         Climate.LocalHumidity * 0.08f +
+        RegionalTransportMoisture +
         OrographicMoisture +
         DrainageMoisture +
         Result.ColdAirPooling * 0.055f -
-        Result.RainShadow * 0.16f -
+        ContinentalDrying -
+        Result.RainShadow * FMath::Lerp(0.14f, 0.26f, Climate.Continentality) -
         ExposureDrying,
         0.0f,
         1.0f
@@ -527,7 +609,8 @@ FCubusBiomeSample FCubusBiomeField::Sample(
 
     /* Elevation modifies climate, but it is no longer a single hard HighCountry switch. */
     const float ElevationCooling = FMath::Clamp(Result.ElevationNormalized, 0.0f, 1.25f) * 0.36f;
-    const float SolarTemperature = (Result.SolarExposure - 0.5f) * 0.10f;
+    const float ContinentalThermalContrast = FMath::Lerp(0.78f, 1.30f, Climate.Continentality);
+    const float SolarTemperature = (Result.SolarExposure - 0.5f) * 0.10f * ContinentalThermalContrast;
     Result.Temperature = FMath::Clamp(
         0.50f +
         Climate.ProvinceTemperature * 0.32f +
@@ -536,7 +619,7 @@ FCubusBiomeSample FCubusBiomeField::Sample(
         ElevationCooling +
         SolarTemperature -
         Result.WindExposure * 0.035f -
-        Result.ColdAirPooling * 0.11f,
+        Result.ColdAirPooling * 0.11f * ContinentalThermalContrast,
         0.0f,
         1.0f
     );
@@ -766,6 +849,33 @@ FCubusBiomeSample FCubusBiomeField::Sample(
   0, 0.20f
         );
         AddBuiltIn(
+  TEXT("WindwardMontaneForest"), ECubusBiomeKind::Forest, Settings.ForestSurfaceMaterialId,
+  ForestClimate * FMath::Max(FoothillBand * 0.72f, MontaneBand) * Result.TreeLineWeight *
+      Result.OrographicLift * RangeSuitability(Result.SoilMoisture, 0.34f, 0.94f, 0.12f) *
+      FMath::Lerp(0.52f, 1.10f, Result.SoilDepth) *
+      FMath::Lerp(0.62f, 1.08f, Result.CanopyPotential) *
+      (1.0f - Result.RainShadow * 0.72f),
+  0, 0.30f
+        );
+        AddBuiltIn(
+  TEXT("ShadedRavineForest"), ECubusBiomeKind::Forest, Settings.ForestSurfaceMaterialId,
+  ForestClimate * FMath::Max(Result.ValleyFloorInfluence, Result.LowerSlopeInfluence * 0.82f) *
+      Result.TreeLineWeight * FMath::Lerp(0.32f, 1.0f, Result.SolarOcclusion) *
+      FMath::Lerp(0.52f, 1.06f, Result.SoilDepth) *
+      FMath::Lerp(0.50f, 1.08f, Result.WaterHoldingCapacity) *
+      (1.0f - Result.Disturbance * 0.42f),
+  1, 0.24f
+        );
+        AddBuiltIn(
+  TEXT("LeewardSteppe"), ECubusBiomeKind::Plains, Settings.PlainsSurfaceMaterialId,
+  FMath::Max(LowlandBand, FoothillBand) * GentleTerrain * Result.RainShadow * Result.CanopyOpenness *
+      RangeSuitability(Result.SoilMoisture, 0.06f, 0.46f, 0.12f) *
+      FMath::Lerp(0.68f, 1.08f, Result.SolarExposure) *
+      FMath::Lerp(0.72f, 1.08f, Result.SoilCoarseness) *
+      (1.0f - Result.WetlandWeight),
+  2, 0.34f
+        );
+        AddBuiltIn(
   TEXT("DeepColluvialForest"), ECubusBiomeKind::Forest, Settings.ForestSurfaceMaterialId,
   ForestClimate * Result.LowerSlopeInfluence * Result.TreeLineWeight * GentleTerrain *
       FMath::Lerp(0.42f, 1.0f, Result.SoilDepth) *
@@ -904,6 +1014,9 @@ FCubusBiomeSample FCubusBiomeField::Sample(
       RangeSuitability(Result.RockExposure, Definition.MinimumRockExposure, Definition.MaximumRockExposure, Softness) *
       RangeSuitability(Result.Exposure, Definition.MinimumExposure, Definition.MaximumExposure, Softness) *
       RangeSuitability(Result.SolarExposure, Definition.MinimumSolarExposure, Definition.MaximumSolarExposure, Softness) *
+                RangeSuitability(Result.OrographicLift, Definition.MinimumOrographicLift, Definition.MaximumOrographicLift, Softness) *
+                RangeSuitability(Result.RainShadow, Definition.MinimumRainShadow, Definition.MaximumRainShadow, Softness) *
+                RangeSuitability(Result.SolarOcclusion, Definition.MinimumSolarOcclusion, Definition.MaximumSolarOcclusion, Softness) *
       RangeSuitability(Result.Fertility, Definition.MinimumFertility, Definition.MaximumFertility, Softness) *
                     RangeSuitability(Result.OrganicMatter, Definition.MinimumOrganicMatter, Definition.MaximumOrganicMatter, Softness) *
                 RangeSuitability(Result.SubstrateHardness, Definition.MinimumSubstrateHardness, Definition.MaximumSubstrateHardness, Softness) *

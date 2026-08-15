@@ -187,7 +187,9 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 
 	SurfaceCache.Reserve(1600);
 	ColumnCache.Reserve(1600);
-	BiomeClimateCache.Reserve(256);
+	BiomeClimateCache.Reserve(96);
+	BiomeTopographicClimateCache.Reserve(32);
+	BiomeMacroHeightCache.Reserve(384);
 }
 
 FCubusDensitySample FCubusTerrainDensityField::Sample(const FIntVector& GlobalSampleCoordinate) const
@@ -398,6 +400,8 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	BiomeTerrainContext.bHasSubstrateSample = true;
 	BiomeTerrainContext.SubstrateHardness = Column.RockHardness;
 	BiomeTerrainContext.FractureDensity = Column.Fracture;
+	BiomeTerrainContext.bHasTopographicClimateSample = true;
+	BiomeTerrainContext.TopographicClimateSample = GetInterpolatedBiomeTopographicClimate(WorldX, WorldY);
 
 	const FCubusBiomeClimateContext Climate = GetInterpolatedBiomeClimate(WorldX, WorldY);
 	Column.BiomeSample = FCubusBiomeField::Sample(
@@ -490,6 +494,163 @@ FCubusBiomeClimateContext FCubusTerrainDensityField::GetInterpolatedBiomeClimate
     const FCubusBiomeClimateContext Bottom = FCubusBiomeField::LerpClimate(C00, C10, AlphaX);
     const FCubusBiomeClimateContext Top = FCubusBiomeField::LerpClimate(C01, C11, AlphaX);
     return FCubusBiomeField::LerpClimate(Bottom, Top, AlphaY);
+}
+
+float FCubusTerrainDensityField::GetCachedBiomeMacroHeight(const float WorldX, const float WorldY) const
+{
+    const FIntPoint Key(
+        FMath::RoundToInt(WorldX * BiomeMacroHeightCacheScale),
+        FMath::RoundToInt(WorldY * BiomeMacroHeightCacheScale)
+    );
+    if (const float* Existing = BiomeMacroHeightCache.Find(Key))
+    {
+        return *Existing;
+    }
+
+    const float QuantizedWorldX = static_cast<float>(Key.X) / BiomeMacroHeightCacheScale;
+    const float QuantizedWorldY = static_cast<float>(Key.Y) / BiomeMacroHeightCacheScale;
+    const float TerrainX = QuantizedWorldX + static_cast<float>(Settings.TerrainOffsetX);
+    const float TerrainY = QuantizedWorldY + static_cast<float>(Settings.TerrainOffsetY);
+
+    /*
+     * Horizon climate intentionally uses macro terrain only. River cuts and local
+     * landmark relief should not create regional rain shadows or solar horizons.
+     */
+    const float Height = Settings.bUseHeightTerrain
+        ? FCubusTerrainForm::Sample(TerrainX, TerrainY, TerrainFormSettings).Height
+        : Settings.FlatSurfaceWorldZ;
+    BiomeMacroHeightCache.Add(Key, Height);
+    return Height;
+}
+
+const FCubusBiomeTopographicClimateContext& FCubusTerrainDensityField::GetCachedBiomeTopographicClimateCell(
+    const FIntPoint& CellCoordinate
+) const
+{
+    if (const FCubusBiomeTopographicClimateContext* Existing = BiomeTopographicClimateCache.Find(CellCoordinate))
+    {
+        return *Existing;
+    }
+
+    const float WorldX = static_cast<float>(CellCoordinate.X) * BiomeTopographicClimateCacheCellSize;
+    const float WorldY = static_cast<float>(CellCoordinate.Y) * BiomeTopographicClimateCacheCellSize;
+    const float LocalHeight = GetCachedBiomeMacroHeight(WorldX, WorldY);
+
+    FVector2D Wind = Settings.BiomeSettings.PrevailingWindDirection;
+    if (Wind.SizeSquared() <= KINDA_SMALL_NUMBER)
+    {
+        Wind = FVector2D(0.82f, 0.57f);
+    }
+    Wind.Normalize();
+
+    FVector2D Solar = Settings.BiomeSettings.SolarDirection;
+    if (Solar.SizeSquared() <= KINDA_SMALL_NUMBER)
+    {
+        Solar = FVector2D(-0.42f, -0.91f);
+    }
+    Solar.Normalize();
+
+    FCubusBiomeTopographicClimateContext Result;
+    constexpr float Distances[] = {24.0f, 64.0f, 128.0f};
+    constexpr float Weights[] = {0.46f, 0.34f, 0.20f};
+
+    float Lift = 0.0f;
+    float RainBarrier = 0.0f;
+    float SolarBarrier = 0.0f;
+    for (int32 Index = 0; Index < UE_ARRAY_COUNT(Distances); ++Index)
+    {
+        const float Distance = Distances[Index];
+        const float Weight = Weights[Index];
+
+        const float UpwindHeight = GetCachedBiomeMacroHeight(
+            WorldX - Wind.X * Distance,
+            WorldY - Wind.Y * Distance
+        );
+        const float RelativeLift = FMath::Clamp(
+            (LocalHeight - UpwindHeight) / FMath::Max(8.0f, Distance * 0.34f),
+            0.0f,
+            1.0f
+        );
+        Lift += RelativeLift * Weight;
+        RainBarrier = FMath::Max(
+            RainBarrier,
+            FMath::Clamp((UpwindHeight - LocalHeight) / FMath::Max(8.0f, Distance * 0.28f), 0.0f, 1.0f) *
+            FMath::Lerp(1.0f, 0.72f, static_cast<float>(Index) / 2.0f)
+        );
+
+        const float SolarHeight = GetCachedBiomeMacroHeight(
+            WorldX + Solar.X * Distance,
+            WorldY + Solar.Y * Distance
+        );
+        SolarBarrier = FMath::Max(
+            SolarBarrier,
+            FMath::Clamp((SolarHeight - LocalHeight) / FMath::Max(8.0f, Distance * 0.24f), 0.0f, 1.0f) *
+            FMath::Lerp(1.0f, 0.74f, static_cast<float>(Index) / 2.0f)
+        );
+    }
+
+    constexpr FVector2D SkyDirections[] = {
+        FVector2D(1.0f, 0.0f), FVector2D(-1.0f, 0.0f),
+        FVector2D(0.0f, 1.0f), FVector2D(0.0f, -1.0f),
+        FVector2D(0.70710678f, 0.70710678f), FVector2D(-0.70710678f, 0.70710678f),
+        FVector2D(0.70710678f, -0.70710678f), FVector2D(-0.70710678f, -0.70710678f)
+    };
+    constexpr float SkyDistance = 48.0f;
+    float HorizonClosure = 0.0f;
+    for (const FVector2D& Direction : SkyDirections)
+    {
+        const float HorizonHeight = GetCachedBiomeMacroHeight(
+            WorldX + Direction.X * SkyDistance,
+            WorldY + Direction.Y * SkyDistance
+        );
+        HorizonClosure += FMath::Clamp(
+            (HorizonHeight - LocalHeight) / (SkyDistance * 0.32f),
+            0.0f,
+            1.0f
+        );
+    }
+
+    Result.OrographicLift = FMath::Clamp(Lift, 0.0f, 1.0f);
+    Result.RainShadow = FMath::Clamp(RainBarrier, 0.0f, 1.0f);
+    Result.SolarOcclusion = FMath::Clamp(SolarBarrier, 0.0f, 1.0f);
+    Result.SkyViewFactor = FMath::Clamp(1.0f - HorizonClosure / static_cast<float>(UE_ARRAY_COUNT(SkyDirections)), 0.0f, 1.0f);
+
+    BiomeTopographicClimateCache.Add(CellCoordinate, Result);
+    return BiomeTopographicClimateCache.FindChecked(CellCoordinate);
+}
+
+FCubusBiomeTopographicClimateContext FCubusTerrainDensityField::GetInterpolatedBiomeTopographicClimate(
+    const float WorldX,
+    const float WorldY
+) const
+{
+    const float GridX = WorldX / BiomeTopographicClimateCacheCellSize;
+    const float GridY = WorldY / BiomeTopographicClimateCacheCellSize;
+    const int32 CellX = FMath::FloorToInt(GridX);
+    const int32 CellY = FMath::FloorToInt(GridY);
+    const float AlphaX = GridX - static_cast<float>(CellX);
+    const float AlphaY = GridY - static_cast<float>(CellY);
+
+    const FCubusBiomeTopographicClimateContext C00 = GetCachedBiomeTopographicClimateCell(FIntPoint(CellX, CellY));
+    const FCubusBiomeTopographicClimateContext C10 = GetCachedBiomeTopographicClimateCell(FIntPoint(CellX + 1, CellY));
+    const FCubusBiomeTopographicClimateContext C01 = GetCachedBiomeTopographicClimateCell(FIntPoint(CellX, CellY + 1));
+    const FCubusBiomeTopographicClimateContext C11 = GetCachedBiomeTopographicClimateCell(FIntPoint(CellX + 1, CellY + 1));
+
+    auto LerpContext = [](const FCubusBiomeTopographicClimateContext& A,
+                          const FCubusBiomeTopographicClimateContext& B,
+                          const float Alpha)
+    {
+        FCubusBiomeTopographicClimateContext Result;
+        Result.OrographicLift = FMath::Lerp(A.OrographicLift, B.OrographicLift, Alpha);
+        Result.RainShadow = FMath::Lerp(A.RainShadow, B.RainShadow, Alpha);
+        Result.SolarOcclusion = FMath::Lerp(A.SolarOcclusion, B.SolarOcclusion, Alpha);
+        Result.SkyViewFactor = FMath::Lerp(A.SkyViewFactor, B.SkyViewFactor, Alpha);
+        return Result;
+    };
+
+    const FCubusBiomeTopographicClimateContext Bottom = LerpContext(C00, C10, AlphaX);
+    const FCubusBiomeTopographicClimateContext Top = LerpContext(C01, C11, AlphaX);
+    return LerpContext(Bottom, Top, AlphaY);
 }
 
 FCubusTerrainDensityField::FTerrainRegionWeights FCubusTerrainDensityField::SampleTerrainRegions(const float WorldX, const float WorldY) const

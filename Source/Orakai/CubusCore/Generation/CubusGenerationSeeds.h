@@ -11,10 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 17: biomes now reuse authoritative terrain/hydrology, interpolate
-    // slow climate fields, consume real substrate geology and retain the richer
-    // disturbance/canopy/substrate habitat through vegetation species selection.
-    static constexpr uint32 CurrentGenerationVersion = 17;
+    // Bumped to 18: climate provinces and cached long-range terrain horizons now
+    // drive windward moisture, rain shadow and solar occlusion; slow climate
+    // interpolation also moves to an 8-voxel lattice for cheaper cold generation.
+    static constexpr uint32 CurrentGenerationVersion = 18;
 
     int64 World = 1;
     int32 Terrain = 0;

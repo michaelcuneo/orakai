@@ -145,6 +145,52 @@ bool FCubusBiomeGeologyClimateTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusBiomeRegionalTopographicClimateTest,
+    "Orakai.Cubus.Generation.BiomeRegionalTopographicClimate",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusBiomeRegionalTopographicClimateTest::RunTest(const FString& Parameters)
+{
+    (void)Parameters;
+
+    FCubusBiomeFieldSettings Settings;
+    Settings.bEnabled = true;
+    Settings.BiomeOffsetX = 8123;
+    Settings.BiomeOffsetY = -3491;
+
+    const FCubusBiomeClimateContext A = FCubusBiomeField::SampleClimate(64.0f, 96.0f, Settings);
+    const FCubusBiomeClimateContext B = FCubusBiomeField::SampleClimate(72.0f, 96.0f, Settings);
+    const FCubusBiomeClimateContext Mid = FCubusBiomeField::LerpClimate(A, B, 0.5f);
+    TestTrue(TEXT("Climate moisture transport remains normalized"), Mid.MoistureTransport >= 0.0f && Mid.MoistureTransport <= 1.0f);
+    TestTrue(TEXT("Climate continentality remains normalized"), Mid.Continentality >= 0.0f && Mid.Continentality <= 1.0f);
+
+    FCubusBiomeTerrainContext OpenSlope;
+    OpenSlope.Gradient = FVector2D(0.40f, 0.0f);
+    OpenSlope.FoothillWeight = 0.75f;
+    OpenSlope.bHasTopographicClimateSample = true;
+    OpenSlope.TopographicClimateSample.OrographicLift = 0.72f;
+    OpenSlope.TopographicClimateSample.RainShadow = 0.04f;
+    OpenSlope.TopographicClimateSample.SolarOcclusion = 0.02f;
+    OpenSlope.TopographicClimateSample.SkyViewFactor = 0.94f;
+
+    FCubusBiomeTerrainContext LeeRavine = OpenSlope;
+    LeeRavine.TopographicClimateSample.OrographicLift = 0.06f;
+    LeeRavine.TopographicClimateSample.RainShadow = 0.78f;
+    LeeRavine.TopographicClimateSample.SolarOcclusion = 0.72f;
+    LeeRavine.TopographicClimateSample.SkyViewFactor = 0.34f;
+
+    const FCubusBiomeSample Windward = FCubusBiomeField::Sample(64.0f, 96.0f, 28.0f, 0.40f, Settings, OpenSlope, &Mid);
+    const FCubusBiomeSample Leeward = FCubusBiomeField::Sample(64.0f, 96.0f, 28.0f, 0.40f, Settings, LeeRavine, &Mid);
+
+    TestTrue(TEXT("Windward horizon lift increases moisture"), Windward.Moisture > Leeward.Moisture);
+    TestTrue(TEXT("Terrain horizon can suppress solar exposure"), Leeward.SolarExposure < Windward.SolarExposure);
+    TestTrue(TEXT("Horizon rain shadow reaches the final biome sample"), Leeward.RainShadow > Windward.RainShadow);
+    TestTrue(TEXT("Climate province is deterministic"), Windward.ClimateProvince == FCubusBiomeField::Sample(64.0f, 96.0f, 28.0f, 0.40f, Settings, OpenSlope, &Mid).ClimateProvince);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCubusBiomeEcologicalNicheTest,
     "Orakai.Cubus.Generation.BiomeEcologicalNiches",
     EAutomationTestFlags::EditorContext |

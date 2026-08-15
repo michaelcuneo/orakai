@@ -51,8 +51,19 @@ struct ORAKAI_API FCubusBiomeClimateContext
     float ProvinceTemperature = 0.0f;
     float RegionalTemperature = 0.0f;
     float LocalTemperature = 0.0f;
+    float MoistureTransport = 0.5f;
+    float Continentality = 0.5f;
     float CommunityPatch[4] = {0.5f, 0.5f, 0.5f, 0.5f};
     float ParentMaterial = 0.5f;
+};
+
+/** Coarse long-range terrain/climate interaction, interpolated between lattice nodes. */
+struct ORAKAI_API FCubusBiomeTopographicClimateContext
+{
+    float OrographicLift = 0.0f;
+    float RainShadow = 0.0f;
+    float SolarOcclusion = 0.0f;
+    float SkyViewFactor = 1.0f;
 };
 
 /** Terrain/environment context supplied by the authoritative density column. */
@@ -74,6 +85,9 @@ struct ORAKAI_API FCubusBiomeTerrainContext
     bool bHasSubstrateSample = false;
     float SubstrateHardness = 0.5f;
     float FractureDensity = 0.0f;
+
+    bool bHasTopographicClimateSample = false;
+    FCubusBiomeTopographicClimateContext TopographicClimateSample;
 };
 
 /** Continuous environmental state and ecological community blend for one world column. */
@@ -91,6 +105,9 @@ struct ORAKAI_API FCubusBiomeSample
     float WetlandWeight = 0.0f;
 
     // Broad climate.
+    ECubusClimateProvince ClimateProvince = ECubusClimateProvince::TemperateTransition;
+    float ClimateMoistureTransport = 0.5f;
+    float ClimateContinentality = 0.5f;
     float Moisture = 0.5f;
     float Temperature = 0.5f;
 
@@ -115,7 +132,11 @@ struct ORAKAI_API FCubusBiomeSample
     float SolarExposure = 0.5f;
     float WindExposure = 0.0f;
     float WindShelter = 1.0f;
+    float OrographicLift = 0.0f;
+    float HorizonRainShadow = 0.0f;
     float RainShadow = 0.0f;
+    float SolarOcclusion = 0.0f;
+    float SkyViewFactor = 1.0f;
     float Exposure = 0.0f;
 
     // Hydrology.
