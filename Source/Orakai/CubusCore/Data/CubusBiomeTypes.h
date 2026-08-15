@@ -26,6 +26,18 @@ enum class ECubusElevationZone : uint8
     Nival
 };
 
+/** Topographic position within the local landform, independent of named biome. */
+UENUM(BlueprintType)
+enum class ECubusTerrainPosition : uint8
+{
+    Floodplain,
+    ValleyFloor,
+    LowerSlope,
+    Midslope,
+    Shoulder,
+    Ridge
+};
+
 /** One weighted ecological community retained in the top-four local ecotone blend. */
 USTRUCT(BlueprintType)
 struct ORAKAI_API FCubusBiomeCommunityBlend
@@ -168,6 +180,30 @@ struct ORAKAI_API FCubusBiomeDefinition
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MaximumErosion = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumValleyFloorInfluence = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumValleyFloorInfluence = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumColdAirPooling = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumColdAirPooling = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Disturbance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumDisturbance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Disturbance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumDisturbance = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumCanopyPotential = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumCanopyPotential = 1.0f;
 
     /** Coherent stand/opening modulation applied only after habitat suitability is established. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))

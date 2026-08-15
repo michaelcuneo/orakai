@@ -75,6 +75,15 @@ struct ORAKAI_API FCubusBiomeSample
     float AlpineInfluence = 0.0f;
     float NivalInfluence = 0.0f;
 
+    // Local landform position. These are continuous even though TerrainPosition is categorical.
+    ECubusTerrainPosition TerrainPosition = ECubusTerrainPosition::Midslope;
+    float FloodplainInfluence = 0.0f;
+    float ValleyFloorInfluence = 0.0f;
+    float LowerSlopeInfluence = 0.0f;
+    float ShoulderInfluence = 0.0f;
+    float RidgeInfluence = 0.0f;
+    float ColdAirPooling = 0.0f;
+
     // Aspect and long-term exposure.
     float AspectRadians = 0.0f;
     float SolarExposure = 0.5f;
@@ -100,6 +109,9 @@ struct ORAKAI_API FCubusBiomeSample
     float Fertility = 0.5f;
     float RockExposure = 0.0f;
     float Erosion = 0.0f;
+    float Disturbance = 0.0f;
+    float CanopyPotential = 0.0f;
+    float CanopyOpenness = 1.0f;
 
     float SurfaceWorldZ = 0.0f;
     float Slope = 0.0f;

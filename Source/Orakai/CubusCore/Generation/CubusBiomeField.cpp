@@ -14,6 +14,22 @@ namespace
         if (ElevationNormalized < 1.00f) return ECubusElevationZone::Alpine;
         return ECubusElevationZone::Nival;
     }
+
+    ECubusTerrainPosition ResolveTerrainPosition(
+        const float Floodplain,
+        const float ValleyFloor,
+        const float LowerSlope,
+        const float Shoulder,
+        const float Ridge
+    )
+    {
+        if (Floodplain >= 0.55f) return ECubusTerrainPosition::Floodplain;
+        if (ValleyFloor >= 0.52f) return ECubusTerrainPosition::ValleyFloor;
+        if (Ridge >= 0.52f) return ECubusTerrainPosition::Ridge;
+        if (Shoulder >= 0.46f) return ECubusTerrainPosition::Shoulder;
+        if (LowerSlope >= 0.44f) return ECubusTerrainPosition::LowerSlope;
+        return ECubusTerrainPosition::Midslope;
+    }
 }
 
 FCubusBiomeFieldSettings FCubusBiomeField::MakeSettings(
@@ -268,6 +284,55 @@ FCubusBiomeSample FCubusBiomeField::Sample(
         Settings.RockySlopeThreshold * 1.05f,
         Slope
     );
+
+    /*
+     * Landform position is derived from actual terrain/hydrology signals, not
+     * another biome noise layer. This lets one climate province express dry
+     * ridges, sheltered shoulders, cold valley floors and active floodplains.
+     */
+    Result.FloodplainInfluence = FMath::Clamp(
+        GentleGround * FMath::Max(Result.RiverInfluence, Result.FlowConvergence * Result.Drainage * 0.72f),
+        0.0f,
+        1.0f
+    );
+    Result.ValleyFloorInfluence = FMath::Clamp(
+        GentleGround * FMath::Max(Result.Drainage * 0.78f, Result.FlowConvergence * 0.88f) *
+        (1.0f - Ecology.Ridge * 0.72f),
+        0.0f,
+        1.0f
+    );
+    Result.RidgeInfluence = FMath::Clamp(
+        Ecology.Ridge * (1.0f - Result.FlowConvergence * 0.62f) * FMath::Lerp(0.72f, 1.08f, Result.WindExposure),
+        0.0f,
+        1.0f
+    );
+    Result.ShoulderInfluence = FMath::Clamp(
+        SlopeAspectStrength * (Ecology.Ridge * 0.46f + Ecology.FoothillWeight * 0.30f) *
+        (1.0f - Result.ValleyFloorInfluence * 0.74f),
+        0.0f,
+        1.0f
+    );
+    Result.LowerSlopeInfluence = FMath::Clamp(
+        SlopeAspectStrength * (Result.FlowConvergence * 0.62f + Result.Drainage * 0.38f) *
+        (1.0f - Result.FloodplainInfluence * 0.62f),
+        0.0f,
+        1.0f
+    );
+    Result.TerrainPosition = ResolveTerrainPosition(
+        Result.FloodplainInfluence,
+        Result.ValleyFloorInfluence,
+        Result.LowerSlopeInfluence,
+        Result.ShoulderInfluence,
+        Result.RidgeInfluence
+    );
+    Result.ColdAirPooling = FMath::Clamp(
+        Result.ValleyFloorInfluence * Result.WindShelter *
+        FMath::Lerp(1.0f, 0.62f, Result.SolarExposure) *
+        (1.0f - Result.RidgeInfluence * 0.80f),
+        0.0f,
+        1.0f
+    );
+
     const float DepositionalGround = FMath::Clamp(
         Result.FlowConvergence * 0.48f + Result.Drainage * 0.22f + Result.RiverInfluence * 0.30f,
         0.0f,
@@ -293,6 +358,22 @@ FCubusBiomeSample FCubusBiomeField::Sample(
         0.0f,
         1.0f
     );
+    const float FloodDisturbance = FMath::Clamp(
+        Result.FloodplainInfluence * (0.28f + Result.RiverInfluence * 0.72f),
+        0.0f,
+        1.0f
+    );
+    Result.Disturbance = FMath::Clamp(
+        FMath::Max(
+            FMath::Max(Result.Erosion, FloodDisturbance),
+            FMath::Max(
+                Result.WindExposure * 0.62f + Form.SurfaceRoughness * 0.18f,
+                Form.ErosionRills * 0.72f + Result.RockExposure * 0.28f
+            )
+        ),
+        0.0f,
+        1.0f
+    );
     const float SoilRetention = FMath::Clamp(
         GentleGround * (1.0f - Result.RockExposure) * (1.0f - Result.Erosion * 0.72f),
         0.0f,
@@ -313,7 +394,8 @@ FCubusBiomeSample FCubusBiomeField::Sample(
         RegionalMoisture * 0.18f +
         LocalHumidity * 0.08f +
         OrographicMoisture +
-        DrainageMoisture -
+        DrainageMoisture +
+        Result.ColdAirPooling * 0.055f -
         Result.RainShadow * 0.16f -
         ExposureDrying,
         0.0f,
@@ -359,7 +441,8 @@ FCubusBiomeSample FCubusBiomeField::Sample(
         LocalTemperature * 0.08f -
         ElevationCooling +
         SolarTemperature -
-        Result.WindExposure * 0.035f,
+        Result.WindExposure * 0.035f -
+        Result.ColdAirPooling * 0.11f,
         0.0f,
         1.0f
     );
@@ -401,6 +484,16 @@ FCubusBiomeSample FCubusBiomeField::Sample(
         SmoothStep(0.22f, 0.62f, Result.Fertility) *
         SmoothStep(0.24f, 0.58f, Result.SoilMoisture) *
         (1.0f - SmoothStep(0.92f, 1.0f, Result.SoilSaturation));
+    Result.CanopyPotential = FMath::Clamp(
+        ForestClimate * Result.TreeLineWeight *
+        FMath::Lerp(0.38f, 1.0f, Result.SoilDepth) *
+        (1.0f - Result.RockExposure * 0.78f) *
+        (1.0f - Result.Disturbance * 0.64f) *
+        FMath::Lerp(0.78f, 1.08f, Result.WindShelter),
+        0.0f,
+        1.0f
+    );
+    Result.CanopyOpenness = 1.0f - Result.CanopyPotential;
 
     Result.WetlandWeight = FMath::Clamp(
         FMath::Max(
@@ -423,6 +516,7 @@ FCubusBiomeSample FCubusBiomeField::Sample(
     );
     Result.ForestWeight = FMath::Clamp(
         ForestClimate * GentleTerrain * Result.TreeLineWeight *
+        FMath::Lerp(0.52f, 1.10f, Result.CanopyPotential) *
         (1.0f - Result.WindExposure * 0.58f) *
         (1.0f - Result.WetlandWeight) *
         (1.0f - Result.RockyWeight * 0.88f),
@@ -510,7 +604,9 @@ FCubusBiomeSample FCubusBiomeField::Sample(
   TEXT("RiparianForest"), ECubusBiomeKind::Forest, Settings.ForestSurfaceMaterialId,
   ForestClimate * Result.RiverInfluence * Result.TreeLineWeight * GentleTerrain *
       RangeSuitability(Result.SoilSaturation, 0.20f, 0.82f, 0.12f) *
-      FMath::Lerp(0.45f, 1.0f, Result.SoilDepth),
+      FMath::Lerp(0.45f, 1.0f, Result.SoilDepth) *
+      FMath::Lerp(0.72f, 1.08f, Result.CanopyPotential) *
+      (1.0f - Result.Disturbance * 0.32f),
   0, 0.20f
         );
         AddBuiltIn(
@@ -518,14 +614,16 @@ FCubusBiomeSample FCubusBiomeField::Sample(
   ForestClimate * Result.TreeLineWeight * GentleTerrain *
       FMath::Max(LowlandBand, FoothillBand * 0.88f) *
       (1.0f - Result.RiverInfluence * 0.55f) *
-      (1.0f - Result.WindExposure * 0.48f),
+      (1.0f - Result.WindExposure * 0.48f) *
+      FMath::Lerp(0.48f, 1.12f, Result.CanopyPotential),
   1, 0.34f
         );
         AddBuiltIn(
   TEXT("MontaneForest"), ECubusBiomeKind::Forest, Settings.ForestSurfaceMaterialId,
   ForestClimate * MontaneBand * Result.TreeLineWeight * GentleTerrain *
       RangeSuitability(Result.SoilMoisture, 0.28f, 0.88f, 0.12f) *
-      (1.0f - Result.RockExposure * 0.72f),
+      (1.0f - Result.RockExposure * 0.72f) *
+      FMath::Lerp(0.52f, 1.10f, Result.CanopyPotential),
   2, 0.32f
         );
         AddBuiltIn(
@@ -544,6 +642,34 @@ FCubusBiomeSample FCubusBiomeField::Sample(
       FMath::Lerp(0.72f, 1.0f, Result.SolarExposure) *
       (1.0f - Result.WetlandWeight),
   0, 0.38f
+        );
+        AddBuiltIn(
+  TEXT("CoolValleyForest"), ECubusBiomeKind::Forest, Settings.ForestSurfaceMaterialId,
+  ForestClimate * Result.ValleyFloorInfluence * Result.TreeLineWeight * GentleTerrain *
+      FMath::Lerp(0.46f, 1.0f, Result.ColdAirPooling) *
+      FMath::Lerp(0.52f, 1.0f, Result.SoilDepth) *
+      FMath::Lerp(0.58f, 1.05f, Result.CanopyPotential),
+  1, 0.24f
+        );
+        AddBuiltIn(
+  TEXT("FloodplainMeadow"), ECubusBiomeKind::Plains, Settings.PlainsSurfaceMaterialId,
+  Result.FloodplainInfluence * GentleTerrain *
+      RangeSuitability(Result.SoilSaturation, 0.24f, 0.78f, 0.12f) *
+      FMath::Lerp(0.42f, 1.0f, Result.Fertility) * Result.CanopyOpenness,
+  2, 0.22f
+        );
+        AddBuiltIn(
+  TEXT("AvalancheMeadow"), ECubusBiomeKind::Plains, Settings.PlainsSurfaceMaterialId,
+  SubalpineBand * Result.Disturbance * Result.CanopyOpenness *
+      RangeSuitability(Slope, Settings.RockySlopeThreshold * 0.18f, Settings.RockySlopeThreshold * 0.78f, 0.14f) *
+      FMath::Lerp(0.35f, 1.0f, Result.SoilDepth),
+  3, 0.18f
+        );
+        AddBuiltIn(
+  TEXT("WindPrunedSubalpineScrub"), ECubusBiomeKind::Rocky, Settings.RockySurfaceMaterialId,
+  FMath::Max(SubalpineBand, AlpineBand * 0.62f) * Result.WindExposure * Result.CanopyOpenness *
+      RangeSuitability(Result.SoilDepth, 0.08f, 0.62f, 0.12f) * (1.0f - Result.NivalInfluence),
+  0, 0.20f
         );
         AddBuiltIn(
   TEXT("Meadow"), ECubusBiomeKind::Plains, Settings.PlainsSurfaceMaterialId,
@@ -657,8 +783,12 @@ FCubusBiomeSample FCubusBiomeField::Sample(
       RangeSuitability(Result.Exposure, Definition.MinimumExposure, Definition.MaximumExposure, Softness) *
       RangeSuitability(Result.SolarExposure, Definition.MinimumSolarExposure, Definition.MaximumSolarExposure, Softness) *
       RangeSuitability(Result.Fertility, Definition.MinimumFertility, Definition.MaximumFertility, Softness) *
-      RangeSuitability(Result.OrganicMatter, Definition.MinimumOrganicMatter, Definition.MaximumOrganicMatter, Softness) *
-      RangeSuitability(Result.Erosion, Definition.MinimumErosion, Definition.MaximumErosion, Softness);
+                    RangeSuitability(Result.OrganicMatter, Definition.MinimumOrganicMatter, Definition.MaximumOrganicMatter, Softness) *
+                RangeSuitability(Result.Erosion, Definition.MinimumErosion, Definition.MaximumErosion, Softness) *
+                RangeSuitability(Result.ValleyFloorInfluence, Definition.MinimumValleyFloorInfluence, Definition.MaximumValleyFloorInfluence, Softness) *
+                RangeSuitability(Result.ColdAirPooling, Definition.MinimumColdAirPooling, Definition.MaximumColdAirPooling, Softness) *
+                RangeSuitability(Result.Disturbance, Definition.MinimumDisturbance, Definition.MaximumDisturbance, Softness) *
+                RangeSuitability(Result.CanopyPotential, Definition.MinimumCanopyPotential, Definition.MaximumCanopyPotential, Softness);
 
   FCubusBiomeCommunityBlend Candidate;
   Candidate.DefinitionIndex = DefinitionIndex;
