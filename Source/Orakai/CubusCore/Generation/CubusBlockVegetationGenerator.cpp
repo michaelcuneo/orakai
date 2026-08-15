@@ -166,7 +166,7 @@ namespace CubusBlockVegetationGenerator
             FMath::Lerp(0.65f, 1.25f, FMath::Clamp(Settings.ForestGroveCoverage, 0.05f, 1.0f));
         const float WetlandTreeBase = Settings.WetlandTreeDensity * BiomeSample.WetlandWeight;
         const float PlainsTreeBase = Settings.PlainsTreeDensity * BiomeSample.PlainsWeight;
-        const float RockyConiferBase = Settings.ForestTreeDensity * BiomeSample.RockyWeight * 0.22f;
+        const float RockyConiferBase = Settings.RockyTreeDensity * BiomeSample.RockyWeight;
 
         const float BroadleafHabitat =
             RangeSuitability(Moisture, 0.34f, 0.92f) *
@@ -325,6 +325,7 @@ FCubusBlockVegetationGenerator::CaptureGenerationSettings(
     Settings.ForestBroadleafFraction = GeologyProfile->ForestBroadleafFraction;
     Settings.WetlandTreeDensity = GeologyProfile->WetlandTreeDensity;
     Settings.WetlandReedDensity = GeologyProfile->WetlandReedDensity;
+    Settings.RockyTreeDensity = GeologyProfile->RockyTreeDensity;
     Settings.RockyAlpineDensity = GeologyProfile->RockyAlpineDensity;
     Settings.PlainsTreeDensity = GeologyProfile->PlainsTreeDensity;
     Settings.PlainsShrubFraction = GeologyProfile->PlainsShrubFraction;

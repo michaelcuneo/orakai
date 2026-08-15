@@ -1,4 +1,5 @@
 #include "CubusCore/Generation/CubusTerrainForm.h"
+#include "CubusCore/Generation/CubusWorldScale.h"
 
 FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float WorldX,
@@ -52,7 +53,55 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
      * density-domain cliff or rough rock surface is allowed to exist later.
      */
 
-    const float RegionFrequency = Settings.RegionFrequency;
+    const float VoxelSizeCm = FMath::Max(1.0f, Settings.VoxelSizeCm);
+    const bool bPhysicalScale = Settings.bUsePhysicalWorldScale;
+
+    // The physical model is authored in metres. Frequencies below are cycles
+    // per canonical voxel, derived from the actual voxel size exactly once.
+    const float RegionFrequency = bPhysicalScale
+        ? CubusWorldScale::FrequencyForWavelengthKilometres(
+            Settings.MountainSystemSpacingKm * 2.0f, VoxelSizeCm)
+        : Settings.RegionFrequency;
+    const float MountainSystemFrequency = bPhysicalScale
+        ? CubusWorldScale::FrequencyForWavelengthKilometres(Settings.MountainSystemSpacingKm, VoxelSizeCm)
+        : FMath::Max(0.00035f, RegionFrequency * 0.30f);
+    const float MassifFrequency = bPhysicalScale
+        ? CubusWorldScale::FrequencyForWavelengthKilometres(Settings.MassifScaleKm, VoxelSizeCm)
+        : RegionFrequency * 0.62f;
+    const float MajorValleyFrequency = bPhysicalScale
+        ? CubusWorldScale::FrequencyForWavelengthKilometres(Settings.MajorValleySpacingKm, VoxelSizeCm)
+        : Settings.ValleyFrequency * 0.30f;
+    const float TributaryFrequency = bPhysicalScale
+        ? CubusWorldScale::FrequencyForWavelengthKilometres(Settings.TributaryValleyScaleKm, VoxelSizeCm)
+        : Settings.ValleyFrequency * 0.72f;
+    const float HillFrequency = bPhysicalScale
+        ? CubusWorldScale::FrequencyForWavelengthMeters(Settings.RollingHillScaleMeters, VoxelSizeCm)
+        : Settings.HillFrequency * 0.34f;
+    const float BroadReliefFrequency = bPhysicalScale
+        ? CubusWorldScale::FrequencyForWavelengthMeters(Settings.BroadReliefScaleMeters, VoxelSizeCm)
+        : Settings.DetailFrequency * 0.26f;
+    const float LocalReliefFrequency = bPhysicalScale
+        ? CubusWorldScale::FrequencyForWavelengthMeters(Settings.LocalReliefScaleMeters, VoxelSizeCm)
+        : Settings.DetailFrequency * 0.82f;
+
+    const float RegionalReliefVoxels = bPhysicalScale
+        ? CubusWorldScale::MetersToVoxels(Settings.RegionalReliefMeters, VoxelSizeCm)
+        : Settings.ContinentAmplitude;
+    const float MountainReliefVoxels = bPhysicalScale
+        ? CubusWorldScale::MetersToVoxels(Settings.MountainReliefMeters, VoxelSizeCm)
+        : Settings.RidgeAmplitude * Settings.MountainElevationScale;
+    const float ValleyReliefVoxels = bPhysicalScale
+        ? CubusWorldScale::MetersToVoxels(Settings.ValleyReliefMeters, VoxelSizeCm)
+        : Settings.ValleyDepth;
+    const float HillReliefVoxels = bPhysicalScale
+        ? CubusWorldScale::MetersToVoxels(Settings.RollingHillReliefMeters, VoxelSizeCm)
+        : Settings.HillAmplitude;
+    const float BroadReliefVoxels = bPhysicalScale
+        ? CubusWorldScale::MetersToVoxels(Settings.BroadReliefMeters, VoxelSizeCm)
+        : Settings.DetailAmplitude;
+    const float LocalReliefVoxels = bPhysicalScale
+        ? CubusWorldScale::MetersToVoxels(Settings.LocalReliefMeters, VoxelSizeCm)
+        : Settings.DetailAmplitude;
     const float MacroWarpFrequency = FMath::Max(
         0.000001f,
         RegionFrequency * 0.22f
@@ -112,10 +161,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
      * ridges read as ribs of the same mountain system rather than unrelated
      * noise mountains.
      */
-    const float RangeFrequency = FMath::Max(
-        0.00035f,
-        RegionFrequency * 0.30f
-    );
+    const float RangeFrequency = MountainSystemFrequency;
     const float RangeSignal = SampleFbm(
         TerrainX * 0.86f - TerrainY * 0.51f + 10427.0f,
         TerrainX * 0.51f + TerrainY * 0.86f - 8633.0f,
@@ -197,7 +243,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         0.5f + 0.5f * SampleFbm(
             TerrainX * 0.72f - TerrainY * 0.69f + 22391.0f,
             TerrainX * 0.69f + TerrainY * 0.72f - 16417.0f,
-            RegionFrequency * 0.62f,
+            MassifFrequency,
             3,
             2.01f,
             0.52f
@@ -256,7 +302,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float MainDrainage = SampleChannelMask(
         TerrainX - 1379.0f,
         TerrainY + 733.0f,
-        Settings.ValleyFrequency * 0.30f,
+        MajorValleyFrequency,
         Settings.ValleyWidth * 1.55f,
         Settings.ValleyFalloff * 1.45f
     );
@@ -275,7 +321,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float TributaryRaw = SampleChannelMask(
         TerrainX * 0.82f - TerrainY * 0.57f + 6197.0f,
         TerrainX * 0.57f + TerrainY * 0.82f - 2467.0f,
-        Settings.ValleyFrequency * 0.72f,
+        TributaryFrequency,
         Settings.ValleyWidth * 0.70f,
         Settings.ValleyFalloff * 0.68f
     );
@@ -413,7 +459,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float RollingRelief = SampleFbm(
         TerrainX + 1823.0f,
         TerrainY - 917.0f,
-        Settings.HillFrequency * 0.34f,
+        HillFrequency,
         3,
         2.03f,
         0.50f
@@ -421,7 +467,7 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
 
     const float ProvinceUplift =
         (ProvinceElevation - 0.5f) * 2.0f *
-        Settings.ContinentAmplitude * 0.54f;
+        RegionalReliefVoxels * 0.54f;
 
     const float ContinentStrength =
         Result.PlainsWeight * 0.36f +
@@ -446,12 +492,13 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         AlongRangeRhythm
     );
     const float RangeUplift =
-        Settings.RidgeAmplitude *
-        Settings.MountainElevationScale *
-        (
-            RangeShoulder * 0.34f +
-            RangeCrest * 1.16f +
-            Result.MassifWeight * 0.42f
+        MountainReliefVoxels *
+        FMath::Clamp(
+            RangeShoulder * 0.24f +
+            RangeCrest * 0.68f +
+            Result.MassifWeight * 0.22f,
+            0.0f,
+            1.0f
         ) *
         RangeRhythm;
 
@@ -460,23 +507,23 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         Result.RollingWeight * 0.72f +
         Result.MountainWeight;
     const float MainValleyCut =
-        Settings.ValleyDepth * ValleyStrength *
+        ValleyReliefVoxels * ValleyStrength *
         (
             MainValleyShoulder * 0.34f +
             MainValleyFloor * 0.58f
         );
     const float TributaryCut =
-        Settings.ValleyDepth * TributaryValley *
+        ValleyReliefVoxels * TributaryValley *
         (0.18f + Result.MountainWeight * 0.16f);
     const float BasinCut =
-        Settings.ValleyDepth * 0.16f * LowlandProvince;
+        ValleyReliefVoxels * 0.16f * LowlandProvince;
     const float CirqueCut =
-        Settings.ValleyDepth * 0.10f * Result.Cirque;
+        ValleyReliefVoxels * 0.10f * Result.Cirque;
 
     const float BroadDetail = SampleFbm(
         TerrainX + 3761.0f,
         TerrainY - 8291.0f,
-        Settings.DetailFrequency * 0.26f,
+        BroadReliefFrequency,
         2,
         2.03f,
         0.48f
@@ -484,24 +531,22 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float FineDetail = SampleNoise(
         TerrainX - 15413.0f,
         TerrainY + 1087.0f,
-        Settings.DetailFrequency * 0.82f
+        LocalReliefFrequency
     );
     const float LocalDetail =
-        Settings.DetailAmplitude *
         Result.SurfaceRoughness *
         (
-            BroadDetail * 0.34f +
-            FineDetail * 0.14f
+            BroadDetail * BroadReliefVoxels * 0.34f +
+            FineDetail * LocalReliefVoxels * 0.14f
         );
     const float RillCut =
-        Result.ErosionRills *
-        Settings.DetailAmplitude * 0.12f;
+        Result.ErosionRills * LocalReliefVoxels * 0.12f;
 
     Result.Height =
         Settings.BaseHeight +
-        MacroRelief * Settings.ContinentAmplitude * ContinentStrength +
+        MacroRelief * RegionalReliefVoxels * 0.34f * ContinentStrength +
         ProvinceUplift +
-        RollingRelief * Settings.HillAmplitude * HillStrength * FloodplainCalm +
+        RollingRelief * HillReliefVoxels * HillStrength * FloodplainCalm +
         RangeUplift -
         BasinCut -
         MainValleyCut -

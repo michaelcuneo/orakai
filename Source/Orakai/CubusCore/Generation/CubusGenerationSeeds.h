@@ -11,10 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 29: terrain generation is split into smooth macro form,
-    // bounded continuous sub-voxel surface relief, and bounded volumetric rock
-    // deformation. Adaptive refinement now preserves interior fine crossings.
-    static constexpr uint32 CurrentGenerationVersion = 29;
+    // Bumped to 30: terrain and biome geography are authored in real-world
+    // metric scale and converted through the actual canonical voxel size.
+    static constexpr uint32 CurrentGenerationVersion = 30;
 
     int64 World = 1;
     int32 Terrain = 0;

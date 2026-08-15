@@ -24,6 +24,7 @@ struct FCubusVegetationGenerationSettings
     float WetlandTreeDensity = 0.0f;
     float WetlandReedDensity = 0.0f;
 
+    float RockyTreeDensity = 0.0f;
     float RockyAlpineDensity = 0.0f;
 
     float PlainsTreeDensity = 0.0f;

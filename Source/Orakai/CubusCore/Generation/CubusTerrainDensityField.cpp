@@ -147,6 +147,7 @@ FCubusTerrainDensityField::FCubusTerrainDensityField(const FCubusTerrainDensityS
 	Settings.RockMaterialDepth = FMath::Max(Settings.SurfaceMaterialDepth, Settings.RockMaterialDepth);
 
 	TerrainFormSettings.BaseHeight = Settings.BaseHeight;
+	TerrainFormSettings.VoxelSizeCm = Settings.VoxelSizeCm;
 	TerrainFormSettings.ContinentAmplitude = Settings.ContinentAmplitude;
 	TerrainFormSettings.ContinentFrequency = Settings.ContinentFrequency;
 	TerrainFormSettings.HillAmplitude = Settings.HillAmplitude;

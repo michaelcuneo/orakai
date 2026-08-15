@@ -545,6 +545,8 @@ FCubusTerrainDensitySettings ACubusVoxelVolumeActor::BuildDensitySettings() cons
 
 	DensitySettings.BaseHeight = static_cast<float>(TerrainBaseHeight);
 
+	DensitySettings.VoxelSizeCm = VoxelSize;
+
 	DensitySettings.ContinentAmplitude = TerrainContinentAmplitude;
 
 	DensitySettings.ContinentFrequency = TerrainContinentFrequency;

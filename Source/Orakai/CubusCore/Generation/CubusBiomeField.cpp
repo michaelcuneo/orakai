@@ -2,6 +2,7 @@
 
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
+#include "CubusCore/Generation/CubusWorldScale.h"
 
 namespace
 {
@@ -173,7 +174,16 @@ FCubusBiomeFieldSettings FCubusBiomeField::BindHydrology(
     Result.bGenerateRivers = BaseSettings.bGenerateRivers && HydrologySettings.bEnabled;
 
     const FCubusTerrainFormSettings& Terrain = HydrologySettings.TerrainFormSettings;
-    const float StructuralNivalWorldZ = Terrain.BaseHeight + FMath::Max(64.0f, Terrain.RidgeAmplitude * 4.0f);
+    if (Terrain.bUsePhysicalWorldScale)
+    {
+        Result.Frequency = CubusWorldScale::FrequencyForWavelengthKilometres(
+            Terrain.ClimateProvinceScaleKm,
+            Terrain.VoxelSizeCm
+        ) / 0.18f;
+    }
+    const float StructuralNivalWorldZ = Terrain.BaseHeight + (Terrain.bUsePhysicalWorldScale
+        ? CubusWorldScale::MetersToVoxels(Terrain.MountainReliefMeters * 0.78f, Terrain.VoxelSizeCm)
+        : FMath::Max(64.0f, Terrain.RidgeAmplitude * 4.0f));
     Result.NivalWorldZ = FMath::Max(
         Result.NivalWorldZ > HydrologySettings.SeaLevel + 1.0f ? Result.NivalWorldZ : StructuralNivalWorldZ,
         StructuralNivalWorldZ

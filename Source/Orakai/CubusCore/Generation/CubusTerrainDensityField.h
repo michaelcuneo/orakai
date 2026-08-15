@@ -14,6 +14,7 @@ struct ORAKAI_API FCubusTerrainDensitySettings
 
     float FlatSurfaceWorldZ = 8.0f;
     float BaseHeight = 8.0f;
+    float VoxelSizeCm = 80.0f;
 
     float ContinentAmplitude = 18.0f;
     float ContinentFrequency = 0.003f;
