@@ -179,9 +179,6 @@ count = text.count(needle)
 if count != 4:
     raise RuntimeError(f'expected 4 classic table call sites in mesher, got {count}')
 text = text.replace(needle, 'GetRegularTriangleEdge(')
-# Calls used to have the namespace function split formatting:
-# GetRegularTriangleEdge(\n case,index ) now has one extra close formatting level
-# but balanced parentheses remain because only the qualified function token was replaced.
 write(mesher, text)
 
 # Remove the now-unused classic table include from the production mesher. The
@@ -204,3 +201,5 @@ for path, token in [
 
 if 'CubusMarchingCubesTables::' in read(mesher):
     raise RuntimeError('production density mesher still uses classic MC topology')
+
+# Trigger marker: final regular-cell alignment pass.
