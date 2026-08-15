@@ -22,7 +22,6 @@ def replace_once(path, old, new):
     write(path, text.replace(old, new, 1))
 
 
-# Fix the ratio assertion: BOTH inequalities are required to guarantee <= 2:1.
 world_cpp = 'Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp'
 replace_once(
     world_cpp,
@@ -30,8 +29,6 @@ replace_once(
     'NeighbourSubdivisions <= SelfSubdivisions * 2 && SelfSubdivisions <= NeighbourSubdivisions * 2,'
 )
 
-# Add the official modified regular-cell lookup tables to the already-vendored,
-# MIT-attributed Transvoxel table header.
 source = urlopen(UPSTREAM_URL, timeout=30).read().decode('utf-8')
 
 def extract_array(declaration):
@@ -82,21 +79,15 @@ replace_once(
     insert + '    struct FTransitionCellData\n'
 )
 
-# Use official modified regular-cell topology while retaining Orakai's existing
-# edge interpolation, gradients, materials, triangle validation, and collision.
 mesher = 'Source/Orakai/CubusCore/Meshing/CubusDensityMesher.cpp'
 helper_anchor = '''    int32 ClampDensityMaterialId(const int32 MaterialId)
     {
 '''
 helper = '''    /*
      * Transvoxel regular cells use binary cube-corner numbering:
-     *
-     *   0=(0,0,0) 1=(1,0,0) 2=(0,1,0) 3=(1,1,0)
-     *   4=(0,0,1) 5=(1,0,1) 6=(0,1,1) 7=(1,1,1)
-     *
-     * Orakai's historic classic-MC order swaps 2<->3 and 6<->7. Convert
-     * cases/endpoints here so the rest of the mesher can continue using its
-     * established corner arrays and twelve standard edge indexes.
+     * 0=(0,0,0) 1=(1,0,0) 2=(0,1,0) 3=(1,1,0),
+     * 4=(0,0,1) 5=(1,0,1) 6=(0,1,1) 7=(1,1,1).
+     * Orakai's historic classic-MC order swaps 2<->3 and 6<->7.
      */
     constexpr int32 TransvoxelPointToOrakaiCorner[8] =
     {
@@ -171,25 +162,24 @@ helper = '''    /*
 '''
 replace_once(mesher, helper_anchor, helper + helper_anchor)
 
-# There are four uses inside the two regular-cell emission loops: initial empty
-# check and per-triangle/per-vertex lookup for canonical + adaptive meshing.
 text = read(mesher)
-needle = 'CubusMarchingCubesTables::\n                        GetTriangleEdge('
+needle = 'CubusMarchingCubesTables::GetTriangleEdge'
 count = text.count(needle)
-if count != 4:
-    raise RuntimeError(f'expected 4 classic table call sites in mesher, got {count}')
-text = text.replace(needle, 'GetRegularTriangleEdge(')
+if count < 1:
+    raise RuntimeError('no classic density-mesher table calls found')
+text = text.replace(needle, 'GetRegularTriangleEdge')
+# The source also has line-wrapped namespace/function spellings.
+text = text.replace('CubusMarchingCubesTables::\n                                GetTriangleEdge', 'GetRegularTriangleEdge')
+text = text.replace('CubusMarchingCubesTables::\n                                            GetTriangleEdge', 'GetRegularTriangleEdge')
+text = text.replace('CubusMarchingCubesTables::\n                        GetTriangleEdge', 'GetRegularTriangleEdge')
 write(mesher, text)
 
-# Remove the now-unused classic table include from the production mesher. The
-# table remains in the repo and retains its dedicated validation tests.
 replace_once(
     mesher,
     '#include "CubusCore/Meshing/CubusMarchingCubesTables.h"\n',
     ''
 )
 
-# Source guards.
 for path, token in [
     (world_cpp, 'NeighbourSubdivisions <= SelfSubdivisions * 2 && SelfSubdivisions <= NeighbourSubdivisions * 2'),
     (tables, 'RegularVertexData[256][12]'),
@@ -201,5 +191,3 @@ for path, token in [
 
 if 'CubusMarchingCubesTables::' in read(mesher):
     raise RuntimeError('production density mesher still uses classic MC topology')
-
-# Trigger marker: final regular-cell alignment pass.
