@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 14: broad mountain mass now creates a genuine alpine elevation
-    // range, and snow/ice is strictly altitude-gated above the alpine snowline.
-    static constexpr uint32 CurrentGenerationVersion = 14;
+    // Bumped to 15: biome ecology now models structural elevation zones, aspect,
+    // hydrology/soil state and blended ecological communities instead of one winner.
+    static constexpr uint32 CurrentGenerationVersion = 15;
 
     int64 World = 1;
     int32 Terrain = 0;

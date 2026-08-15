@@ -613,6 +613,10 @@ FCubusTerrainDensitySettings ACubusVoxelVolumeActor::BuildDensitySettings() cons
 	DensitySettings.CaveOffsetZ = FCubusGenerationSeeds::DomainOffsetZ(Seeds.Caves);
 
 	DensitySettings.BiomeSettings = FCubusBiomeField::MakeSettings(GeologyProfile.Get(), Seeds.Biomes, Seeds.Rivers);
+	DensitySettings.BiomeSettings.NivalWorldZ = FMath::Max(
+		DensitySettings.BiomeSnowMinimumHeight,
+		DensitySettings.BaseHeight + FMath::Max(64.0f, DensitySettings.RidgeAmplitude * 4.0f)
+	);
 
 	DensitySettings.LandmarkSettings = FCubusLandmarkField::MakeSettings(GeologyProfile.Get(), Seeds.Terrain);
 

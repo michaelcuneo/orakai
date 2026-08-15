@@ -4,107 +4,178 @@
 
 #include "CubusBiomeTypes.generated.h"
 
-/** Broad habitat behaviour used by vegetation and gameplay rules. */
+/** Broad habitat behaviour retained for compatibility with vegetation/gameplay rules. */
 UENUM(BlueprintType)
 enum class ECubusBiomeKind : uint8
 {
-	Plains,
-	Forest,
-	Rocky,
-	Wetland
+    Plains,
+    Forest,
+    Rocky,
+    Wetland
+};
+
+/** Structural elevation zone derived from sea level, treeline and the alpine/nival scale. */
+UENUM(BlueprintType)
+enum class ECubusElevationZone : uint8
+{
+    Lowland,
+    Foothill,
+    Montane,
+    Subalpine,
+    Alpine,
+    Nival
+};
+
+/** One weighted ecological community retained in the top-four local ecotone blend. */
+USTRUCT(BlueprintType)
+struct ORAKAI_API FCubusBiomeCommunityBlend
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Biomes|Blend")
+    int32 DefinitionIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Biomes|Blend")
+    FName Name = NAME_None;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Biomes|Blend")
+    ECubusBiomeKind Archetype = ECubusBiomeKind::Plains;
+
+    /** Normalized share of this community in the local ecotone. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Biomes|Blend", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Weight = 0.0f;
+
+    /** Raw environmental suitability before competition with other communities. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Biomes|Blend", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Suitability = 0.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Biomes|Blend", meta = (ClampMin = "1"))
+    int32 SurfaceMaterialId = 1;
 };
 
 /**
- * One client-authored biome definition.
+ * One client-authored ecological community definition.
  *
- * Archetype is deliberately broad: it controls generic vegetation/gameplay
- * behaviour, while Name identifies the actual ecological community (for
- * example MontaneForest, RiparianForest, AlpineMeadow or Marsh).
- *
- * Climate uses target/tolerance envelopes. Terrain/environment controls use
- * inclusive ranges so old assets remain permissive by default while authored
- * biomes can opt into much more specific niches.
+ * Archetype is deliberately broad and retained for legacy vegetation masks.
+ * The real community is selected from climate, relative elevation, terrain,
+ * hydrology, soil and exposure. Multiple matching definitions are retained in
+ * the runtime top-four blend rather than throwing away every non-winner.
  */
 USTRUCT(BlueprintType)
 struct ORAKAI_API FCubusBiomeDefinition
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes")
-	FName Name = NAME_None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes")
+    FName Name = NAME_None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes")
-	ECubusBiomeKind Archetype = ECubusBiomeKind::Plains;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes")
+    ECubusBiomeKind Archetype = ECubusBiomeKind::Plains;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes", meta = (ClampMin = "1"))
-	int32 SurfaceMaterialId = 1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes", meta = (ClampMin = "1"))
+    int32 SurfaceMaterialId = 1;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float TargetMoisture = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TargetMoisture = 0.5f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.01", ClampMax = "1.0"))
-	float MoistureTolerance = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+    float MoistureTolerance = 0.5f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float TargetTemperature = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TargetTemperature = 0.5f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.01", ClampMax = "1.0"))
-	float TemperatureTolerance = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+    float TemperatureTolerance = 0.5f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain")
-	float MinimumWorldZ = -100000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Elevation")
+    float MinimumWorldZ = -100000.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain")
-	float MaximumWorldZ = 100000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Elevation")
+    float MaximumWorldZ = 100000.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0"))
-	float MaximumSlope = 2.0f;
+    /** Relative 0..1 position from sea level to the nival/snow-line datum. Values above 1 are summit terrain. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.5"))
+    float MinimumElevationNormalized = 0.0f;
 
-	/** Normalized accumulated/depositional soil depth. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MinimumSoilDepth = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.5"))
+    float MaximumElevationNormalized = 1.5f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MaximumSoilDepth = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0"))
+    float MaximumSlope = 2.0f;
 
-	/** 0 = dry/ridge-like, 1 = concentrated drainage/floodplain. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MinimumDrainage = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumSoilDepth = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MaximumDrainage = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumSoilDepth = 1.0f;
 
-	/** 0 = no river influence, 1 = channel/floodplain centre. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MinimumRiverInfluence = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumDrainage = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MaximumRiverInfluence = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumDrainage = 1.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MinimumRockExposure = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumRiverInfluence = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MaximumRockExposure = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumRiverInfluence = 1.0f;
 
-	/** Long-term wind/topographic exposure. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MinimumExposure = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumSoilSaturation = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MaximumExposure = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumSoilSaturation = 1.0f;
 
-	/** Combined soil, water and climate productivity estimate. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MinimumFertility = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumGroundwaterPotential = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MaximumFertility = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumGroundwaterPotential = 1.0f;
 
-	/** Width of the soft transition at environmental range boundaries. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes", meta = (ClampMin = "0.01", ClampMax = "0.5"))
-	float TransitionSoftness = 0.12f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumRockExposure = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes", meta = (ClampMin = "0.01"))
-	float Priority = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumRockExposure = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumExposure = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumExposure = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumSolarExposure = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumSolarExposure = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumFertility = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumFertility = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumOrganicMatter = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Soil", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumOrganicMatter = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumErosion = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumErosion = 1.0f;
+
+    /** Coherent stand/opening modulation applied only after habitat suitability is established. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PatchStrength = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes", meta = (ClampMin = "0.01", ClampMax = "0.5"))
+    float TransitionSoftness = 0.12f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes", meta = (ClampMin = "0.01"))
+    float Priority = 1.0f;
 };

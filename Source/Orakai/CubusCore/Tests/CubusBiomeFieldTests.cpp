@@ -228,4 +228,140 @@ bool FCubusDensityBiomeContextTest::RunTest(const FString& Parameters)
     return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusBiomeElevationStructureTest,
+    "Orakai.Cubus.Generation.BiomeElevationStructure",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusBiomeElevationStructureTest::RunTest(const FString& Parameters)
+{
+    (void)Parameters;
+
+    FCubusBiomeFieldSettings Settings;
+    Settings.bEnabled = true;
+    Settings.NivalWorldZ = 72.0f;
+    Settings.BiomeOffsetX = 933;
+    Settings.BiomeOffsetY = -1701;
+
+    const FCubusBiomeSample Lowland = FCubusBiomeField::Sample(20.0f, 30.0f, 8.0f, 0.08f, Settings);
+    const FCubusBiomeSample Montane = FCubusBiomeField::Sample(20.0f, 30.0f, 44.0f, 0.08f, Settings);
+    const FCubusBiomeSample Subalpine = FCubusBiomeField::Sample(20.0f, 30.0f, 60.0f, 0.08f, Settings);
+    const FCubusBiomeSample Alpine = FCubusBiomeField::Sample(20.0f, 30.0f, 68.0f, 0.08f, Settings);
+    const FCubusBiomeSample Nival = FCubusBiomeField::Sample(20.0f, 30.0f, 80.0f, 0.08f, Settings);
+
+    TestEqual(TEXT("Sea-level terrain is lowland"), Lowland.ElevationZone, ECubusElevationZone::Lowland);
+    TestEqual(TEXT("Mid mountain terrain is montane"), Montane.ElevationZone, ECubusElevationZone::Montane);
+    TestEqual(TEXT("Upper mountain terrain is subalpine"), Subalpine.ElevationZone, ECubusElevationZone::Subalpine);
+    TestEqual(TEXT("Terrain below the snow datum can be alpine"), Alpine.ElevationZone, ECubusElevationZone::Alpine);
+    TestEqual(TEXT("Terrain above the nival datum is nival"), Nival.ElevationZone, ECubusElevationZone::Nival);
+    TestTrue(TEXT("Treeline fades with relative elevation"), Lowland.TreeLineWeight > Subalpine.TreeLineWeight && Subalpine.TreeLineWeight > Alpine.TreeLineWeight);
+    TestTrue(TEXT("Nival influence grows only at the top elevation band"), Nival.NivalInfluence > Alpine.NivalInfluence);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusBiomeAspectAndWaterTest,
+    "Orakai.Cubus.Generation.BiomeAspectAndWater",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusBiomeAspectAndWaterTest::RunTest(const FString& Parameters)
+{
+    (void)Parameters;
+
+    FCubusBiomeFieldSettings Settings;
+    Settings.bEnabled = true;
+    Settings.NivalWorldZ = 72.0f;
+    Settings.BiomeOffsetX = 1221;
+    Settings.BiomeOffsetY = 381;
+
+    FCubusBiomeTerrainContext SunnyContext;
+    SunnyContext.Gradient = FVector2D(0.42f, 0.91f);
+    FCubusBiomeTerrainContext ShadyContext = SunnyContext;
+    ShadyContext.Gradient *= -1.0f;
+
+    const FCubusBiomeSample Sunny = FCubusBiomeField::Sample(100.0f, -30.0f, 28.0f, 0.80f, Settings, SunnyContext);
+    const FCubusBiomeSample Shady = FCubusBiomeField::Sample(100.0f, -30.0f, 28.0f, 0.80f, Settings, ShadyContext);
+    TestTrue(TEXT("Opposite slope aspects produce different solar exposure"), Sunny.SolarExposure > Shady.SolarExposure + 0.15f);
+
+    FCubusBiomeTerrainContext WindwardContext;
+    WindwardContext.MountainCore = 0.8f;
+    WindwardContext.FoothillWeight = 0.8f;
+    WindwardContext.Ridge = 0.7f;
+    WindwardContext.Gradient = FVector2D(0.82f, 0.57f);
+    FCubusBiomeTerrainContext LeewardContext = WindwardContext;
+    LeewardContext.Gradient *= -1.0f;
+
+    const FCubusBiomeSample Windward = FCubusBiomeField::Sample(100.0f, -30.0f, 36.0f, 0.70f, Settings, WindwardContext);
+    const FCubusBiomeSample Leeward = FCubusBiomeField::Sample(100.0f, -30.0f, 36.0f, 0.70f, Settings, LeewardContext);
+    TestTrue(TEXT("Windward slope reports greater wind exposure"), Windward.WindExposure > Leeward.WindExposure);
+    TestTrue(TEXT("Leeward slope develops a stronger rain shadow"), Leeward.RainShadow > Windward.RainShadow);
+
+    FCubusBiomeTerrainContext DryContext;
+    DryContext.Drainage = 0.0f;
+    FCubusBiomeTerrainContext WetContext;
+    WetContext.Drainage = 1.0f;
+    const FCubusBiomeSample Dry = FCubusBiomeField::Sample(-400.0f, 250.0f, 16.0f, 0.10f, Settings, DryContext);
+    const FCubusBiomeSample Wet = FCubusBiomeField::Sample(-400.0f, 250.0f, 16.0f, 0.10f, Settings, WetContext);
+    TestTrue(TEXT("Convergent terrain increases surface wetness"), Wet.SurfaceWetness > Dry.SurfaceWetness);
+    TestTrue(TEXT("Convergent terrain increases soil saturation"), Wet.SoilSaturation > Dry.SoilSaturation);
+    TestTrue(TEXT("Convergent terrain increases groundwater potential"), Wet.GroundwaterPotential > Dry.GroundwaterPotential);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusBiomeCommunityBlendTest,
+    "Orakai.Cubus.Generation.BiomeCommunityBlend",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusBiomeCommunityBlendTest::RunTest(const FString& Parameters)
+{
+    (void)Parameters;
+
+    FCubusBiomeFieldSettings Settings;
+    Settings.bEnabled = true;
+    Settings.NivalWorldZ = 72.0f;
+    Settings.BiomeOffsetX = 191;
+    Settings.BiomeOffsetY = -817;
+
+    for (int32 Index = 0; Index < 5; ++Index)
+    {
+        FCubusBiomeDefinition Definition;
+        Definition.Name = FName(*FString::Printf(TEXT("Blend_%d"), Index));
+        Definition.Archetype = Index % 2 == 0 ? ECubusBiomeKind::Forest : ECubusBiomeKind::Plains;
+        Definition.SurfaceMaterialId = 60 + Index;
+        Definition.TargetMoisture = 0.5f;
+        Definition.MoistureTolerance = 1.0f;
+        Definition.TargetTemperature = 0.5f;
+        Definition.TemperatureTolerance = 1.0f;
+        Definition.MinimumWorldZ = -1000.0f;
+        Definition.MaximumWorldZ = 1000.0f;
+        Definition.MaximumSlope = 100.0f;
+        Definition.PatchStrength = 0.0f;
+        Definition.Priority = static_cast<float>(Index + 1);
+        Settings.Definitions.Add(Definition);
+    }
+
+    const FCubusBiomeSample Sample = FCubusBiomeField::Sample(32.0f, 48.0f, 20.0f, 0.10f, Settings);
+    TestEqual(TEXT("Biome sample retains four competing communities"), Sample.CommunityBlendCount, 4);
+    TestEqual(TEXT("Highest-priority matching community remains dominant"), Sample.CommunityBlend[0].DefinitionIndex, 4);
+    TestEqual(TEXT("Compatibility winner follows top community"), Sample.BiomeDefinitionIndex, 4);
+
+    float BlendTotal = 0.0f;
+    for (int32 Index = 0; Index < Sample.CommunityBlendCount; ++Index)
+    {
+        BlendTotal += Sample.CommunityBlend[Index].Weight;
+        if (Index > 0)
+        {
+  TestTrue(TEXT("Community blend is sorted by descending weight"),
+      Sample.CommunityBlend[Index - 1].Weight >= Sample.CommunityBlend[Index].Weight);
+        }
+    }
+    TestTrue(TEXT("Community blend weights are normalized"), FMath::IsNearlyEqual(BlendTotal, 1.0f, 0.001f));
+    return true;
+}
+
 #endif
