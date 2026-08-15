@@ -1,0 +1,419 @@
+name: Wire vegetation to biome ecology v2
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Extend vegetation habitat model
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if new in text:
+                  return False
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected one anchor, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+              return True
+
+          instance = 'Source/Orakai/CubusCore/Data/CubusVegetationInstance.h'
+          old_fields = (
+              '    uint8 Fertility = 128;\n'
+              '    uint8 SlopeDegrees = 0;\n'
+          )
+          new_fields = (
+              '    uint8 Fertility = 128;\n'
+              '    uint8 ElevationNormalized = 0;\n'
+              '    uint8 TreeLineWeight = 255;\n'
+              '    uint8 SoilSaturation = 0;\n'
+              '    uint8 GroundwaterPotential = 0;\n'
+              '    uint8 SolarExposure = 128;\n'
+              '    uint8 Erosion = 0;\n'
+              '    uint8 SlopeDegrees = 0;\n'
+          )
+          replace_once(instance, old_fields, new_fields, 'vegetation habitat fields')
+
+          old_getters = (
+              '    float GetFertility() const { return DecodeUnit(Fertility); }\n'
+              '    float GetSlopeDegrees() const { return DecodeUnit(SlopeDegrees) * 90.0f; }\n'
+          )
+          new_getters = (
+              '    float GetFertility() const { return DecodeUnit(Fertility); }\n'
+              '    float GetElevationNormalized() const { return DecodeUnit(ElevationNormalized) * 1.5f; }\n'
+              '    float GetTreeLineWeight() const { return DecodeUnit(TreeLineWeight); }\n'
+              '    float GetSoilSaturation() const { return DecodeUnit(SoilSaturation); }\n'
+              '    float GetGroundwaterPotential() const { return DecodeUnit(GroundwaterPotential); }\n'
+              '    float GetSolarExposure() const { return DecodeUnit(SolarExposure); }\n'
+              '    float GetErosion() const { return DecodeUnit(Erosion); }\n'
+              '    float GetSlopeDegrees() const { return DecodeUnit(SlopeDegrees) * 90.0f; }\n'
+          )
+          replace_once(instance, old_getters, new_getters, 'vegetation habitat getters')
+
+          types = 'Source/Orakai/CubusCore/Vegetation/CubusVegetationTypes.h'
+          old_envelope_anchor = (
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MaximumFertility = 1.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat", meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))\n'
+              '    float MaximumSlopeDegrees = 90.0f;\n'
+          )
+          new_envelope_anchor = (
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MaximumFertility = 1.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.5"))\n'
+              '    float MinimumElevationNormalized = 0.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.5"))\n'
+              '    float MaximumElevationNormalized = 1.5f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MinimumTreeLineWeight = 0.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MaximumTreeLineWeight = 1.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MinimumSoilSaturation = 0.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MaximumSoilSaturation = 1.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MinimumGroundwaterPotential = 0.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MaximumGroundwaterPotential = 1.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MinimumSolarExposure = 0.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MaximumSolarExposure = 1.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MinimumErosion = 0.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n'
+              '    float MaximumErosion = 1.0f;\n\n'
+              '    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat", meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))\n'
+              '    float MaximumSlopeDegrees = 90.0f;\n'
+          )
+          replace_once(types, old_envelope_anchor, new_envelope_anchor, 'vegetation habitat envelope')
+
+          generator = 'Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp'
+          old_make = (
+              '        Habitat.Exposure = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Exposure);\n'
+              '        Habitat.Fertility = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Fertility);\n'
+              '        Habitat.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(\n'
+          )
+          new_make = (
+              '        Habitat.Exposure = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Exposure);\n'
+              '        Habitat.Fertility = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Fertility);\n'
+              '        Habitat.ElevationNormalized = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.ElevationNormalized / 1.5f);\n'
+              '        Habitat.TreeLineWeight = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.TreeLineWeight);\n'
+              '        Habitat.SoilSaturation = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.SoilSaturation);\n'
+              '        Habitat.GroundwaterPotential = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.GroundwaterPotential);\n'
+              '        Habitat.SolarExposure = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.SolarExposure);\n'
+              '        Habitat.Erosion = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Erosion);\n'
+              '        Habitat.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(\n'
+          )
+          replace_once(generator, old_make, new_make, 'habitat sample propagation')
+
+          old_locals = (
+              '        const float Fertility = FMath::Clamp(BiomeSample.Fertility, 0.0f, 1.0f);\n'
+              '        const float SlopeDegrees = FMath::RadiansToDegrees(FMath::Atan(BiomeSample.Slope));\n'
+          )
+          new_locals = (
+              '        const float Fertility = FMath::Clamp(BiomeSample.Fertility, 0.0f, 1.0f);\n'
+              '        const float Elevation = FMath::Clamp(BiomeSample.ElevationNormalized, 0.0f, 1.5f);\n'
+              '        const float TreeLine = FMath::Clamp(BiomeSample.TreeLineWeight, 0.0f, 1.0f);\n'
+              '        const float Saturation = FMath::Clamp(BiomeSample.SoilSaturation, 0.0f, 1.0f);\n'
+              '        const float Groundwater = FMath::Clamp(BiomeSample.GroundwaterPotential, 0.0f, 1.0f);\n'
+              '        const float Solar = FMath::Clamp(BiomeSample.SolarExposure, 0.0f, 1.0f);\n'
+              '        const float Erosion = FMath::Clamp(BiomeSample.Erosion, 0.0f, 1.0f);\n'
+              '        const float Alpine = FMath::Clamp(BiomeSample.AlpineInfluence, 0.0f, 1.0f);\n'
+              '        const float Nival = FMath::Clamp(BiomeSample.NivalInfluence, 0.0f, 1.0f);\n'
+              '        const float SlopeDegrees = FMath::RadiansToDegrees(FMath::Atan(BiomeSample.Slope));\n'
+          )
+          replace_once(generator, old_locals, new_locals, 'vegetation ecology locals')
+
+          old_broadleaf = (
+              '            FMath::Lerp(1.0f, 0.30f, Rock) *\n'
+              '            Gentle;\n\n'
+              '        const float ConiferHabitat =\n'
+          )
+          new_broadleaf = (
+              '            FMath::Lerp(1.0f, 0.30f, Rock) *\n'
+              '            RangeSuitability(Saturation, 0.02f, 0.82f) *\n'
+              '            RangeSuitability(Elevation, 0.0f, 0.76f) *\n'
+              '            TreeLine * (1.0f - Alpine * 0.78f) *\n'
+              '            Gentle;\n\n'
+              '        const float ConiferHabitat =\n'
+          )
+          replace_once(generator, old_broadleaf, new_broadleaf, 'broadleaf elevation ecology')
+
+          old_conifer = (
+              '            FMath::Lerp(1.0f, 0.70f, Rock) *\n'
+              '            (1.0f - FMath::SmoothStep(34.0f, 48.0f, SlopeDegrees));\n'
+          )
+          new_conifer = (
+              '            FMath::Lerp(1.0f, 0.70f, Rock) *\n'
+              '            RangeSuitability(Saturation, 0.01f, 0.88f) *\n'
+              '            RangeSuitability(Elevation, 0.12f, 0.94f) *\n'
+              '            FMath::Sqrt(TreeLine) * (1.0f - Nival) *\n'
+              '            (1.0f - FMath::SmoothStep(34.0f, 48.0f, SlopeDegrees));\n'
+          )
+          replace_once(generator, old_conifer, new_conifer, 'conifer elevation ecology')
+
+          old_reed = (
+              '            FMath::SmoothStep(0.25f, 0.78f, River) *\n'
+              '            FMath::SmoothStep(0.48f, 0.82f, Moisture) *\n'
+              '            FMath::Lerp(0.55f, 1.0f, Fertility) * VeryGentle;\n'
+          )
+          new_reed = (
+              '            FMath::Max(FMath::SmoothStep(0.25f, 0.78f, River), FMath::SmoothStep(0.52f, 0.82f, Groundwater)) *\n'
+              '            FMath::SmoothStep(0.48f, 0.82f, Moisture) *\n'
+              '            FMath::SmoothStep(0.42f, 0.76f, Saturation) *\n'
+              '            FMath::Lerp(0.55f, 1.0f, Fertility) * VeryGentle * (1.0f - Nival);\n'
+          )
+          replace_once(generator, old_reed, new_reed, 'reed hydrology ecology')
+
+          old_alpine = (
+              '        const float AlpineHabitat =\n'
+              '            RangeSuitability(Temperature, 0.0f, 0.48f) *\n'
+              '            FMath::Lerp(0.45f, 1.0f, Exposure) *\n'
+              '            FMath::Lerp(0.35f, 1.0f, FMath::Max(Rock, BiomeSample.RockyWeight)) *\n'
+              '            (1.0f - River * 0.8f);\n'
+          )
+          new_alpine = (
+              '        const float AlpineHabitat =\n'
+              '            Alpine * (1.0f - Nival) *\n'
+              '            RangeSuitability(Elevation, 0.62f, 1.02f) *\n'
+              '            RangeSuitability(Temperature, 0.0f, 0.58f) *\n'
+              '            FMath::Lerp(0.55f, 1.0f, Exposure) *\n'
+              '            FMath::Lerp(0.45f, 1.0f, FMath::Max(Rock, BiomeSample.RockyWeight)) *\n'
+              '            (1.0f - River * 0.8f);\n'
+          )
+          replace_once(generator, old_alpine, new_alpine, 'alpine elevation ecology')
+
+          old_shrub = (
+              '            FMath::Lerp(0.75f, 1.15f, Exposure) *\n'
+              '            FMath::Lerp(1.1f, 0.62f, Soil) *\n'
+              '            (1.0f - River * 0.72f) *\n'
+          )
+          new_shrub = (
+              '            FMath::Lerp(0.75f, 1.15f, Exposure) *\n'
+              '            FMath::Lerp(0.82f, 1.12f, Solar) *\n'
+              '            FMath::Lerp(1.1f, 0.62f, Soil) *\n'
+              '            FMath::Lerp(1.0f, 0.58f, Erosion) *\n'
+              '            (1.0f - River * 0.72f) * (1.0f - Nival) *\n'
+          )
+          replace_once(generator, old_shrub, new_shrub, 'shrub exposure ecology')
+
+          old_grass = (
+              '            FMath::Lerp(0.48f, 1.0f, Fertility) *\n'
+              '            FMath::Lerp(1.0f, 0.55f, Rock) * Gentle;\n'
+          )
+          new_grass = (
+              '            FMath::Lerp(0.48f, 1.0f, Fertility) *\n'
+              '            FMath::Lerp(1.0f, 0.55f, Rock) *\n'
+              '            FMath::Lerp(1.0f, 0.66f, Erosion) *\n'
+              '            (1.0f - Nival) * Gentle;\n'
+          )
+          replace_once(generator, old_grass, new_grass, 'grass erosion ecology')
+
+          catalog = 'Source/Orakai/CubusCore/Vegetation/CubusVegetationCatalog.cpp'
+          old_catalog_fields = (
+              '        const float Fertility = SmoothRangeSuitability(Sample.GetFertility(), Habitat.MinimumFertility, Habitat.MaximumFertility, Softness);\n\n'
+              '        const float MaximumSlope = FMath::Clamp(Habitat.MaximumSlopeDegrees, 0.1f, 90.0f);\n'
+          )
+          new_catalog_fields = (
+              '        const float Fertility = SmoothRangeSuitability(Sample.GetFertility(), Habitat.MinimumFertility, Habitat.MaximumFertility, Softness);\n'
+              '        const float Elevation = SmoothRangeSuitability(Sample.GetElevationNormalized(), Habitat.MinimumElevationNormalized, Habitat.MaximumElevationNormalized, Softness);\n'
+              '        const float TreeLine = SmoothRangeSuitability(Sample.GetTreeLineWeight(), Habitat.MinimumTreeLineWeight, Habitat.MaximumTreeLineWeight, Softness);\n'
+              '        const float Saturation = SmoothRangeSuitability(Sample.GetSoilSaturation(), Habitat.MinimumSoilSaturation, Habitat.MaximumSoilSaturation, Softness);\n'
+              '        const float Groundwater = SmoothRangeSuitability(Sample.GetGroundwaterPotential(), Habitat.MinimumGroundwaterPotential, Habitat.MaximumGroundwaterPotential, Softness);\n'
+              '        const float Solar = SmoothRangeSuitability(Sample.GetSolarExposure(), Habitat.MinimumSolarExposure, Habitat.MaximumSolarExposure, Softness);\n'
+              '        const float Erosion = SmoothRangeSuitability(Sample.GetErosion(), Habitat.MinimumErosion, Habitat.MaximumErosion, Softness);\n\n'
+              '        const float MaximumSlope = FMath::Clamp(Habitat.MaximumSlopeDegrees, 0.1f, 90.0f);\n'
+          )
+          replace_once(catalog, old_catalog_fields, new_catalog_fields, 'catalog habitat dimensions')
+
+          old_product = (
+              '            Moisture * Temperature * Soil * Drainage * River * Rock * Exposure * Fertility * SlopeSuitability\n'
+              '        );\n'
+              '        return FMath::Pow(Product, 1.0f / 9.0f);\n'
+          )
+          new_product = (
+              '            Moisture * Temperature * Soil * Drainage * River * Rock * Exposure * Fertility *\n'
+              '            Elevation * TreeLine * Saturation * Groundwater * Solar * Erosion * SlopeSuitability\n'
+              '        );\n'
+              '        return FMath::Pow(Product, 1.0f / 15.0f);\n'
+          )
+          replace_once(catalog, old_product, new_product, 'catalog geometric mean')
+
+          old_broadleaf_defaults = (
+              '            Entry.Habitat.MinimumFertility = 0.30f;\n'
+              '            Entry.Habitat.MaximumSlopeDegrees = 34.0f;\n'
+          )
+          new_broadleaf_defaults = (
+              '            Entry.Habitat.MinimumFertility = 0.30f;\n'
+              '            Entry.Habitat.MaximumElevationNormalized = 0.78f;\n'
+              '            Entry.Habitat.MinimumTreeLineWeight = 0.20f;\n'
+              '            Entry.Habitat.MaximumSoilSaturation = 0.86f;\n'
+              '            Entry.Habitat.MaximumErosion = 0.76f;\n'
+              '            Entry.Habitat.MaximumSlopeDegrees = 34.0f;\n'
+          )
+          replace_once(catalog, old_broadleaf_defaults, new_broadleaf_defaults, 'broadleaf default niche')
+
+          old_conifer_defaults = (
+              '            Entry.Habitat.MaximumExposure = 0.90f;\n'
+              '            Entry.Habitat.MaximumSlopeDegrees = 40.0f;\n'
+          )
+          new_conifer_defaults = (
+              '            Entry.Habitat.MaximumExposure = 0.90f;\n'
+              '            Entry.Habitat.MinimumElevationNormalized = 0.10f;\n'
+              '            Entry.Habitat.MaximumElevationNormalized = 0.94f;\n'
+              '            Entry.Habitat.MinimumTreeLineWeight = 0.04f;\n'
+              '            Entry.Habitat.MaximumSoilSaturation = 0.90f;\n'
+              '            Entry.Habitat.MaximumErosion = 0.86f;\n'
+              '            Entry.Habitat.MaximumSlopeDegrees = 40.0f;\n'
+          )
+          replace_once(catalog, old_conifer_defaults, new_conifer_defaults, 'conifer default niche')
+
+          tests = 'Source/Orakai/CubusCore/Tests/CubusVegetationEcologyTests.cpp'
+          old_quant = (
+              '    Sample.SoilDepth = FCubusVegetationHabitatSample::QuantizeUnit(0.61f);\n'
+              '    Sample.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(37.0f);\n\n'
+              '    TestTrue(TEXT("Moisture survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetMoisture(), 0.73f, 0.005f));\n'
+              '    TestTrue(TEXT("Temperature survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetTemperature(), 0.28f, 0.005f));\n'
+              '    TestTrue(TEXT("Soil depth survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSoilDepth(), 0.61f, 0.005f));\n'
+              '    TestTrue(TEXT("Slope survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSlopeDegrees(), 37.0f, 0.5f));\n'
+          )
+          new_quant = (
+              '    Sample.SoilDepth = FCubusVegetationHabitatSample::QuantizeUnit(0.61f);\n'
+              '    Sample.ElevationNormalized = FCubusVegetationHabitatSample::QuantizeUnit(0.72f / 1.5f);\n'
+              '    Sample.TreeLineWeight = FCubusVegetationHabitatSample::QuantizeUnit(0.34f);\n'
+              '    Sample.SoilSaturation = FCubusVegetationHabitatSample::QuantizeUnit(0.66f);\n'
+              '    Sample.GroundwaterPotential = FCubusVegetationHabitatSample::QuantizeUnit(0.58f);\n'
+              '    Sample.SolarExposure = FCubusVegetationHabitatSample::QuantizeUnit(0.81f);\n'
+              '    Sample.Erosion = FCubusVegetationHabitatSample::QuantizeUnit(0.42f);\n'
+              '    Sample.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(37.0f);\n\n'
+              '    TestTrue(TEXT("Moisture survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetMoisture(), 0.73f, 0.005f));\n'
+              '    TestTrue(TEXT("Temperature survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetTemperature(), 0.28f, 0.005f));\n'
+              '    TestTrue(TEXT("Soil depth survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSoilDepth(), 0.61f, 0.005f));\n'
+              '    TestTrue(TEXT("Elevation survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetElevationNormalized(), 0.72f, 0.01f));\n'
+              '    TestTrue(TEXT("Treeline survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetTreeLineWeight(), 0.34f, 0.005f));\n'
+              '    TestTrue(TEXT("Soil saturation survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSoilSaturation(), 0.66f, 0.005f));\n'
+              '    TestTrue(TEXT("Groundwater survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetGroundwaterPotential(), 0.58f, 0.005f));\n'
+              '    TestTrue(TEXT("Solar exposure survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSolarExposure(), 0.81f, 0.005f));\n'
+              '    TestTrue(TEXT("Erosion survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetErosion(), 0.42f, 0.005f));\n'
+              '    TestTrue(TEXT("Slope survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSlopeDegrees(), 37.0f, 0.5f));\n'
+          )
+          replace_once(tests, old_quant, new_quant, 'vegetation habitat quantization tests')
+
+          test_path = Path(tests)
+          test_text = test_path.read_text(encoding='utf-8')
+          marker = 'FCubusVegetationElevationNicheTest'
+          if marker not in test_text:
+              lines = [
+                  '',
+                  'IMPLEMENT_SIMPLE_AUTOMATION_TEST(',
+                  '    FCubusVegetationElevationNicheTest,',
+                  '    "Orakai.Cubus.Vegetation.ElevationNicheSelection",',
+                  '    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter',
+                  ')',
+                  '',
+                  'bool FCubusVegetationElevationNicheTest::RunTest(const FString& Parameters)',
+                  '{',
+                  '    (void)Parameters;',
+                  '',
+                  '    TArray<FCubusVegetationSpeciesCatalogEntry> Species;',
+                  '    FCubusVegetationSpeciesCatalogEntry Montane;',
+                  '    Montane.SpeciesId = TEXT("MontaneConifer");',
+                  '    Montane.TypeId = CubusVegetationType::ConiferTree;',
+                  '    Montane.BiomeMask = static_cast<int32>(ECubusVegetationBiome::Forest) | static_cast<int32>(ECubusVegetationBiome::Rocky);',
+                  '    Montane.Habitat.MinimumElevationNormalized = 0.25f;',
+                  '    Montane.Habitat.MaximumElevationNormalized = 0.68f;',
+                  '    Montane.Habitat.MinimumTreeLineWeight = 0.30f;',
+                  '    Montane.Habitat.TransitionSoftness = 0.03f;',
+                  '    Montane.GrowthStageMeshes.Add(TSoftObjectPtr<UObject>(FSoftObjectPath(TEXT("/Game/Test/Montane.Montane"))));',
+                  '    Species.Add(Montane);',
+                  '',
+                  '    FCubusVegetationSpeciesCatalogEntry Subalpine = Montane;',
+                  '    Subalpine.SpeciesId = TEXT("SubalpineConifer");',
+                  '    Subalpine.Habitat.MinimumElevationNormalized = 0.66f;',
+                  '    Subalpine.Habitat.MaximumElevationNormalized = 0.94f;',
+                  '    Subalpine.Habitat.MinimumTreeLineWeight = 0.03f;',
+                  '    Subalpine.Habitat.MaximumTreeLineWeight = 0.38f;',
+                  '    Subalpine.GrowthStageMeshes[0] = TSoftObjectPtr<UObject>(FSoftObjectPath(TEXT("/Game/Test/Subalpine.Subalpine")));',
+                  '    Species.Add(Subalpine);',
+                  '',
+                  '    FCubusVegetationCatalog Catalog;',
+                  '    Catalog.Rebuild(Species);',
+                  '',
+                  '    FCubusVegetationInstance MontaneInstance;',
+                  '    MontaneInstance.WorldVoxel = FIntVector(10, 20, 40);',
+                  '    MontaneInstance.TypeId = CubusVegetationType::ConiferTree;',
+                  '    MontaneInstance.BiomeMask = CubusVegetationBiome::Forest | CubusVegetationBiome::Rocky;',
+                  '    MontaneInstance.Habitat.ElevationNormalized = FCubusVegetationHabitatSample::QuantizeUnit(0.50f / 1.5f);',
+                  '    MontaneInstance.Habitat.TreeLineWeight = FCubusVegetationHabitatSample::QuantizeUnit(0.82f);',
+                  '    const int32 MontaneSelection = Catalog.SelectSpeciesIndex(MontaneInstance, Species, false, 12, 721);',
+                  '    TestEqual(TEXT("Montane elevation selects montane conifer"), MontaneSelection, 0);',
+                  '',
+                  '    FCubusVegetationInstance SubalpineInstance = MontaneInstance;',
+                  '    SubalpineInstance.WorldVoxel = FIntVector(10, 20, 64);',
+                  '    SubalpineInstance.Habitat.ElevationNormalized = FCubusVegetationHabitatSample::QuantizeUnit(0.82f / 1.5f);',
+                  '    SubalpineInstance.Habitat.TreeLineWeight = FCubusVegetationHabitatSample::QuantizeUnit(0.16f);',
+                  '    const int32 SubalpineSelection = Catalog.SelectSpeciesIndex(SubalpineInstance, Species, false, 12, 721);',
+                  '    TestEqual(TEXT("Subalpine elevation selects treeline conifer"), SubalpineSelection, 1);',
+                  '    return true;',
+                  '}',
+                  ''
+              ]
+              added = '\n'.join(lines)
+              if '\n#endif\n' not in test_text:
+                  raise RuntimeError('vegetation test endif anchor missing')
+              test_path.write_text(test_text.replace('\n#endif\n', added + '\n#endif\n', 1), encoding='utf-8')
+
+          seeds = 'Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h'
+          old_version = (
+              '    // Bumped to 15: biome ecology now models structural elevation zones, aspect,\n'
+              '    // hydrology/soil state and blended ecological communities instead of one winner.\n'
+              '    static constexpr uint32 CurrentGenerationVersion = 15;\n'
+          )
+          new_version = (
+              '    // Bumped to 16: vegetation species and placement ecology now consume the v2\n'
+              '    // elevation, treeline, hydrology, solar-exposure and erosion habitat fields.\n'
+              '    static constexpr uint32 CurrentGenerationVersion = 16;\n'
+          )
+          replace_once(seeds, old_version, new_version, 'generation version 16')
+          PY
+
+          git diff --check
+          grep -n 'ElevationNormalized' Source/Orakai/CubusCore/Data/CubusVegetationInstance.h
+          grep -n 'MinimumTreeLineWeight' Source/Orakai/CubusCore/Vegetation/CubusVegetationTypes.h
+          grep -n 'Habitat.SoilSaturation' Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp
+          grep -n '1.0f / 15.0f' Source/Orakai/CubusCore/Vegetation/CubusVegetationCatalog.cpp
+          grep -n 'FCubusVegetationElevationNicheTest' Source/Orakai/CubusCore/Tests/CubusVegetationEcologyTests.cpp
+          grep -n 'CurrentGenerationVersion = 16' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
+
+          if git diff --quiet; then
+            echo 'Biome ecology v2 vegetation wiring already applied.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            Source/Orakai/CubusCore/Data/CubusVegetationInstance.h \
+            Source/Orakai/CubusCore/Vegetation/CubusVegetationTypes.h \
+            Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp \
+            Source/Orakai/CubusCore/Vegetation/CubusVegetationCatalog.cpp \
+            Source/Orakai/CubusCore/Tests/CubusVegetationEcologyTests.cpp \
+            Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
+          git commit -m 'Wire vegetation to biome ecology v2'
+          git push origin HEAD:agent/density-meshing
