@@ -63,6 +63,12 @@ namespace
         const float Rock = SmoothRangeSuitability(Sample.GetRockExposure(), Habitat.MinimumRockExposure, Habitat.MaximumRockExposure, Softness);
         const float Exposure = SmoothRangeSuitability(Sample.GetExposure(), Habitat.MinimumExposure, Habitat.MaximumExposure, Softness);
         const float Fertility = SmoothRangeSuitability(Sample.GetFertility(), Habitat.MinimumFertility, Habitat.MaximumFertility, Softness);
+        const float Elevation = SmoothRangeSuitability(Sample.GetElevationNormalized(), Habitat.MinimumElevationNormalized, Habitat.MaximumElevationNormalized, Softness);
+        const float TreeLine = SmoothRangeSuitability(Sample.GetTreeLineWeight(), Habitat.MinimumTreeLineWeight, Habitat.MaximumTreeLineWeight, Softness);
+        const float Saturation = SmoothRangeSuitability(Sample.GetSoilSaturation(), Habitat.MinimumSoilSaturation, Habitat.MaximumSoilSaturation, Softness);
+        const float Groundwater = SmoothRangeSuitability(Sample.GetGroundwaterPotential(), Habitat.MinimumGroundwaterPotential, Habitat.MaximumGroundwaterPotential, Softness);
+        const float Solar = SmoothRangeSuitability(Sample.GetSolarExposure(), Habitat.MinimumSolarExposure, Habitat.MaximumSolarExposure, Softness);
+        const float Erosion = SmoothRangeSuitability(Sample.GetErosion(), Habitat.MinimumErosion, Habitat.MaximumErosion, Softness);
 
         const float MaximumSlope = FMath::Clamp(Habitat.MaximumSlopeDegrees, 0.1f, 90.0f);
         const float SlopeSuitability = 1.0f - FMath::SmoothStep(
@@ -75,9 +81,10 @@ namespace
         // collapsing moderate multi-dimensional matches too aggressively.
         const float Product = FMath::Max(
             0.0f,
-            Moisture * Temperature * Soil * Drainage * River * Rock * Exposure * Fertility * SlopeSuitability
+            Moisture * Temperature * Soil * Drainage * River * Rock * Exposure * Fertility *
+            Elevation * TreeLine * Saturation * Groundwater * Solar * Erosion * SlopeSuitability
         );
-        return FMath::Pow(Product, 1.0f / 9.0f);
+        return FMath::Pow(Product, 1.0f / 15.0f);
     }
 }
 
@@ -235,6 +242,10 @@ void FCubusVegetationCatalog::BuildDefaultsIfNeeded(
             Entry.Habitat.MaximumRockExposure = 0.55f;
             Entry.Habitat.MaximumExposure = 0.72f;
             Entry.Habitat.MinimumFertility = 0.30f;
+            Entry.Habitat.MaximumElevationNormalized = 0.78f;
+            Entry.Habitat.MinimumTreeLineWeight = 0.20f;
+            Entry.Habitat.MaximumSoilSaturation = 0.86f;
+            Entry.Habitat.MaximumErosion = 0.76f;
             Entry.Habitat.MaximumSlopeDegrees = 34.0f;
         }
         else if (TypeId == ConiferType)
@@ -246,6 +257,11 @@ void FCubusVegetationCatalog::BuildDefaultsIfNeeded(
             Entry.Habitat.MinimumSoilDepth = 0.18f;
             Entry.Habitat.MaximumRockExposure = 0.82f;
             Entry.Habitat.MaximumExposure = 0.90f;
+            Entry.Habitat.MinimumElevationNormalized = 0.10f;
+            Entry.Habitat.MaximumElevationNormalized = 0.94f;
+            Entry.Habitat.MinimumTreeLineWeight = 0.04f;
+            Entry.Habitat.MaximumSoilSaturation = 0.90f;
+            Entry.Habitat.MaximumErosion = 0.86f;
             Entry.Habitat.MaximumSlopeDegrees = 40.0f;
         }
         else if (TypeId == ShrubType)

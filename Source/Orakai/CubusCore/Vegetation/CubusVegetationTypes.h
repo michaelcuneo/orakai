@@ -87,6 +87,42 @@ struct FCubusVegetationHabitatEnvelope
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MaximumFertility = 1.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.5"))
+    float MinimumElevationNormalized = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.5"))
+    float MaximumElevationNormalized = 1.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumTreeLineWeight = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Elevation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumTreeLineWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumSoilSaturation = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumSoilSaturation = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumGroundwaterPotential = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Hydrology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumGroundwaterPotential = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumSolarExposure = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Exposure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumSolarExposure = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinimumErosion = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaximumErosion = 1.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat", meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))
     float MaximumSlopeDegrees = 90.0f;
 

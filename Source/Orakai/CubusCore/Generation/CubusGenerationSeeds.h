@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 15: biome ecology now models structural elevation zones, aspect,
-    // hydrology/soil state and blended ecological communities instead of one winner.
-    static constexpr uint32 CurrentGenerationVersion = 15;
+    // Bumped to 16: vegetation species and placement ecology now consume the v2
+    // elevation, treeline, hydrology, solar-exposure and erosion habitat fields.
+    static constexpr uint32 CurrentGenerationVersion = 16;
 
     int64 World = 1;
     int32 Terrain = 0;

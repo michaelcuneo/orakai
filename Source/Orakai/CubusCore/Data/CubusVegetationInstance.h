@@ -30,6 +30,12 @@ struct FCubusVegetationHabitatSample
     uint8 RockExposure = 0;
     uint8 Exposure = 0;
     uint8 Fertility = 128;
+    uint8 ElevationNormalized = 0;
+    uint8 TreeLineWeight = 255;
+    uint8 SoilSaturation = 0;
+    uint8 GroundwaterPotential = 0;
+    uint8 SolarExposure = 128;
+    uint8 Erosion = 0;
     uint8 SlopeDegrees = 0;
 
     static uint8 QuantizeUnit(const float Value)
@@ -55,6 +61,12 @@ struct FCubusVegetationHabitatSample
     float GetRockExposure() const { return DecodeUnit(RockExposure); }
     float GetExposure() const { return DecodeUnit(Exposure); }
     float GetFertility() const { return DecodeUnit(Fertility); }
+    float GetElevationNormalized() const { return DecodeUnit(ElevationNormalized) * 1.5f; }
+    float GetTreeLineWeight() const { return DecodeUnit(TreeLineWeight); }
+    float GetSoilSaturation() const { return DecodeUnit(SoilSaturation); }
+    float GetGroundwaterPotential() const { return DecodeUnit(GroundwaterPotential); }
+    float GetSolarExposure() const { return DecodeUnit(SolarExposure); }
+    float GetErosion() const { return DecodeUnit(Erosion); }
     float GetSlopeDegrees() const { return DecodeUnit(SlopeDegrees) * 90.0f; }
 };
 
