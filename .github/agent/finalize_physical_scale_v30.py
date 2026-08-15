@@ -1,9 +1,6 @@
 from pathlib import Path
 
-# One-shot v30 finalizer. This file intentionally exists only to apply a guarded
-# source migration in GitHub Actions; it is removed after the migration succeeds.
-
-
+# One-shot v30 finalizer. Removed after the guarded migration succeeds.
 def replace_once(path: str, old: str, new: str) -> None:
     p = Path(path)
     text = p.read_text(encoding='utf-8')
@@ -17,18 +14,22 @@ tests = 'Source/Orakai/CubusCore/Tests/CubusTerrainFormTests.cpp'
 density = 'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp'
 
 anchor = '''    const float AlpineBand = Result.AlpineInfluence * (1.0f - Result.NivalInfluence);\n\n    if (Settings.Definitions.Num() == 0)\n    {\n'''
-replacement = '''    const float AlpineBand = Result.AlpineInfluence * (1.0f - Result.NivalInfluence);\n\n    const auto IsLegacyArchetypeDefinition = [](const FCubusBiomeDefinition& Definition)\n    {\n        return Definition.Name == TEXT("Plains") ||\n            Definition.Name == TEXT("Forest") ||\n            Definition.Name == TEXT("Rocky") ||\n            Definition.Name == TEXT("Wetland");\n    };\n    bool bOnlyLegacyArchetypeDefinitions = !Settings.Definitions.IsEmpty();\n    for (const FCubusBiomeDefinition& Definition : Settings.Definitions)\n    {\n        bOnlyLegacyArchetypeDefinitions &= IsLegacyArchetypeDefinition(Definition);\n    }\n    const bool bUseBuiltInRealCommunities =\n        Settings.Definitions.IsEmpty() || bOnlyLegacyArchetypeDefinitions;\n\n    /*\n     * Plains / Forest / Rocky / Wetland are compatibility projections used by\n     * old material and vegetation masks. A Data Asset containing only those\n     * generic entries must not downgrade the ecology engine to four biomes.\n     * The built-in named communities remain active until the asset contains at\n     * least one genuinely authored community definition.\n     */\n    if (bUseBuiltInRealCommunities)\n    {\n'''
+replacement = '''    const float AlpineBand = Result.AlpineInfluence * (1.0f - Result.NivalInfluence);\n\n    const auto IsLegacyArchetypeDefinition = [](const FCubusBiomeDefinition& Definition)\n    {\n        return Definition.Name == TEXT("Plains") ||\n            Definition.Name == TEXT("Forest") ||\n            Definition.Name == TEXT("Rocky") ||\n            Definition.Name == TEXT("Wetland");\n    };\n    bool bOnlyLegacyArchetypeDefinitions = !Settings.Definitions.IsEmpty();\n    for (const FCubusBiomeDefinition& Definition : Settings.Definitions)\n    {\n        bOnlyLegacyArchetypeDefinitions &= IsLegacyArchetypeDefinition(Definition);\n    }\n    const bool bUseBuiltInRealCommunities =\n        Settings.Definitions.IsEmpty() || bOnlyLegacyArchetypeDefinitions;\n\n    /* Plains / Forest / Rocky / Wetland are compatibility projections. A Data\n     * Asset containing only those generic entries must not suppress the real\n     * named community classifier. */\n    if (bUseBuiltInRealCommunities)\n    {\n'''
 replace_once(biome, anchor, replacement)
 
+# Convert geology fabric frequencies to physical sizes while retaining v29's
+# hard displacement cap. These are coherent structures, not extra amplitude.
 replace_once(density,
-    '''\tconst float StructuralFrequency = FMath::Max(Settings.GeologyMassFrequency, 0.000001f);\n''',
-    '''\tconst float StructuralFrequency = TerrainFormSettings.bUsePhysicalWorldScale\n\t\t? CubusWorldScale::FrequencyForWavelengthMeters(220.0f, Settings.VoxelSizeCm)\n\t\t: FMath::Max(Settings.GeologyMassFrequency, 0.000001f);\n''')
+    '''\tconst float RockMass = SampleNoise3D(\n\t\tWorldX - 6211.0f,\n\t\tWorldY + 4177.0f,\n\t\tWorldZ - 1987.0f,\n\t\tFMath::Clamp(Settings.GeologyMassFrequency, 0.006f, 0.18f)\n\t);\n\tconst float RockWarp = SampleNoise3D(\n\t\tWorldX + 1709.0f,\n\t\tWorldY - 3187.0f,\n\t\tWorldZ + 733.0f,\n\t\tFMath::Clamp(Settings.GeologyRockWarpFrequency, 0.008f, 0.22f)\n\t);\n\tconst float FractureVolume = SampleRidgedNoise3D(\n\t\tWorldX + 12011.0f,\n\t\tWorldY - 4919.0f,\n\t\tWorldZ + 2791.0f,\n\t\tFMath::Clamp(Settings.GeologyFractureFrequency, 0.006f, 0.18f)\n\t);\n''',
+    '''\tconst float RockMassFrequency = TerrainFormSettings.bUsePhysicalWorldScale\n\t\t? CubusWorldScale::FrequencyForWavelengthMeters(220.0f, Settings.VoxelSizeCm)\n\t\t: FMath::Clamp(Settings.GeologyMassFrequency, 0.006f, 0.18f);\n\tconst float RockWarpFrequency = TerrainFormSettings.bUsePhysicalWorldScale\n\t\t? CubusWorldScale::FrequencyForWavelengthMeters(70.0f, Settings.VoxelSizeCm)\n\t\t: FMath::Clamp(Settings.GeologyRockWarpFrequency, 0.008f, 0.22f);\n\tconst float FractureFrequency = TerrainFormSettings.bUsePhysicalWorldScale\n\t\t? CubusWorldScale::FrequencyForWavelengthMeters(90.0f, Settings.VoxelSizeCm)\n\t\t: FMath::Clamp(Settings.GeologyFractureFrequency, 0.006f, 0.18f);\n\n\tconst float RockMass = SampleNoise3D(\n\t\tWorldX - 6211.0f,\n\t\tWorldY + 4177.0f,\n\t\tWorldZ - 1987.0f,\n\t\tRockMassFrequency\n\t);\n\tconst float RockWarp = SampleNoise3D(\n\t\tWorldX + 1709.0f,\n\t\tWorldY - 3187.0f,\n\t\tWorldZ + 733.0f,\n\t\tRockWarpFrequency\n\t);\n\tconst float FractureVolume = SampleRidgedNoise3D(\n\t\tWorldX + 12011.0f,\n\t\tWorldY - 4919.0f,\n\t\tWorldZ + 2791.0f,\n\t\tFractureFrequency\n\t);\n''')
 p = Path(density)
 text = p.read_text(encoding='utf-8')
 if '#include "CubusCore/Generation/CubusWorldScale.h"' not in text:
     text = text.replace('#include "CubusCore/Generation/CubusTerrainDensityField.h"\n', '#include "CubusCore/Generation/CubusTerrainDensityField.h"\n#include "CubusCore/Generation/CubusWorldScale.h"\n', 1)
 p.write_text(text, encoding='utf-8')
 
+# Preserve the old tight shape test on the legacy parameter path, and add a
+# separate test that measures the physical world in metres/kilometres.
 replace_once(tests,
     '''    FCubusTerrainFormSettings Settings;\n    FCubusTerrainFormSettings NoDetailSettings = Settings;\n''',
     '''    FCubusTerrainFormSettings Settings;\n    Settings.bUsePhysicalWorldScale = false;\n    FCubusTerrainFormSettings NoDetailSettings = Settings;\n''')
@@ -45,7 +46,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FCubusPhysicalTerrainScaleTest::RunTest(const FString& Parameters)
 {
     (void)Parameters;
-
     FCubusTerrainFormSettings Settings;
     Settings.VoxelSizeCm = 80.0f;
     Settings.bUsePhysicalWorldScale = true;
@@ -57,13 +57,12 @@ bool FCubusPhysicalTerrainScaleTest::RunTest(const FString& Parameters)
     };
 
     TestTrue(TEXT("80 cm voxels convert one kilometre to 1250 canonical voxels"), FMath::IsNearlyEqual(MetersToVoxels(1000.0f), 1250.0f, 0.01f));
-    TestTrue(TEXT("Configured mountain relief represents kilometre-scale vertical terrain"), Settings.MountainReliefMeters >= 1000.0f);
-    TestTrue(TEXT("Configured major valleys are hundreds of metres deep"), Settings.ValleyReliefMeters >= 250.0f);
-    TestTrue(TEXT("Mountain systems are separated by regional real-world distances"), Settings.MountainSystemSpacingKm >= 10.0f);
+    TestTrue(TEXT("Mountain relief is kilometre scale"), Settings.MountainReliefMeters >= 1000.0f);
+    TestTrue(TEXT("Major valleys are hundreds of metres deep"), Settings.ValleyReliefMeters >= 250.0f);
+    TestTrue(TEXT("Mountain systems have regional spacing"), Settings.MountainSystemSpacingKm >= 10.0f);
 
     const int32 HalfExtent = FMath::RoundToInt(MetersToVoxels(20000.0f));
     const int32 Step = FMath::Max(1, FMath::RoundToInt(MetersToVoxels(320.0f)));
-
     float MinimumHeight = MAX_flt;
     float MaximumHeight = -MAX_flt;
     float MaximumDrainage = 0.0f;
@@ -85,10 +84,10 @@ bool FCubusPhysicalTerrainScaleTest::RunTest(const FString& Parameters)
 
     const float ReliefMeters = (MaximumHeight - MinimumHeight) * MetersPerVoxel;
     TestTrue(TEXT("Physical world contains mountain country"), MountainSamples > 0);
-    TestTrue(TEXT("Physical world also contains broad non-mountain country"), LowlandSamples > 0);
-    TestTrue(TEXT("Physical world contains major drainage structure"), MaximumDrainage > 0.55f);
-    TestTrue(TEXT("Regional terrain relief reaches real mountain scale"), ReliefMeters >= 700.0f);
-    TestTrue(TEXT("Regional terrain relief remains bounded below absurd vertical scale"), ReliefMeters <= 4200.0f);
+    TestTrue(TEXT("Physical world contains broad non-mountain country"), LowlandSamples > 0);
+    TestTrue(TEXT("Physical world contains major drainage"), MaximumDrainage > 0.55f);
+    TestTrue(TEXT("Regional relief reaches mountain scale"), ReliefMeters >= 700.0f);
+    TestTrue(TEXT("Regional relief remains physically bounded"), ReliefMeters <= 4200.0f);
     return true;
 }
 '''
@@ -102,10 +101,10 @@ p.write_text(text, encoding='utf-8')
 b = Path(biome).read_text(encoding='utf-8')
 d = Path(density).read_text(encoding='utf-8')
 t = Path(tests).read_text(encoding='utf-8')
-for token in ['bOnlyLegacyArchetypeDefinitions', 'bUseBuiltInRealCommunities']:
-    if token not in b:
-        raise RuntimeError(f'missing biome compatibility token {token}')
-if 'FrequencyForWavelengthMeters(220.0f' not in d:
-    raise RuntimeError('physical outcrop scale missing')
+if 'bUseBuiltInRealCommunities' not in b:
+    raise RuntimeError('legacy biome compatibility fix missing')
+for token in ['FrequencyForWavelengthMeters(220.0f', 'FrequencyForWavelengthMeters(70.0f', 'FrequencyForWavelengthMeters(90.0f']:
+    if token not in d:
+        raise RuntimeError(f'physical geology token missing: {token}')
 if 'FCubusPhysicalTerrainScaleTest' not in t:
     raise RuntimeError('physical terrain scale test missing')
