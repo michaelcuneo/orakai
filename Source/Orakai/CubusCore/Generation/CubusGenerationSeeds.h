@@ -11,10 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 18: climate provinces and cached long-range terrain horizons now
-    // drive windward moisture, rain shadow and solar occlusion; slow climate
-    // interpolation also moves to an 8-voxel lattice for cheaper cold generation.
-    static constexpr uint32 CurrentGenerationVersion = 18;
+    // Bumped to 19: ecological communities now emit an explicit visible phenotype
+    // that strongly drives tree composition and ground-cover structure.
+    static constexpr uint32 CurrentGenerationVersion = 19;
 
     int64 World = 1;
     int32 Terrain = 0;

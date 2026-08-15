@@ -5,6 +5,64 @@
 
 namespace
 {
+    struct FCommunityVisualProfile
+    {
+        float TreeCover = 0.0f;
+        float ConiferPreference = 0.5f;
+        float ShrubCover = 0.0f;
+        float HerbCover = 0.0f;
+        float ReedCover = 0.0f;
+        float AlpineCover = 0.0f;
+    };
+
+    FCommunityVisualProfile ResolveCommunityVisualProfile(const FName Name, const ECubusBiomeKind Archetype)
+    {
+        FCommunityVisualProfile Result;
+        switch (Archetype)
+        {
+            case ECubusBiomeKind::Forest:
+                Result = {0.70f, 0.42f, 0.22f, 0.24f, 0.02f, 0.02f};
+                break;
+            case ECubusBiomeKind::Rocky:
+                Result = {0.03f, 0.72f, 0.24f, 0.14f, 0.00f, 0.42f};
+                break;
+            case ECubusBiomeKind::Wetland:
+                Result = {0.10f, 0.18f, 0.12f, 0.48f, 0.82f, 0.00f};
+                break;
+            case ECubusBiomeKind::Plains:
+            default:
+                Result = {0.04f, 0.28f, 0.20f, 0.82f, 0.02f, 0.02f};
+                break;
+        }
+
+        if (Name == TEXT("RiparianForest"))          return {0.72f, 0.16f, 0.18f, 0.32f, 0.34f, 0.00f};
+        if (Name == TEXT("TemperateForest"))         return {0.94f, 0.12f, 0.16f, 0.12f, 0.00f, 0.00f};
+        if (Name == TEXT("MontaneForest"))           return {0.88f, 0.66f, 0.18f, 0.18f, 0.00f, 0.08f};
+        if (Name == TEXT("WindwardMontaneForest"))   return {1.00f, 0.74f, 0.16f, 0.14f, 0.02f, 0.08f};
+        if (Name == TEXT("ShadedRavineForest"))      return {0.96f, 0.28f, 0.24f, 0.16f, 0.18f, 0.00f};
+        if (Name == TEXT("CoolValleyForest"))        return {0.90f, 0.38f, 0.22f, 0.20f, 0.12f, 0.00f};
+        if (Name == TEXT("DeepColluvialForest"))     return {0.94f, 0.24f, 0.20f, 0.14f, 0.02f, 0.00f};
+        if (Name == TEXT("SubalpineWoodland"))       return {0.54f, 0.92f, 0.40f, 0.34f, 0.00f, 0.26f};
+        if (Name == TEXT("OpenWoodland"))            return {0.34f, 0.30f, 0.48f, 0.64f, 0.00f, 0.00f};
+        if (Name == TEXT("DryRockWoodland"))         return {0.24f, 0.48f, 0.68f, 0.46f, 0.00f, 0.06f};
+        if (Name == TEXT("WindPrunedSubalpineScrub"))return {0.06f, 0.92f, 0.92f, 0.20f, 0.00f, 0.62f};
+        if (Name == TEXT("FracturedRockHeath"))      return {0.01f, 0.78f, 0.84f, 0.28f, 0.00f, 0.54f};
+        if (Name == TEXT("LeewardSteppe"))           return {0.01f, 0.36f, 0.42f, 1.00f, 0.00f, 0.00f};
+        if (Name == TEXT("Meadow"))                  return {0.02f, 0.24f, 0.10f, 1.00f, 0.00f, 0.00f};
+        if (Name == TEXT("DryGrassland"))            return {0.01f, 0.30f, 0.32f, 0.92f, 0.00f, 0.00f};
+        if (Name == TEXT("WetMeadow"))               return {0.01f, 0.18f, 0.10f, 0.94f, 0.36f, 0.00f};
+        if (Name == TEXT("FloodplainMeadow"))        return {0.01f, 0.18f, 0.08f, 0.96f, 0.48f, 0.00f};
+        if (Name == TEXT("AvalancheMeadow"))         return {0.00f, 0.62f, 0.20f, 0.88f, 0.00f, 0.42f};
+        if (Name == TEXT("Marsh"))                   return {0.00f, 0.10f, 0.05f, 0.30f, 1.00f, 0.00f};
+        if (Name == TEXT("RiparianWetland"))         return {0.06f, 0.16f, 0.10f, 0.44f, 0.96f, 0.00f};
+        if (Name == TEXT("AlpineMeadow"))            return {0.00f, 0.80f, 0.12f, 0.64f, 0.00f, 1.00f};
+        if (Name == TEXT("AlpineHeath"))             return {0.00f, 0.82f, 0.62f, 0.18f, 0.00f, 0.92f};
+        if (Name == TEXT("Scree"))                   return {0.00f, 0.86f, 0.05f, 0.04f, 0.00f, 0.28f};
+        if (Name == TEXT("ExposedRock"))             return {0.00f, 0.82f, 0.02f, 0.01f, 0.00f, 0.08f};
+        if (Name == TEXT("NivalRock"))               return {0.00f, 0.88f, 0.00f, 0.00f, 0.00f, 0.00f};
+        return Result;
+    }
+
     ECubusClimateProvince ResolveClimateProvince(const FCubusBiomeClimateContext& Climate)
     {
         const float Moisture = FMath::Clamp(
@@ -1082,6 +1140,30 @@ FCubusBiomeSample FCubusBiomeField::Sample(
             default: Result.PlainsWeight += Community.Weight; break;
         }
     }
+
+    Result.VisualTreeCover = 0.0f;
+    Result.VisualConiferPreference = 0.0f;
+    Result.VisualShrubCover = 0.0f;
+    Result.VisualHerbCover = 0.0f;
+    Result.VisualReedCover = 0.0f;
+    Result.VisualAlpineCover = 0.0f;
+    for (int32 Index = 0; Index < Result.CommunityBlendCount; ++Index)
+    {
+        const FCubusBiomeCommunityBlend& Community = Result.CommunityBlend[Index];
+        const FCommunityVisualProfile Visual = ResolveCommunityVisualProfile(Community.Name, Community.Archetype);
+        Result.VisualTreeCover += Visual.TreeCover * Community.Weight;
+        Result.VisualConiferPreference += Visual.ConiferPreference * Community.Weight;
+        Result.VisualShrubCover += Visual.ShrubCover * Community.Weight;
+        Result.VisualHerbCover += Visual.HerbCover * Community.Weight;
+        Result.VisualReedCover += Visual.ReedCover * Community.Weight;
+        Result.VisualAlpineCover += Visual.AlpineCover * Community.Weight;
+    }
+    Result.VisualTreeCover = FMath::Clamp(Result.VisualTreeCover, 0.0f, 1.0f);
+    Result.VisualConiferPreference = FMath::Clamp(Result.VisualConiferPreference, 0.0f, 1.0f);
+    Result.VisualShrubCover = FMath::Clamp(Result.VisualShrubCover, 0.0f, 1.0f);
+    Result.VisualHerbCover = FMath::Clamp(Result.VisualHerbCover, 0.0f, 1.0f);
+    Result.VisualReedCover = FMath::Clamp(Result.VisualReedCover, 0.0f, 1.0f);
+    Result.VisualAlpineCover = FMath::Clamp(Result.VisualAlpineCover, 0.0f, 1.0f);
 
     const FCubusBiomeCommunityBlend& DominantCommunity = Result.CommunityBlend[0];
     Result.BiomeDefinitionIndex = DominantCommunity.DefinitionIndex;

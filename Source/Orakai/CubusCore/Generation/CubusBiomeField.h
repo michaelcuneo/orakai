@@ -164,6 +164,15 @@ struct ORAKAI_API FCubusBiomeSample
     float CanopyPotential = 0.0f;
     float CanopyOpenness = 1.0f;
 
+    // Visible community phenotype. These deliberately drive large changes in
+    // vegetation structure so distinct ecological communities look distinct.
+    float VisualTreeCover = 0.0f;
+    float VisualConiferPreference = 0.5f;
+    float VisualShrubCover = 0.0f;
+    float VisualHerbCover = 0.0f;
+    float VisualReedCover = 0.0f;
+    float VisualAlpineCover = 0.0f;
+
     float SurfaceWorldZ = 0.0f;
     float Slope = 0.0f;
     int32 SurfaceMaterialId = 1;

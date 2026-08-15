@@ -191,6 +191,47 @@ bool FCubusBiomeRegionalTopographicClimateTest::RunTest(const FString& Parameter
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusBiomeVisualPhenotypeTest,
+    "Orakai.Cubus.Generation.BiomeVisualPhenotype",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusBiomeVisualPhenotypeTest::RunTest(const FString& Parameters)
+{
+    (void)Parameters;
+
+    FCubusBiomeFieldSettings Settings;
+    Settings.bEnabled = true;
+
+    bool bFoundDenseForest = false;
+    bool bFoundOpenCommunity = false;
+    float MaximumTreeCover = 0.0f;
+    float MinimumTreeCover = 1.0f;
+    float MaximumHerbCover = 0.0f;
+
+    for (int32 Y = -640; Y <= 640; Y += 32)
+    {
+        for (int32 X = -640; X <= 640; X += 32)
+        {
+            const FCubusBiomeSample Sample = FCubusBiomeField::Sample(
+                static_cast<float>(X), static_cast<float>(Y), 24.0f, 0.24f, Settings
+            );
+            MaximumTreeCover = FMath::Max(MaximumTreeCover, Sample.VisualTreeCover);
+            MinimumTreeCover = FMath::Min(MinimumTreeCover, Sample.VisualTreeCover);
+            MaximumHerbCover = FMath::Max(MaximumHerbCover, Sample.VisualHerbCover);
+            bFoundDenseForest |= Sample.VisualTreeCover >= 0.60f;
+            bFoundOpenCommunity |= Sample.VisualTreeCover <= 0.20f && Sample.VisualHerbCover >= 0.45f;
+        }
+    }
+
+    TestTrue(TEXT("Biome phenotype produces dense forest structure"), bFoundDenseForest);
+    TestTrue(TEXT("Biome phenotype produces visibly open communities"), bFoundOpenCommunity);
+    TestTrue(TEXT("Tree-cover phenotype spans a meaningful range"), MaximumTreeCover - MinimumTreeCover >= 0.35f);
+    TestTrue(TEXT("Herbaceous communities can dominate ground cover"), MaximumHerbCover >= 0.60f);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCubusBiomeEcologicalNicheTest,
     "Orakai.Cubus.Generation.BiomeEcologicalNiches",
     EAutomationTestFlags::EditorContext |

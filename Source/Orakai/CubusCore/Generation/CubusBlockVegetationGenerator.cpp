@@ -155,6 +155,12 @@ namespace CubusBlockVegetationGenerator
         const float Gentle = 1.0f - FMath::SmoothStep(24.0f, 48.0f, SlopeDegrees);
         const float VeryGentle = 1.0f - FMath::SmoothStep(10.0f, 28.0f, SlopeDegrees);
         const float EcologyStrength = DominantEcologyStrength(BiomeSample);
+        const float VisualTreeCover = FMath::Clamp(BiomeSample.VisualTreeCover, 0.0f, 1.0f);
+        const float VisualConiferPreference = FMath::Clamp(BiomeSample.VisualConiferPreference, 0.0f, 1.0f);
+        const float VisualShrubCover = FMath::Clamp(BiomeSample.VisualShrubCover, 0.0f, 1.0f);
+        const float VisualHerbCover = FMath::Clamp(BiomeSample.VisualHerbCover, 0.0f, 1.0f);
+        const float VisualReedCover = FMath::Clamp(BiomeSample.VisualReedCover, 0.0f, 1.0f);
+        const float VisualAlpineCover = FMath::Clamp(BiomeSample.VisualAlpineCover, 0.0f, 1.0f);
 
         const float ForestTreeBase = Settings.ForestTreeDensity * BiomeSample.ForestWeight *
             FMath::Lerp(0.65f, 1.25f, FMath::Clamp(Settings.ForestGroveCoverage, 0.05f, 1.0f));
@@ -187,7 +193,9 @@ namespace CubusBlockVegetationGenerator
             FMath::Sqrt(TreeLine) * (1.0f - Nival) *
             (1.0f - FMath::SmoothStep(34.0f, 48.0f, SlopeDegrees));
 
-        const float TreeBase = ForestTreeBase + WetlandTreeBase + PlainsTreeBase + RockyConiferBase;
+        const float LegacyTreeBase = ForestTreeBase + WetlandTreeBase + PlainsTreeBase + RockyConiferBase;
+        const float PhenotypeTreeBase = Settings.ForestTreeDensity * FMath::Lerp(0.04f, 1.85f, VisualTreeCover);
+        const float TreeBase = FMath::Lerp(LegacyTreeBase, PhenotypeTreeBase, 0.78f);
         const float ArchetypeBroadleafFraction = FMath::Clamp(
             BiomeSample.ForestWeight * Settings.ForestBroadleafFraction +
             BiomeSample.WetlandWeight * 0.86f +
@@ -197,9 +205,14 @@ namespace CubusBlockVegetationGenerator
             0.95f
         );
 
-        Result.BroadleafScore = ArchetypeBroadleafFraction * BroadleafHabitat;
-        Result.ConiferScore = (1.0f - ArchetypeBroadleafFraction) * ConiferHabitat +
-            BiomeSample.RockyWeight * ConiferHabitat * 0.28f;
+        const float BroadleafFraction = FMath::Clamp(
+            FMath::Lerp(ArchetypeBroadleafFraction, 1.0f - VisualConiferPreference, 0.82f),
+            0.02f,
+            0.98f
+        );
+        Result.BroadleafScore = BroadleafFraction * BroadleafHabitat;
+        Result.ConiferScore = (1.0f - BroadleafFraction) * ConiferHabitat +
+            BiomeSample.RockyWeight * ConiferHabitat * 0.18f;
         const float TreeHabitat = FMath::Clamp(Result.BroadleafScore + Result.ConiferScore, 0.0f, 1.25f);
         Result.TreeDensity = FMath::Clamp(
             TreeBase *
@@ -218,7 +231,8 @@ namespace CubusBlockVegetationGenerator
             FMath::Lerp(0.55f, 1.0f, Fertility) *
             FMath::Lerp(0.72f, 1.08f, WaterHolding) * VeryGentle * (1.0f - Nival);
         Result.ReedDensity = FMath::Clamp(
-            Settings.WetlandReedDensity * (0.35f + BiomeSample.WetlandWeight) * ReedHabitat,
+            Settings.WetlandReedDensity *
+            FMath::Lerp(0.08f, 1.90f, VisualReedCover) * ReedHabitat,
             0.0f,
             1.0f
         );
@@ -232,12 +246,13 @@ namespace CubusBlockVegetationGenerator
             FMath::Lerp(0.82f, 1.12f, Coarseness) *
             (1.0f - River * 0.8f);
         Result.AlpineDensity = FMath::Clamp(
-            Settings.RockyAlpineDensity * (0.25f + BiomeSample.RockyWeight) * AlpineHabitat,
+            Settings.RockyAlpineDensity *
+            FMath::Lerp(0.08f, 2.10f, VisualAlpineCover) * AlpineHabitat,
             0.0f,
             1.0f
         );
 
-        const float GroundBase = Settings.PlainsGroundCoverDensity *
+        const float LegacyGroundBase = Settings.PlainsGroundCoverDensity *
             (BiomeSample.PlainsWeight + BiomeSample.ForestWeight * 0.35f + BiomeSample.RockyWeight * 0.16f);
         const float ModerateDisturbance = 1.0f - FMath::Clamp(FMath::Abs(Disturbance - 0.45f) / 0.55f, 0.0f, 1.0f);
         const float ShrubHabitat =
@@ -262,8 +277,12 @@ namespace CubusBlockVegetationGenerator
             (1.0f - Nival) * Gentle;
 
         const float ShrubFraction = FMath::Clamp(Settings.PlainsShrubFraction, 0.0f, 1.0f);
-        Result.ShrubDensity = FMath::Clamp(GroundBase * FMath::Lerp(0.24f, 0.78f, ShrubFraction) * ShrubHabitat, 0.0f, 1.0f);
-        Result.GrassDensity = FMath::Clamp(GroundBase * FMath::Lerp(1.0f, 0.52f, ShrubFraction) * GrassHabitat, 0.0f, 1.0f);
+        const float PhenotypeShrubBase = Settings.PlainsGroundCoverDensity * FMath::Lerp(0.04f, 1.75f, VisualShrubCover);
+        const float PhenotypeHerbBase = Settings.PlainsGroundCoverDensity * FMath::Lerp(0.04f, 1.85f, VisualHerbCover);
+        const float ShrubBase = FMath::Lerp(LegacyGroundBase * FMath::Lerp(0.24f, 0.78f, ShrubFraction), PhenotypeShrubBase, 0.82f);
+        const float HerbBase = FMath::Lerp(LegacyGroundBase * FMath::Lerp(1.0f, 0.52f, ShrubFraction), PhenotypeHerbBase, 0.82f);
+        Result.ShrubDensity = FMath::Clamp(ShrubBase * ShrubHabitat, 0.0f, 1.0f);
+        Result.GrassDensity = FMath::Clamp(HerbBase * GrassHabitat, 0.0f, 1.0f);
 
         return Result;
     }
@@ -279,6 +298,21 @@ FCubusBlockVegetationGenerator::CaptureGenerationSettings(
 
     Settings.bUseConfiguredBiomes = IsValid(GeologyProfile) && GeologyProfile->bGenerateBiomes;
     Settings.BiomeSettings = FCubusBiomeField::MakeSettings(GeologyProfile, GenerationSeeds.Biomes, GenerationSeeds.Rivers);
+
+    static TAtomic<bool> bLoggedBiomeRuntime(false);
+    bool bExpected = false;
+    if (bLoggedBiomeRuntime.CompareExchange(bExpected, true))
+    {
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT("Cubus biome runtime: profile=%s enabled=%s definitions=%d generationVersion=%u"),
+            *GetPathNameSafe(GeologyProfile),
+            Settings.bUseConfiguredBiomes ? TEXT("YES") : TEXT("NO - VEGETATION FALLBACK ACTIVE"),
+            Settings.BiomeSettings.Definitions.Num(),
+            FCubusGenerationSeeds::CurrentGenerationVersion
+        );
+    }
     Settings.LandmarkSettings = FCubusLandmarkField::MakeSettings(GeologyProfile, GenerationSeeds.Terrain);
 
     if (!IsValid(GeologyProfile))
@@ -496,6 +530,14 @@ void FCubusBlockVegetationGenerator::Generate(
             Instance.WorldVoxel = FIntVector(WorldX, WorldY, SurfaceWorldZ + 1);
             Instance.RotationYaw = HashToUnitFloat(HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 211)) * 360.0f;
             Instance.Scale = FMath::Lerp(0.85f, 1.15f, HashToUnitFloat(HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 307)));
+            if (IsTreeType(Selection.TypeId))
+            {
+                Instance.Scale *= FMath::Lerp(0.86f, 1.18f, BiomeSample.VisualTreeCover);
+            }
+            else if (Selection.TypeId == CubusVegetationType::Shrub)
+            {
+                Instance.Scale *= FMath::Lerp(0.84f, 1.16f, BiomeSample.VisualShrubCover);
+            }
             Instance.TypeId = Selection.TypeId;
             Instance.BiomeMask = Selection.BiomeMask;
             Instance.Habitat = CubusBlockVegetationGenerator::MakeHabitatSample(BiomeSample);
@@ -554,6 +596,7 @@ void FCubusBlockVegetationGenerator::GenerateTreesForRegion(
             Instance.WorldVoxel = FIntVector(WorldX, WorldY, FMath::RoundToInt(BiomeSample.SurfaceWorldZ) + 1);
             Instance.RotationYaw = HashToUnitFloat(HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 211)) * 360.0f;
             Instance.Scale = FMath::Lerp(0.85f, 1.15f, HashToUnitFloat(HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 307)));
+            Instance.Scale *= FMath::Lerp(0.86f, 1.18f, BiomeSample.VisualTreeCover);
             Instance.TypeId = Selection.TypeId;
             Instance.BiomeMask = Selection.BiomeMask;
             Instance.Habitat = CubusBlockVegetationGenerator::MakeHabitatSample(BiomeSample);
