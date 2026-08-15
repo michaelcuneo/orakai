@@ -39,6 +39,19 @@ struct ORAKAI_API FCubusBiomeFieldSettings
     TArray<FCubusBiomeDefinition> Definitions;
 };
 
+/** Slow-varying seeded climate backbone, safe to interpolate between nearby columns. */
+struct ORAKAI_API FCubusBiomeClimateContext
+{
+    float ProvinceMoisture = 0.0f;
+    float RegionalMoisture = 0.0f;
+    float LocalHumidity = 0.0f;
+    float ProvinceTemperature = 0.0f;
+    float RegionalTemperature = 0.0f;
+    float LocalTemperature = 0.0f;
+    float CommunityPatch[4] = {0.5f, 0.5f, 0.5f, 0.5f};
+    float ParentMaterial = 0.5f;
+};
+
 /** Terrain/environment context supplied by the authoritative density column. */
 struct ORAKAI_API FCubusBiomeTerrainContext
 {
@@ -48,6 +61,12 @@ struct ORAKAI_API FCubusBiomeTerrainContext
     float FoothillWeight = 0.0f;
     float Ridge = 0.0f;
     FVector2D Gradient = FVector2D::ZeroVector;
+
+    bool bHasTerrainFormSample = false;
+    FCubusTerrainFormSample TerrainFormSample;
+
+    bool bHasHydrologySample = false;
+    FCubusHydrologySample HydrologySample;
 };
 
 /** Continuous environmental state and ecological community blend for one world column. */
