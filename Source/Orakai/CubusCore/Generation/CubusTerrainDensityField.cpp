@@ -589,7 +589,7 @@ const FCubusBiomeTopographicClimateContext& FCubusTerrainDensityField::GetCached
         );
     }
 
-    constexpr FVector2D SkyDirections[] = {
+    static const FVector2D SkyDirections[] = {
         FVector2D(1.0f, 0.0f), FVector2D(-1.0f, 0.0f),
         FVector2D(0.0f, 1.0f), FVector2D(0.0f, -1.0f),
         FVector2D(0.70710678f, 0.70710678f), FVector2D(-0.70710678f, 0.70710678f),
