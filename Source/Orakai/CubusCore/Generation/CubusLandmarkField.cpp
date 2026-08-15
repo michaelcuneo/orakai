@@ -15,7 +15,19 @@ FCubusLandmarkFieldSettings FCubusLandmarkField::MakeSettings(
         return Settings;
     }
 
-    Settings.bEnabled = GeologyProfile->bGenerateLandmarks;
+    /*
+     * Legacy cellular mesas are intentionally retired as terrain shapers.
+     *
+     * They were selected from a regular world-cell lattice without any knowledge
+     * of ridges, valleys, hydrology or geology, so even a well-shaped individual
+     * formation could appear in a place with no geomorphic reason to exist.
+     * Natural large-scale features now belong to FCubusTerrainForm where they can
+     * participate in the same structural hierarchy as ranges and drainage.
+     *
+     * Keep the authored values copied for save/data compatibility and for a future
+     * semantic POI system, but do not allow this legacy field to modify terrain.
+     */
+    Settings.bEnabled = false;
     Settings.CellSizeVoxels = GeologyProfile->LandmarkCellSizeVoxels;
     Settings.SpawnChance = GeologyProfile->LandmarkSpawnChance;
     Settings.MinimumRadiusVoxels = GeologyProfile->LandmarkMinimumRadiusVoxels;
@@ -233,9 +245,6 @@ FCubusLandmarkSample FCubusLandmarkField::Sample(
                 continue;
             }
 
-            // The summit does not sit at the geometric centre. Decoupling it
-            // from the footprint removes the even, conical falloff that made
-            // the old landmark read as a haystack.
             const float SummitOffsetX = FMath::Lerp(
                 -0.12f,
                 0.18f,
@@ -273,8 +282,6 @@ FCubusLandmarkSample FCubusLandmarkField::Sample(
             );
             float SmoothInfluence = FMath::Max(Escarpment, Apron);
 
-            // Two lower, offset rock masses break the single-peak silhouette
-            // and form readable shoulders and saddles around the main cap.
             const float ShoulderSide = HashToUnitFloat(
                 HashCell(CellX, CellY, InSettings.Seed, 0x27D4EB2Fu)
             ) >= 0.5f ? 1.0f : -1.0f;
@@ -301,8 +308,6 @@ FCubusLandmarkSample FCubusLandmarkField::Sample(
                 FMath::Max(ShoulderA, ShoulderB)
             );
 
-            // Seeded radial gullies cut only the sloped faces. The summit and
-            // outer apron remain readable while the rim loses its uniformity.
             const float GullyAngleA = HashToUnitFloat(
                 HashCell(CellX, CellY, InSettings.Seed, 0x85EBCA77u)
             ) * 2.0f * PI;
