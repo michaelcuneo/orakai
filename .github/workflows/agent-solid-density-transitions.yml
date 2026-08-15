@@ -1,0 +1,39 @@
+name: Agent solid density transitions
+
+on:
+  push:
+    branches:
+      - agent/density-meshing
+    paths:
+      - .github/agent/solid_density_transitions.py
+      - .github/workflows/agent-solid-density-transitions.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Apply transition-cell migration
+        run: python .github/agent/solid_density_transitions.py
+      - name: Verify diff
+        run: |
+          git diff --check
+          git diff -- Source/Orakai/CubusCore/Meshing/CubusTransvoxelTables.h Source/Orakai/CubusCore/Meshing/CubusDensityLod.h Source/Orakai/CubusCore/Meshing/CubusDensityMesher.h Source/Orakai/CubusCore/Meshing/CubusDensityMesher.cpp Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.h Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.cpp Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.h Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp Source/Orakai/CubusCore/Tests/CubusDensityMesherTests.cpp
+      - name: Commit changes
+        run: |
+          git config user.name 'OpenAI Agent'
+          git config user.email 'openai-agent@users.noreply.github.com'
+          git add Source/Orakai/CubusCore/Meshing/CubusTransvoxelTables.h Source/Orakai/CubusCore/Meshing/CubusDensityLod.h Source/Orakai/CubusCore/Meshing/CubusDensityMesher.h Source/Orakai/CubusCore/Meshing/CubusDensityMesher.cpp Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.h Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.cpp Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.h Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp Source/Orakai/CubusCore/Tests/CubusDensityMesherTests.cpp
+          git diff --cached --quiet && exit 0
+          git commit -m 'Make density LOD transitions watertight'
+          git push origin HEAD:agent/density-meshing
