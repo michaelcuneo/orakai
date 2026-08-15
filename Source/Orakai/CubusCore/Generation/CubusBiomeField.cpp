@@ -832,7 +832,25 @@ FCubusBiomeSample FCubusBiomeField::Sample(
         (1.0f - SmoothStep(0.88f, 0.98f, Result.ElevationNormalized));
     const float AlpineBand = Result.AlpineInfluence * (1.0f - Result.NivalInfluence);
 
-    if (Settings.Definitions.Num() == 0)
+    const auto IsLegacyArchetypeDefinition = [](const FCubusBiomeDefinition& Definition)
+    {
+        return Definition.Name == TEXT("Plains") ||
+            Definition.Name == TEXT("Forest") ||
+            Definition.Name == TEXT("Rocky") ||
+            Definition.Name == TEXT("Wetland");
+    };
+    bool bOnlyLegacyArchetypeDefinitions = !Settings.Definitions.IsEmpty();
+    for (const FCubusBiomeDefinition& Definition : Settings.Definitions)
+    {
+        bOnlyLegacyArchetypeDefinitions &= IsLegacyArchetypeDefinition(Definition);
+    }
+    const bool bUseBuiltInRealCommunities =
+        Settings.Definitions.IsEmpty() || bOnlyLegacyArchetypeDefinitions;
+
+    /* Plains / Forest / Rocky / Wetland are compatibility projections. A Data
+     * Asset containing only those generic entries must not suppress the real
+     * named community classifier. */
+    if (bUseBuiltInRealCommunities)
     {
         auto AddBuiltIn = [&](const FName Name, const ECubusBiomeKind Archetype, const int32 MaterialId,
                     const float Suitability, const int32 PatchSlot, const float PatchStrength)

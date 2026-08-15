@@ -16,6 +16,7 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
     (void)Parameters;
 
     FCubusTerrainFormSettings Settings;
+    Settings.bUsePhysicalWorldScale = false;
     FCubusTerrainFormSettings NoDetailSettings = Settings;
     NoDetailSettings.DetailAmplitude = 0.0f;
     float MaximumAdjacentHeightDelta = 0.0f;
@@ -338,6 +339,62 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
         TEXT("Terrain ridge curvature remains supported across neighbouring columns"),
         MaximumAxisCurvature < 2.5f
     );
+    return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusPhysicalTerrainScaleTest,
+    "Orakai.Cubus.Generation.PhysicalTerrainScale",
+    EAutomationTestFlags::EditorContext |
+    EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusPhysicalTerrainScaleTest::RunTest(const FString& Parameters)
+{
+    (void)Parameters;
+    FCubusTerrainFormSettings Settings;
+    Settings.VoxelSizeCm = 80.0f;
+    Settings.bUsePhysicalWorldScale = true;
+
+    const float MetersPerVoxel = Settings.VoxelSizeCm * 0.01f;
+    const auto MetersToVoxels = [MetersPerVoxel](const float Meters)
+    {
+        return Meters / MetersPerVoxel;
+    };
+
+    TestTrue(TEXT("80 cm voxels convert one kilometre to 1250 canonical voxels"), FMath::IsNearlyEqual(MetersToVoxels(1000.0f), 1250.0f, 0.01f));
+    TestTrue(TEXT("Mountain relief is kilometre scale"), Settings.MountainReliefMeters >= 1000.0f);
+    TestTrue(TEXT("Major valleys are hundreds of metres deep"), Settings.ValleyReliefMeters >= 250.0f);
+    TestTrue(TEXT("Mountain systems have regional spacing"), Settings.MountainSystemSpacingKm >= 10.0f);
+
+    const int32 HalfExtent = FMath::RoundToInt(MetersToVoxels(20000.0f));
+    const int32 Step = FMath::Max(1, FMath::RoundToInt(MetersToVoxels(320.0f)));
+    float MinimumHeight = MAX_flt;
+    float MaximumHeight = -MAX_flt;
+    float MaximumDrainage = 0.0f;
+    int32 MountainSamples = 0;
+    int32 LowlandSamples = 0;
+
+    for (int32 Y = -HalfExtent; Y <= HalfExtent; Y += Step)
+    {
+        for (int32 X = -HalfExtent; X <= HalfExtent; X += Step)
+        {
+            const FCubusTerrainFormSample Sample = FCubusTerrainForm::Sample(static_cast<float>(X), static_cast<float>(Y), Settings);
+            MinimumHeight = FMath::Min(MinimumHeight, Sample.Height);
+            MaximumHeight = FMath::Max(MaximumHeight, Sample.Height);
+            MaximumDrainage = FMath::Max(MaximumDrainage, Sample.Drainage);
+            MountainSamples += Sample.MountainWeight > 0.60f ? 1 : 0;
+            LowlandSamples += Sample.MountainWeight < 0.25f ? 1 : 0;
+        }
+    }
+
+    const float ReliefMeters = (MaximumHeight - MinimumHeight) * MetersPerVoxel;
+    TestTrue(TEXT("Physical world contains mountain country"), MountainSamples > 0);
+    TestTrue(TEXT("Physical world contains broad non-mountain country"), LowlandSamples > 0);
+    TestTrue(TEXT("Physical world contains major drainage"), MaximumDrainage > 0.55f);
+    TestTrue(TEXT("Regional relief reaches mountain scale"), ReliefMeters >= 700.0f);
+    TestTrue(TEXT("Regional relief remains physically bounded"), ReliefMeters <= 4200.0f);
     return true;
 }
 

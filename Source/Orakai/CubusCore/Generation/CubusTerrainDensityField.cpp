@@ -1,4 +1,5 @@
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
+#include "CubusCore/Generation/CubusWorldScale.h"
 
 namespace CubusTerrainDensityField
 {
@@ -919,23 +920,33 @@ float FCubusTerrainDensityField::SampleGeologicalDensity(
 		SampleNoise2D(Along + 9113.0f, Across - 4327.0f, StrataFrequency * 0.16f) * 0.20f;
 	const float StrataWave = FMath::Sin(StrataPhase * 2.0f * PI);
 
+	const float RockMassFrequency = TerrainFormSettings.bUsePhysicalWorldScale
+		? CubusWorldScale::FrequencyForWavelengthMeters(220.0f, Settings.VoxelSizeCm)
+		: FMath::Clamp(Settings.GeologyMassFrequency, 0.006f, 0.18f);
+	const float RockWarpFrequency = TerrainFormSettings.bUsePhysicalWorldScale
+		? CubusWorldScale::FrequencyForWavelengthMeters(70.0f, Settings.VoxelSizeCm)
+		: FMath::Clamp(Settings.GeologyRockWarpFrequency, 0.008f, 0.22f);
+	const float FractureFrequency = TerrainFormSettings.bUsePhysicalWorldScale
+		? CubusWorldScale::FrequencyForWavelengthMeters(90.0f, Settings.VoxelSizeCm)
+		: FMath::Clamp(Settings.GeologyFractureFrequency, 0.006f, 0.18f);
+
 	const float RockMass = SampleNoise3D(
 		WorldX - 6211.0f,
 		WorldY + 4177.0f,
 		WorldZ - 1987.0f,
-		FMath::Clamp(Settings.GeologyMassFrequency, 0.006f, 0.18f)
+		RockMassFrequency
 	);
 	const float RockWarp = SampleNoise3D(
 		WorldX + 1709.0f,
 		WorldY - 3187.0f,
 		WorldZ + 733.0f,
-		FMath::Clamp(Settings.GeologyRockWarpFrequency, 0.008f, 0.22f)
+		RockWarpFrequency
 	);
 	const float FractureVolume = SampleRidgedNoise3D(
 		WorldX + 12011.0f,
 		WorldY - 4919.0f,
 		WorldZ + 2791.0f,
-		FMath::Clamp(Settings.GeologyFractureFrequency, 0.006f, 0.18f)
+		FractureFrequency
 	);
 	const float FractureCut =
 		SmoothStep(0.80f, 0.97f, FractureVolume) *
