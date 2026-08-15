@@ -1,0 +1,281 @@
+name: Refine biome terrain position ecology
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Apply terrain-position ecology refinement
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if new in text:
+                  return
+              if old not in text:
+                  raise RuntimeError(f'missing anchor in {path}: {old[:80]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # Biome public data model
+          # ------------------------------------------------------------------
+          replace_once(
+              'Source/Orakai/CubusCore/Data/CubusBiomeTypes.h',
+              '''UENUM(BlueprintType)\nenum class ECubusElevationZone : uint8\n{\n    Lowland,\n    Foothill,\n    Montane,\n    Subalpine,\n    Alpine,\n    Nival\n};\n\n/** One weighted ecological community retained in the top-four local ecotone blend. */\n''',
+              '''UENUM(BlueprintType)\nenum class ECubusElevationZone : uint8\n{\n    Lowland,\n    Foothill,\n    Montane,\n    Subalpine,\n    Alpine,\n    Nival\n};\n\n/** Topographic position within the local landform, independent of named biome. */\nUENUM(BlueprintType)\nenum class ECubusTerrainPosition : uint8\n{\n    Floodplain,\n    ValleyFloor,\n    LowerSlope,\n    Midslope,\n    Shoulder,\n    Ridge\n};\n\n/** One weighted ecological community retained in the top-four local ecotone blend. */\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Data/CubusBiomeTypes.h',
+              '''    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumErosion = 1.0f;\n\n    /** Coherent stand/opening modulation applied only after habitat suitability is established. */\n''',
+              '''    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumErosion = 1.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MinimumValleyFloorInfluence = 0.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumValleyFloorInfluence = 1.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MinimumColdAirPooling = 0.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumColdAirPooling = 1.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Disturbance", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MinimumDisturbance = 0.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Disturbance", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumDisturbance = 1.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MinimumCanopyPotential = 0.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Biomes|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumCanopyPotential = 1.0f;\n\n    /** Coherent stand/opening modulation applied only after habitat suitability is established. */\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.h',
+              '''    float NivalInfluence = 0.0f;\n\n    // Aspect and long-term exposure.\n''',
+              '''    float NivalInfluence = 0.0f;\n\n    // Local landform position. These are continuous even though TerrainPosition is categorical.\n    ECubusTerrainPosition TerrainPosition = ECubusTerrainPosition::Midslope;\n    float FloodplainInfluence = 0.0f;\n    float ValleyFloorInfluence = 0.0f;\n    float LowerSlopeInfluence = 0.0f;\n    float ShoulderInfluence = 0.0f;\n    float RidgeInfluence = 0.0f;\n    float ColdAirPooling = 0.0f;\n\n    // Aspect and long-term exposure.\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.h',
+              '''    float RockExposure = 0.0f;\n    float Erosion = 0.0f;\n\n    float SurfaceWorldZ = 0.0f;\n''',
+              '''    float RockExposure = 0.0f;\n    float Erosion = 0.0f;\n    float Disturbance = 0.0f;\n    float CanopyPotential = 0.0f;\n    float CanopyOpenness = 1.0f;\n\n    float SurfaceWorldZ = 0.0f;\n'''
+          )
+
+          # ------------------------------------------------------------------
+          # Biome field implementation
+          # ------------------------------------------------------------------
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''    ECubusElevationZone ResolveElevationZone(const float ElevationNormalized)\n    {\n        if (ElevationNormalized < 0.18f) return ECubusElevationZone::Lowland;\n        if (ElevationNormalized < 0.38f) return ECubusElevationZone::Foothill;\n        if (ElevationNormalized < 0.62f) return ECubusElevationZone::Montane;\n        if (ElevationNormalized < 0.82f) return ECubusElevationZone::Subalpine;\n        if (ElevationNormalized < 1.00f) return ECubusElevationZone::Alpine;\n        return ECubusElevationZone::Nival;\n    }\n''',
+              '''    ECubusElevationZone ResolveElevationZone(const float ElevationNormalized)\n    {\n        if (ElevationNormalized < 0.18f) return ECubusElevationZone::Lowland;\n        if (ElevationNormalized < 0.38f) return ECubusElevationZone::Foothill;\n        if (ElevationNormalized < 0.62f) return ECubusElevationZone::Montane;\n        if (ElevationNormalized < 0.82f) return ECubusElevationZone::Subalpine;\n        if (ElevationNormalized < 1.00f) return ECubusElevationZone::Alpine;\n        return ECubusElevationZone::Nival;\n    }\n\n    ECubusTerrainPosition ResolveTerrainPosition(\n        const float Floodplain,\n        const float ValleyFloor,\n        const float LowerSlope,\n        const float Shoulder,\n        const float Ridge\n    )\n    {\n        if (Floodplain >= 0.55f) return ECubusTerrainPosition::Floodplain;\n        if (ValleyFloor >= 0.52f) return ECubusTerrainPosition::ValleyFloor;\n        if (Ridge >= 0.52f) return ECubusTerrainPosition::Ridge;\n        if (Shoulder >= 0.46f) return ECubusTerrainPosition::Shoulder;\n        if (LowerSlope >= 0.44f) return ECubusTerrainPosition::LowerSlope;\n        return ECubusTerrainPosition::Midslope;\n    }\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''    const float GentleGround = 1.0f - SmoothStep(\n        Settings.RockySlopeThreshold * 0.35f,\n        Settings.RockySlopeThreshold * 1.05f,\n        Slope\n    );\n    const float DepositionalGround = FMath::Clamp(\n''',
+              '''    const float GentleGround = 1.0f - SmoothStep(\n        Settings.RockySlopeThreshold * 0.35f,\n        Settings.RockySlopeThreshold * 1.05f,\n        Slope\n    );\n\n    /*\n     * Landform position is derived from actual terrain/hydrology signals, not\n     * another biome noise layer. This lets one climate province express dry\n     * ridges, sheltered shoulders, cold valley floors and active floodplains.\n     */\n    Result.FloodplainInfluence = FMath::Clamp(\n        GentleGround * FMath::Max(Result.RiverInfluence, Result.FlowConvergence * Result.Drainage * 0.72f),\n        0.0f,\n        1.0f\n    );\n    Result.ValleyFloorInfluence = FMath::Clamp(\n        GentleGround * FMath::Max(Result.Drainage * 0.78f, Result.FlowConvergence * 0.88f) *\n        (1.0f - Ecology.Ridge * 0.72f),\n        0.0f,\n        1.0f\n    );\n    Result.RidgeInfluence = FMath::Clamp(\n        Ecology.Ridge * (1.0f - Result.FlowConvergence * 0.62f) * FMath::Lerp(0.72f, 1.08f, Result.WindExposure),\n        0.0f,\n        1.0f\n    );\n    Result.ShoulderInfluence = FMath::Clamp(\n        SlopeAspectStrength * (Ecology.Ridge * 0.46f + Ecology.FoothillWeight * 0.30f) *\n        (1.0f - Result.ValleyFloorInfluence * 0.74f),\n        0.0f,\n        1.0f\n    );\n    Result.LowerSlopeInfluence = FMath::Clamp(\n        SlopeAspectStrength * (Result.FlowConvergence * 0.62f + Result.Drainage * 0.38f) *\n        (1.0f - Result.FloodplainInfluence * 0.62f),\n        0.0f,\n        1.0f\n    );\n    Result.TerrainPosition = ResolveTerrainPosition(\n        Result.FloodplainInfluence,\n        Result.ValleyFloorInfluence,\n        Result.LowerSlopeInfluence,\n        Result.ShoulderInfluence,\n        Result.RidgeInfluence\n    );\n    Result.ColdAirPooling = FMath::Clamp(\n        Result.ValleyFloorInfluence * Result.WindShelter *\n        FMath::Lerp(1.0f, 0.62f, Result.SolarExposure) *\n        (1.0f - Result.RidgeInfluence * 0.80f),\n        0.0f,\n        1.0f\n    );\n\n    const float DepositionalGround = FMath::Clamp(\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''    Result.Erosion = FMath::Clamp(\n        SlopeErosion * 0.50f + Result.WindExposure * 0.22f + Result.RockExposure * 0.20f - DepositionalGround * 0.24f,\n        0.0f,\n        1.0f\n    );\n    const float SoilRetention = FMath::Clamp(\n''',
+              '''    Result.Erosion = FMath::Clamp(\n        SlopeErosion * 0.50f + Result.WindExposure * 0.22f + Result.RockExposure * 0.20f - DepositionalGround * 0.24f,\n        0.0f,\n        1.0f\n    );\n    const float FloodDisturbance = FMath::Clamp(\n        Result.FloodplainInfluence * (0.28f + Result.RiverInfluence * 0.72f),\n        0.0f,\n        1.0f\n    );\n    Result.Disturbance = FMath::Clamp(\n        FMath::Max(\n            FMath::Max(Result.Erosion, FloodDisturbance),\n            FMath::Max(\n                Result.WindExposure * 0.62f + Form.SurfaceRoughness * 0.18f,\n                Form.ErosionRills * 0.72f + Result.RockExposure * 0.28f\n            )\n        ),\n        0.0f,\n        1.0f\n    );\n    const float SoilRetention = FMath::Clamp(\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''        DrainageMoisture -\n        Result.RainShadow * 0.16f -\n        ExposureDrying,\n''',
+              '''        DrainageMoisture +\n        Result.ColdAirPooling * 0.055f -\n        Result.RainShadow * 0.16f -\n        ExposureDrying,\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''        LocalTemperature * 0.08f -\n        ElevationCooling +\n        SolarTemperature -\n        Result.WindExposure * 0.035f,\n''',
+              '''        LocalTemperature * 0.08f -\n        ElevationCooling +\n        SolarTemperature -\n        Result.WindExposure * 0.035f -\n        Result.ColdAirPooling * 0.11f,\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''    const float ForestClimate =\n        SmoothStep(0.22f, 0.62f, Result.Fertility) *\n        SmoothStep(0.24f, 0.58f, Result.SoilMoisture) *\n        (1.0f - SmoothStep(0.92f, 1.0f, Result.SoilSaturation));\n\n    Result.WetlandWeight = FMath::Clamp(\n''',
+              '''    const float ForestClimate =\n        SmoothStep(0.22f, 0.62f, Result.Fertility) *\n        SmoothStep(0.24f, 0.58f, Result.SoilMoisture) *\n        (1.0f - SmoothStep(0.92f, 1.0f, Result.SoilSaturation));\n    Result.CanopyPotential = FMath::Clamp(\n        ForestClimate * Result.TreeLineWeight *\n        FMath::Lerp(0.38f, 1.0f, Result.SoilDepth) *\n        (1.0f - Result.RockExposure * 0.78f) *\n        (1.0f - Result.Disturbance * 0.64f) *\n        FMath::Lerp(0.78f, 1.08f, Result.WindShelter),\n        0.0f,\n        1.0f\n    );\n    Result.CanopyOpenness = 1.0f - Result.CanopyPotential;\n\n    Result.WetlandWeight = FMath::Clamp(\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''        ForestClimate * GentleTerrain * Result.TreeLineWeight *\n        (1.0f - Result.WindExposure * 0.58f) *\n''',
+              '''        ForestClimate * GentleTerrain * Result.TreeLineWeight *\n        FMath::Lerp(0.52f, 1.10f, Result.CanopyPotential) *\n        (1.0f - Result.WindExposure * 0.58f) *\n'''
+          )
+
+          # Built-in communities: landform and disturbance now shape habitat structure.
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''      RangeSuitability(Result.SoilSaturation, 0.20f, 0.82f, 0.12f) *\n      FMath::Lerp(0.45f, 1.0f, Result.SoilDepth),\n''',
+              '''      RangeSuitability(Result.SoilSaturation, 0.20f, 0.82f, 0.12f) *\n      FMath::Lerp(0.45f, 1.0f, Result.SoilDepth) *\n      FMath::Lerp(0.72f, 1.08f, Result.CanopyPotential) *\n      (1.0f - Result.Disturbance * 0.32f),\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''      (1.0f - Result.RiverInfluence * 0.55f) *\n      (1.0f - Result.WindExposure * 0.48f),\n''',
+              '''      (1.0f - Result.RiverInfluence * 0.55f) *\n      (1.0f - Result.WindExposure * 0.48f) *\n      FMath::Lerp(0.48f, 1.12f, Result.CanopyPotential),\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''      RangeSuitability(Result.SoilMoisture, 0.28f, 0.88f, 0.12f) *\n      (1.0f - Result.RockExposure * 0.72f),\n''',
+              '''      RangeSuitability(Result.SoilMoisture, 0.28f, 0.88f, 0.12f) *\n      (1.0f - Result.RockExposure * 0.72f) *\n      FMath::Lerp(0.52f, 1.10f, Result.CanopyPotential),\n'''
+          )
+
+          # Insert landform-specific communities before generic meadow.
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''        AddBuiltIn(\n  TEXT("Meadow"), ECubusBiomeKind::Plains, Settings.PlainsSurfaceMaterialId,\n''',
+              '''        AddBuiltIn(\n  TEXT("CoolValleyForest"), ECubusBiomeKind::Forest, Settings.ForestSurfaceMaterialId,\n  ForestClimate * Result.ValleyFloorInfluence * Result.TreeLineWeight * GentleTerrain *\n      FMath::Lerp(0.46f, 1.0f, Result.ColdAirPooling) *\n      FMath::Lerp(0.52f, 1.0f, Result.SoilDepth) *\n      FMath::Lerp(0.58f, 1.05f, Result.CanopyPotential),\n  1, 0.24f\n        );\n        AddBuiltIn(\n  TEXT("FloodplainMeadow"), ECubusBiomeKind::Plains, Settings.PlainsSurfaceMaterialId,\n  Result.FloodplainInfluence * GentleTerrain *\n      RangeSuitability(Result.SoilSaturation, 0.24f, 0.78f, 0.12f) *\n      FMath::Lerp(0.42f, 1.0f, Result.Fertility) * Result.CanopyOpenness,\n  2, 0.22f\n        );\n        AddBuiltIn(\n  TEXT("AvalancheMeadow"), ECubusBiomeKind::Plains, Settings.PlainsSurfaceMaterialId,\n  SubalpineBand * Result.Disturbance * Result.CanopyOpenness *\n      RangeSuitability(Slope, Settings.RockySlopeThreshold * 0.18f, Settings.RockySlopeThreshold * 0.78f, 0.14f) *\n      FMath::Lerp(0.35f, 1.0f, Result.SoilDepth),\n  3, 0.18f\n        );\n        AddBuiltIn(\n  TEXT("WindPrunedSubalpineScrub"), ECubusBiomeKind::Rocky, Settings.RockySurfaceMaterialId,\n  FMath::Max(SubalpineBand, AlpineBand * 0.62f) * Result.WindExposure * Result.CanopyOpenness *\n      RangeSuitability(Result.SoilDepth, 0.08f, 0.62f, 0.12f) * (1.0f - Result.NivalInfluence),\n  0, 0.20f\n        );\n        AddBuiltIn(\n  TEXT("Meadow"), ECubusBiomeKind::Plains, Settings.PlainsSurfaceMaterialId,\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''                RangeSuitability(Result.OrganicMatter, Definition.MinimumOrganicMatter, Definition.MaximumOrganicMatter, Softness) *\n                RangeSuitability(Result.Erosion, Definition.MinimumErosion, Definition.MaximumErosion, Softness);\n''',
+              '''                RangeSuitability(Result.OrganicMatter, Definition.MinimumOrganicMatter, Definition.MaximumOrganicMatter, Softness) *\n                RangeSuitability(Result.Erosion, Definition.MinimumErosion, Definition.MaximumErosion, Softness) *\n                RangeSuitability(Result.ValleyFloorInfluence, Definition.MinimumValleyFloorInfluence, Definition.MaximumValleyFloorInfluence, Softness) *\n                RangeSuitability(Result.ColdAirPooling, Definition.MinimumColdAirPooling, Definition.MaximumColdAirPooling, Softness) *\n                RangeSuitability(Result.Disturbance, Definition.MinimumDisturbance, Definition.MaximumDisturbance, Softness) *\n                RangeSuitability(Result.CanopyPotential, Definition.MinimumCanopyPotential, Definition.MaximumCanopyPotential, Softness);\n'''
+          )
+
+          # Compatibility archetypes are projections of the actual top-four community blend.
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp',
+              '''    if (CommunityWeightTotal > KINDA_SMALL_NUMBER)\n    {\n        for (int32 Index = 0; Index < Result.CommunityBlendCount; ++Index)\n        {\n            Result.CommunityBlend[Index].Weight /= CommunityWeightTotal;\n        }\n    }\n\n    const FCubusBiomeCommunityBlend& DominantCommunity = Result.CommunityBlend[0];\n''',
+              '''    if (CommunityWeightTotal > KINDA_SMALL_NUMBER)\n    {\n        for (int32 Index = 0; Index < Result.CommunityBlendCount; ++Index)\n        {\n            Result.CommunityBlend[Index].Weight /= CommunityWeightTotal;\n        }\n    }\n\n    Result.PlainsWeight = 0.0f;\n    Result.ForestWeight = 0.0f;\n    Result.RockyWeight = 0.0f;\n    Result.WetlandWeight = 0.0f;\n    for (int32 Index = 0; Index < Result.CommunityBlendCount; ++Index)\n    {\n        const FCubusBiomeCommunityBlend& Community = Result.CommunityBlend[Index];\n        switch (Community.Archetype)\n        {\n            case ECubusBiomeKind::Forest: Result.ForestWeight += Community.Weight; break;\n            case ECubusBiomeKind::Rocky: Result.RockyWeight += Community.Weight; break;\n            case ECubusBiomeKind::Wetland: Result.WetlandWeight += Community.Weight; break;\n            case ECubusBiomeKind::Plains:\n            default: Result.PlainsWeight += Community.Weight; break;\n        }\n    }\n\n    const FCubusBiomeCommunityBlend& DominantCommunity = Result.CommunityBlend[0];\n'''
+          )
+
+          # ------------------------------------------------------------------
+          # Vegetation carries and consumes structure/disturbance.
+          # ------------------------------------------------------------------
+          replace_once(
+              'Source/Orakai/CubusCore/Data/CubusVegetationInstance.h',
+              '''    uint8 SolarExposure = 128;\n    uint8 Erosion = 0;\n    uint8 SlopeDegrees = 0;\n''',
+              '''    uint8 SolarExposure = 128;\n    uint8 Erosion = 0;\n    uint8 ColdAirPooling = 0;\n    uint8 Disturbance = 0;\n    uint8 CanopyPotential = 0;\n    uint8 SlopeDegrees = 0;\n'''
+          )
+          replace_once(
+              'Source/Orakai/CubusCore/Data/CubusVegetationInstance.h',
+              '''    float GetSolarExposure() const { return DecodeUnit(SolarExposure); }\n    float GetErosion() const { return DecodeUnit(Erosion); }\n    float GetSlopeDegrees() const { return DecodeUnit(SlopeDegrees) * 90.0f; }\n''',
+              '''    float GetSolarExposure() const { return DecodeUnit(SolarExposure); }\n    float GetErosion() const { return DecodeUnit(Erosion); }\n    float GetColdAirPooling() const { return DecodeUnit(ColdAirPooling); }\n    float GetDisturbance() const { return DecodeUnit(Disturbance); }\n    float GetCanopyPotential() const { return DecodeUnit(CanopyPotential); }\n    float GetSlopeDegrees() const { return DecodeUnit(SlopeDegrees) * 90.0f; }\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Vegetation/CubusVegetationTypes.h',
+              '''    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumErosion = 1.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat", meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))\n''',
+              '''    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Terrain", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumErosion = 1.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MinimumColdAirPooling = 0.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumColdAirPooling = 1.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Disturbance", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MinimumDisturbance = 0.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Disturbance", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumDisturbance = 1.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MinimumCanopyPotential = 0.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat|Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))\n    float MaximumCanopyPotential = 1.0f;\n\n    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Vegetation|Habitat", meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp',
+              '''        Habitat.SolarExposure = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.SolarExposure);\n        Habitat.Erosion = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Erosion);\n        Habitat.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(\n''',
+              '''        Habitat.SolarExposure = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.SolarExposure);\n        Habitat.Erosion = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Erosion);\n        Habitat.ColdAirPooling = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.ColdAirPooling);\n        Habitat.Disturbance = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.Disturbance);\n        Habitat.CanopyPotential = FCubusVegetationHabitatSample::QuantizeUnit(BiomeSample.CanopyPotential);\n        Habitat.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp',
+              '''        const float Erosion = FMath::Clamp(BiomeSample.Erosion, 0.0f, 1.0f);\n        const float Alpine = FMath::Clamp(BiomeSample.AlpineInfluence, 0.0f, 1.0f);\n''',
+              '''        const float Erosion = FMath::Clamp(BiomeSample.Erosion, 0.0f, 1.0f);\n        const float ColdPool = FMath::Clamp(BiomeSample.ColdAirPooling, 0.0f, 1.0f);\n        const float Disturbance = FMath::Clamp(BiomeSample.Disturbance, 0.0f, 1.0f);\n        const float Canopy = FMath::Clamp(BiomeSample.CanopyPotential, 0.0f, 1.0f);\n        const float CanopyOpen = 1.0f - Canopy;\n        const float Alpine = FMath::Clamp(BiomeSample.AlpineInfluence, 0.0f, 1.0f);\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp',
+              '''            TreeBase * FMath::Lerp(0.55f, 1.30f, EcologyStrength) * TreeHabitat,\n''',
+              '''            TreeBase * FMath::Lerp(0.55f, 1.30f, EcologyStrength) * TreeHabitat *\n            FMath::Lerp(0.48f, 1.12f, Canopy) * (1.0f - Disturbance * 0.52f),\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp',
+              '''            FMath::Lerp(1.0f, 0.58f, Erosion) *\n            (1.0f - River * 0.72f) * (1.0f - Nival) *\n''',
+              '''            FMath::Lerp(1.0f, 0.58f, Erosion) *\n            FMath::Lerp(0.82f, 1.16f, CanopyOpen) *\n            FMath::Lerp(0.92f, 1.08f, Disturbance) *\n            (1.0f - River * 0.72f) * (1.0f - Nival) *\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp',
+              '''            FMath::Lerp(1.0f, 0.66f, Erosion) *\n            (1.0f - Nival) * Gentle;\n''',
+              '''            FMath::Lerp(1.0f, 0.66f, Erosion) *\n            FMath::Lerp(0.66f, 1.22f, CanopyOpen) *\n            FMath::Lerp(0.96f, 1.06f, ColdPool) *\n            (1.0f - Nival) * Gentle;\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Vegetation/CubusVegetationCatalog.cpp',
+              '''        const float Erosion = SmoothRangeSuitability(Sample.GetErosion(), Habitat.MinimumErosion, Habitat.MaximumErosion, Softness);\n\n        const float MaximumSlope = FMath::Clamp(Habitat.MaximumSlopeDegrees, 0.1f, 90.0f);\n''',
+              '''        const float Erosion = SmoothRangeSuitability(Sample.GetErosion(), Habitat.MinimumErosion, Habitat.MaximumErosion, Softness);\n        const float ColdPool = SmoothRangeSuitability(Sample.GetColdAirPooling(), Habitat.MinimumColdAirPooling, Habitat.MaximumColdAirPooling, Softness);\n        const float Disturbance = SmoothRangeSuitability(Sample.GetDisturbance(), Habitat.MinimumDisturbance, Habitat.MaximumDisturbance, Softness);\n        const float Canopy = SmoothRangeSuitability(Sample.GetCanopyPotential(), Habitat.MinimumCanopyPotential, Habitat.MaximumCanopyPotential, Softness);\n\n        const float MaximumSlope = FMath::Clamp(Habitat.MaximumSlopeDegrees, 0.1f, 90.0f);\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Vegetation/CubusVegetationCatalog.cpp',
+              '''            Elevation * TreeLine * Saturation * Groundwater * Solar * Erosion * SlopeSuitability\n        );\n        return FMath::Pow(Product, 1.0f / 15.0f);\n''',
+              '''            Elevation * TreeLine * Saturation * Groundwater * Solar * Erosion *\n            ColdPool * Disturbance * Canopy * SlopeSuitability\n        );\n        return FMath::Pow(Product, 1.0f / 18.0f);\n'''
+          )
+
+          # ------------------------------------------------------------------
+          # Tests
+          # ------------------------------------------------------------------
+          replace_once(
+              'Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp',
+              '''    TestTrue(TEXT("Community blend weights are normalized"), FMath::IsNearlyEqual(BlendTotal, 1.0f, 0.001f));\n    return true;\n}\n\n#endif''',
+              '''    TestTrue(TEXT("Community blend weights are normalized"), FMath::IsNearlyEqual(BlendTotal, 1.0f, 0.001f));\n\n    float ForestProjection = 0.0f;\n    float PlainsProjection = 0.0f;\n    for (int32 Index = 0; Index < Sample.CommunityBlendCount; ++Index)\n    {\n        if (Sample.CommunityBlend[Index].Archetype == ECubusBiomeKind::Forest) ForestProjection += Sample.CommunityBlend[Index].Weight;\n        if (Sample.CommunityBlend[Index].Archetype == ECubusBiomeKind::Plains) PlainsProjection += Sample.CommunityBlend[Index].Weight;\n    }\n    TestTrue(TEXT("Legacy forest weight projects the actual community blend"), FMath::IsNearlyEqual(Sample.ForestWeight, ForestProjection, 0.001f));\n    TestTrue(TEXT("Legacy plains weight projects the actual community blend"), FMath::IsNearlyEqual(Sample.PlainsWeight, PlainsProjection, 0.001f));\n    return true;\n}\n\nIMPLEMENT_SIMPLE_AUTOMATION_TEST(\n    FCubusBiomeTerrainPositionTest,\n    "Orakai.Cubus.Generation.BiomeTerrainPosition",\n    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter\n)\n\nbool FCubusBiomeTerrainPositionTest::RunTest(const FString& Parameters)\n{\n    (void)Parameters;\n\n    FCubusBiomeFieldSettings Settings;\n    Settings.bEnabled = true;\n    Settings.NivalWorldZ = 72.0f;\n    Settings.BiomeOffsetX = 551;\n    Settings.BiomeOffsetY = -931;\n\n    FCubusBiomeTerrainContext ValleyContext;\n    ValleyContext.Drainage = 1.0f;\n    ValleyContext.Gradient = FVector2D(0.04f, 0.02f);\n\n    FCubusBiomeTerrainContext RidgeContext;\n    RidgeContext.Ridge = 1.0f;\n    RidgeContext.MountainCore = 0.75f;\n    RidgeContext.Gradient = FVector2D(0.82f, 0.57f);\n\n    const FCubusBiomeSample Valley = FCubusBiomeField::Sample(125.0f, -80.0f, 26.0f, 0.12f, Settings, ValleyContext);\n    const FCubusBiomeSample Ridge = FCubusBiomeField::Sample(125.0f, -80.0f, 26.0f, 0.62f, Settings, RidgeContext);\n\n    TestTrue(TEXT("Valley terrain has stronger valley-floor influence"), Valley.ValleyFloorInfluence > Ridge.ValleyFloorInfluence);\n    TestTrue(TEXT("Ridge terrain has stronger ridge influence"), Ridge.RidgeInfluence > Valley.RidgeInfluence);\n    TestTrue(TEXT("Sheltered valley floors accumulate colder air"), Valley.ColdAirPooling > Ridge.ColdAirPooling);\n    TestTrue(TEXT("Canopy potential and openness remain complementary"), FMath::IsNearlyEqual(Valley.CanopyPotential + Valley.CanopyOpenness, 1.0f, 0.001f));\n    TestTrue(TEXT("Disturbance remains normalized"), Ridge.Disturbance >= 0.0f && Ridge.Disturbance <= 1.0f);\n    return true;\n}\n\n#endif'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Tests/CubusVegetationEcologyTests.cpp',
+              '''    Sample.Erosion = FCubusVegetationHabitatSample::QuantizeUnit(0.42f);\n    Sample.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(37.0f);\n''',
+              '''    Sample.Erosion = FCubusVegetationHabitatSample::QuantizeUnit(0.42f);\n    Sample.ColdAirPooling = FCubusVegetationHabitatSample::QuantizeUnit(0.64f);\n    Sample.Disturbance = FCubusVegetationHabitatSample::QuantizeUnit(0.31f);\n    Sample.CanopyPotential = FCubusVegetationHabitatSample::QuantizeUnit(0.77f);\n    Sample.SlopeDegrees = FCubusVegetationHabitatSample::QuantizeSlopeDegrees(37.0f);\n'''
+          )
+          replace_once(
+              'Source/Orakai/CubusCore/Tests/CubusVegetationEcologyTests.cpp',
+              '''    TestTrue(TEXT("Erosion survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetErosion(), 0.42f, 0.005f));\n    TestTrue(TEXT("Slope survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSlopeDegrees(), 37.0f, 0.5f));\n''',
+              '''    TestTrue(TEXT("Erosion survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetErosion(), 0.42f, 0.005f));\n    TestTrue(TEXT("Cold-air pooling survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetColdAirPooling(), 0.64f, 0.005f));\n    TestTrue(TEXT("Disturbance survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetDisturbance(), 0.31f, 0.005f));\n    TestTrue(TEXT("Canopy potential survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetCanopyPotential(), 0.77f, 0.005f));\n    TestTrue(TEXT("Slope survives compact habitat quantization"), FMath::IsNearlyEqual(Sample.GetSlopeDegrees(), 37.0f, 0.5f));\n'''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h',
+              '''    // Bumped to 16: vegetation species and placement ecology now consume the v2\n    // elevation, treeline, hydrology, solar-exposure and erosion habitat fields.\n    static constexpr uint32 CurrentGenerationVersion = 16;\n''',
+              '''    // Bumped to 17: ecology now distinguishes landform position, cold-air pools,\n    // disturbance and canopy structure, and vegetation consumes those fields.\n    static constexpr uint32 CurrentGenerationVersion = 17;\n'''
+          )
+          PY
+
+          git diff --check
+          grep -n 'ECubusTerrainPosition' Source/Orakai/CubusCore/Data/CubusBiomeTypes.h
+          grep -n 'ColdAirPooling' Source/Orakai/CubusCore/Generation/CubusBiomeField.h
+          grep -n 'ResolveTerrainPosition' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
+          grep -n 'CoolValleyForest' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
+          grep -n 'AvalancheMeadow' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
+          grep -n 'Result.PlainsWeight = 0.0f' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
+          grep -n 'GetCanopyPotential' Source/Orakai/CubusCore/Data/CubusVegetationInstance.h
+          grep -n 'MinimumDisturbance' Source/Orakai/CubusCore/Vegetation/CubusVegetationTypes.h
+          grep -n '1.0f / 18.0f' Source/Orakai/CubusCore/Vegetation/CubusVegetationCatalog.cpp
+          grep -n 'CurrentGenerationVersion = 17' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
+          grep -n 'FCubusBiomeTerrainPositionTest' Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp
+
+          python3 - <<'PY'
+          from pathlib import Path
+          biome = Path('Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp').read_text(encoding='utf-8')
+          assert biome.count('CoolValleyForest') == 1
+          assert biome.count('FloodplainMeadow') == 1
+          assert biome.count('AvalancheMeadow') == 1
+          assert biome.count('WindPrunedSubalpineScrub') == 1
+          assert 'Result.ColdAirPooling * 0.11f' in biome
+          assert 'Result.CommunityBlend[Index].Weight /=' in biome
+          assert 'Result.ForestWeight += Community.Weight' in biome
+          assert 'RangeSuitability(Result.CanopyPotential' in biome
+          habitat = Path('Source/Orakai/CubusCore/Data/CubusVegetationInstance.h').read_text(encoding='utf-8')
+          assert habitat.count('uint8 CanopyPotential') == 1
+          assert habitat.count('uint8 Disturbance') == 1
+          assert habitat.count('uint8 ColdAirPooling') == 1
+          PY
+
+          if git diff --quiet; then
+            echo 'Terrain-position ecology refinement already applied.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            Source/Orakai/CubusCore/Data/CubusBiomeTypes.h \
+            Source/Orakai/CubusCore/Generation/CubusBiomeField.h \
+            Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp \
+            Source/Orakai/CubusCore/Data/CubusVegetationInstance.h \
+            Source/Orakai/CubusCore/Vegetation/CubusVegetationTypes.h \
+            Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp \
+            Source/Orakai/CubusCore/Vegetation/CubusVegetationCatalog.cpp \
+            Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp \
+            Source/Orakai/CubusCore/Tests/CubusVegetationEcologyTests.cpp \
+            Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
+          git commit -m 'Refine biome terrain-position ecology'
+          git push origin HEAD:agent/density-meshing
