@@ -1,32 +1,9 @@
-name: Run biome ecology v17 refinement
+name: Biome ecology v17 archive
 on:
-  push:
-    branches:
-      - agent/density-meshing
-permissions:
-  contents: write
+  workflow_dispatch:
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  archived:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/density-meshing
-          fetch-depth: 0
-      - name: Apply ecology refinement
-        shell: bash
-        run: |
-          python3 .github/agent/biome_ecology_v17.py
-          git diff --check
-          grep -n 'BiomePrevailingWindDirection' Source/Orakai/CubusCore/Data/CubusGeologyProfile.h
-          grep -n 'DeepColluvialForest' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
-          grep -n 'GetInterpolatedBiomeClimate' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
-          grep -n 'GetCanopyPotential' Source/Orakai/CubusCore/Data/CubusVegetationInstance.h
-          grep -n '1.0f / 20.0f' Source/Orakai/CubusCore/Vegetation/CubusVegetationCatalog.cpp
-          grep -n 'CurrentGenerationVersion = 17' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Source/Orakai/CubusCore
-          git commit -m 'Deepen biome geology and climate ecology'
-          git push origin HEAD:agent/density-meshing
+      - name: Archived patch marker
+        run: echo "Biome ecology v17 source patch already applied."
