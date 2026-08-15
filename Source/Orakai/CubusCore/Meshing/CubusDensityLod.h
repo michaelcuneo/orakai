@@ -5,21 +5,47 @@
 /**
  * Density-LOD scale rules shared by streaming, chunks and meshing.
  *
- * Fine density subdivision is temporarily disabled as a runtime default.
- * The current adaptive path rebuilds chunks synchronously, cooks collision,
- * and multiplies Marching Cubes work by the cube of the subdivision count.
- * Keep the canonical 100 cm lattice authoritative until refinement is moved
- * to an asynchronous, budgeted near-field system.
+ * The procedural scalar field remains canonical and resolution-independent.
+ * Subdivision changes only how densely a chunk samples that field for its
+ * Marching Cubes mesh; generated terrain is never persisted at the finer
+ * resolution. Player density edits remain a separate sparse field and are
+ * evaluated continuously by FCubusDensityEditField.
+ *
+ * Runtime refinement is deliberately capped at 4 subdivisions per canonical
+ * voxel. With an 80 cm canonical voxel this gives 20 cm near-field samples,
+ * 40 cm transition samples, and 80 cm ordinary samples. BuildAdaptiveChunk()
+ * rejects coarse cells that cannot contain a surface before marching the fine
+ * lattice, avoiding the old cubic full-volume refinement cost.
  */
 class ORAKAI_API FCubusDensityLod
 {
 public:
+    static constexpr int32 MaximumRuntimeSubdivisions = 4;
+
     static int32 NormalizeSubdivisions(
         const int32 RequestedSubdivisions
     )
     {
-        (void)RequestedSubdivisions;
-        return 1;
+        const int32 SafeRequested = FMath::Clamp(
+            RequestedSubdivisions,
+            1,
+            MaximumRuntimeSubdivisions
+        );
+
+        // Keep neighbouring fine lattices on power-of-two sample intervals.
+        // This gives stable 1x / 2x / 4x tiers and avoids arbitrary fractional
+        // lattice relationships between streamed chunks.
+        if (SafeRequested <= 1)
+        {
+            return 1;
+        }
+
+        if (SafeRequested <= 2)
+        {
+            return 2;
+        }
+
+        return 4;
     }
 
     static int32 ResolveSubdivisionsForSpacing(
@@ -27,9 +53,18 @@ public:
         const float TargetSampleSpacing
     )
     {
-        (void)CanonicalVoxelSize;
-        (void)TargetSampleSpacing;
-        return 1;
+        const float SafeVoxelSize = FMath::Max(1.0f, CanonicalVoxelSize);
+        const float SafeTargetSpacing = FMath::Clamp(
+            TargetSampleSpacing,
+            1.0f,
+            SafeVoxelSize
+        );
+
+        const int32 RequiredSubdivisions = FMath::CeilToInt(
+            SafeVoxelSize / SafeTargetSpacing
+        );
+
+        return NormalizeSubdivisions(RequiredSubdivisions);
     }
 
     static float GetSampleSpacing(
@@ -37,8 +72,8 @@ public:
         const int32 SubdivisionsPerVoxel
     )
     {
-        (void)SubdivisionsPerVoxel;
-        return FMath::Max(1.0f, CanonicalVoxelSize);
+        return FMath::Max(1.0f, CanonicalVoxelSize) /
+            static_cast<float>(NormalizeSubdivisions(SubdivisionsPerVoxel));
     }
 
     static int32 ChunkDistance(
