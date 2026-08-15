@@ -221,7 +221,6 @@ bool FCubusNaturalTerrainFormTest::RunTest(const FString& Parameters)
     TArray<uint8> Visited;
     Visited.SetNumZeroed(MountainMask.Num());
     int32 LongestConnectedRange = 0;
-    float MaximumAlpineHeight = -MAX_flt;
     constexpr int32 NeighbourOffsets[8][2] =
     {
         {-1, -1}, {0, -1}, {1, -1}, {-1, 0},
