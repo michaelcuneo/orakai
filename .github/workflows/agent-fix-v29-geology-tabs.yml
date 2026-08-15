@@ -5,6 +5,7 @@ on:
       - agent/density-meshing
     paths:
       - '.github/agent/fix_v29_geology_tabs.py'
+      - '.github/workflows/agent-fix-v29-geology-tabs.yml'
   workflow_dispatch:
 permissions:
   contents: write
