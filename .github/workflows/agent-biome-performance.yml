@@ -1,0 +1,684 @@
+name: Optimize biome cold generation
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Apply biome performance refinement
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              old = textwrap.dedent(old)
+              new = textwrap.dedent(new)
+              if new in text:
+                  return
+              if old not in text:
+                  raise RuntimeError(f'missing anchor in {path}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # --------------------------------------------------------------
+          # Biome field: separate slow climate backbone from local ecology.
+          # --------------------------------------------------------------
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.h',
+              '''
+              /** Terrain/environment context supplied by the authoritative density column. */
+              struct ORAKAI_API FCubusBiomeTerrainContext
+              {
+                  float Drainage = 0.0f;
+                  float RockExposure = 0.0f;
+                  float MountainCore = 0.0f;
+                  float FoothillWeight = 0.0f;
+                  float Ridge = 0.0f;
+                  FVector2D Gradient = FVector2D::ZeroVector;
+              };
+              ''',
+              '''
+              /** Slow-varying seeded climate backbone, safe to interpolate between nearby columns. */
+              struct ORAKAI_API FCubusBiomeClimateContext
+              {
+                  float ProvinceMoisture = 0.0f;
+                  float RegionalMoisture = 0.0f;
+                  float LocalHumidity = 0.0f;
+                  float ProvinceTemperature = 0.0f;
+                  float RegionalTemperature = 0.0f;
+                  float LocalTemperature = 0.0f;
+                  float CommunityPatch[4] = {0.5f, 0.5f, 0.5f, 0.5f};
+                  float ParentMaterial = 0.5f;
+              };
+
+              /** Terrain/environment context supplied by the authoritative density column. */
+              struct ORAKAI_API FCubusBiomeTerrainContext
+              {
+                  float Drainage = 0.0f;
+                  float RockExposure = 0.0f;
+                  float MountainCore = 0.0f;
+                  float FoothillWeight = 0.0f;
+                  float Ridge = 0.0f;
+                  FVector2D Gradient = FVector2D::ZeroVector;
+
+                  bool bHasTerrainFormSample = false;
+                  FCubusTerrainFormSample TerrainFormSample;
+
+                  bool bHasHydrologySample = false;
+                  FCubusHydrologySample HydrologySample;
+              };
+              '''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusBiomeField.h',
+              '''
+                  static FCubusBiomeSample Sample(
+                      float WorldX,
+                      float WorldY,
+                      float SurfaceWorldZ,
+                      float Slope,
+                      const FCubusBiomeFieldSettings& Settings,
+                      const FCubusBiomeTerrainContext& TerrainContext = FCubusBiomeTerrainContext()
+                  );
+              ''',
+              '''
+                  static FCubusBiomeClimateContext SampleClimate(
+                      float WorldX,
+                      float WorldY,
+                      const FCubusBiomeFieldSettings& Settings
+                  );
+
+                  static FCubusBiomeClimateContext LerpClimate(
+                      const FCubusBiomeClimateContext& A,
+                      const FCubusBiomeClimateContext& B,
+                      float Alpha
+                  );
+
+                  static FCubusBiomeSample Sample(
+                      float WorldX,
+                      float WorldY,
+                      float SurfaceWorldZ,
+                      float Slope,
+                      const FCubusBiomeFieldSettings& Settings,
+                      const FCubusBiomeTerrainContext& TerrainContext = FCubusBiomeTerrainContext(),
+                      const FCubusBiomeClimateContext* ClimateContext = nullptr
+                  );
+              '''
+          )
+
+          biome_cpp = Path('Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp')
+          text = biome_cpp.read_text(encoding='utf-8')
+
+          old_sig = textwrap.dedent('''
+          FCubusBiomeSample FCubusBiomeField::Sample(
+              const float WorldX,
+              const float WorldY,
+              const float SurfaceWorldZ,
+              const float Slope,
+              const FCubusBiomeFieldSettings& InSettings,
+              const FCubusBiomeTerrainContext& TerrainContext
+          )
+          ''')
+          new_sig = textwrap.dedent('''
+          FCubusBiomeSample FCubusBiomeField::Sample(
+              const float WorldX,
+              const float WorldY,
+              const float SurfaceWorldZ,
+              const float Slope,
+              const FCubusBiomeFieldSettings& InSettings,
+              const FCubusBiomeTerrainContext& TerrainContext,
+              const FCubusBiomeClimateContext* ClimateContext
+          )
+          ''')
+          if new_sig not in text:
+              if old_sig not in text:
+                  raise RuntimeError('missing biome Sample signature')
+              text = text.replace(old_sig, new_sig, 1)
+
+          old_form = textwrap.dedent('''
+              /* Reuse the authoritative terrain form rather than inventing biome-only geography. */
+              FCubusBiomeTerrainContext Ecology = TerrainContext;
+              const float TerrainX = WorldX + static_cast<float>(Settings.HydrologySettings.TerrainOffsetX);
+              const float TerrainY = WorldY + static_cast<float>(Settings.HydrologySettings.TerrainOffsetY);
+              const FCubusTerrainFormSample Form = FCubusTerrainForm::Sample(
+                  TerrainX,
+                  TerrainY,
+                  Settings.HydrologySettings.TerrainFormSettings
+              );
+          ''')
+          new_form = textwrap.dedent('''
+              /* Reuse the authoritative terrain form rather than inventing biome-only geography. */
+              FCubusBiomeTerrainContext Ecology = TerrainContext;
+              const float TerrainX = WorldX + static_cast<float>(Settings.HydrologySettings.TerrainOffsetX);
+              const float TerrainY = WorldY + static_cast<float>(Settings.HydrologySettings.TerrainOffsetY);
+              const FCubusTerrainFormSample Form = TerrainContext.bHasTerrainFormSample
+                  ? TerrainContext.TerrainFormSample
+                  : FCubusTerrainForm::Sample(
+                      TerrainX,
+                      TerrainY,
+                      Settings.HydrologySettings.TerrainFormSettings
+                  );
+          ''')
+          if new_form not in text:
+              if old_form not in text:
+                  raise RuntimeError('missing terrain-form biome anchor')
+              text = text.replace(old_form, new_form, 1)
+
+          old_climate = textwrap.dedent('''
+              const float BiomeX = WorldX + static_cast<float>(Settings.BiomeOffsetX);
+              const float BiomeY = WorldY + static_cast<float>(Settings.BiomeOffsetY);
+
+              /* Broad seeded climate provinces remain coherent; local terrain modifies them afterwards. */
+              const float ClimateProvinceFrequency = Settings.Frequency * 0.18f;
+              const float ClimateRegionalFrequency = Settings.Frequency * 0.62f;
+              const float ClimateLocalFrequency = Settings.Frequency * 1.55f;
+              const float WarpFrequency = ClimateProvinceFrequency * 0.55f;
+              const float WarpAmplitude = FMath::Clamp(0.18f / ClimateProvinceFrequency, 96.0f, 520.0f);
+              const float WarpedX = BiomeX + SampleFbm(
+                  BiomeX + 3527.0f,
+                  BiomeY - 1871.0f,
+                  WarpFrequency,
+                  3,
+                  0.5f
+              ) * WarpAmplitude;
+              const float WarpedY = BiomeY + SampleFbm(
+                  BiomeX - 6173.0f,
+                  BiomeY + 2593.0f,
+                  WarpFrequency,
+                  3,
+                  0.5f
+              ) * WarpAmplitude;
+
+              const float ProvinceMoisture = SampleFbm(WarpedX + 4219.0f, WarpedY - 1877.0f, ClimateProvinceFrequency * 0.95f, 4, 0.52f);
+              const float RegionalMoisture = SampleFbm(WarpedX - 11549.0f, WarpedY + 9011.0f, ClimateRegionalFrequency * 0.90f, 3, 0.50f);
+              const float LocalHumidity = SampleFbm(WarpedX + 1013.0f, WarpedY + 6427.0f, ClimateLocalFrequency, 2, 0.45f);
+              const float ProvinceTemperature = SampleFbm(WarpedX - 8111.0f, WarpedY + 3203.0f, ClimateProvinceFrequency * 0.78f, 4, 0.52f);
+              const float RegionalTemperature = SampleFbm(WarpedX + 14831.0f, WarpedY - 10427.0f, ClimateRegionalFrequency * 0.82f, 3, 0.50f);
+              const float LocalTemperature = SampleFbm(WarpedX - 2791.0f, WarpedY - 15317.0f, ClimateLocalFrequency * 0.72f, 2, 0.45f);
+
+              /* Four coherent patch fields are shared by every community. They modulate valid habitat; they never create it. */
+              const float CommunityPatch[4] =
+              {
+                  FMath::Clamp(0.5f + SampleFbm(WarpedX + 17011.0f, WarpedY - 9017.0f, Settings.Frequency * 0.95f, 2, 0.48f) * 0.5f, 0.0f, 1.0f),
+                  FMath::Clamp(0.5f + SampleFbm(WarpedX - 2477.0f, WarpedY + 19421.0f, Settings.Frequency * 1.25f, 2, 0.48f) * 0.5f, 0.0f, 1.0f),
+                  FMath::Clamp(0.5f + SampleFbm(WarpedX + 29831.0f, WarpedY + 4711.0f, Settings.Frequency * 1.55f, 2, 0.46f) * 0.5f, 0.0f, 1.0f),
+                  FMath::Clamp(0.5f + SampleFbm(WarpedX - 15331.0f, WarpedY - 22051.0f, Settings.Frequency * 0.72f, 2, 0.50f) * 0.5f, 0.0f, 1.0f)
+              };
+          ''')
+          new_climate = textwrap.dedent('''
+              const FCubusBiomeClimateContext Climate = ClimateContext != nullptr
+                  ? *ClimateContext
+                  : SampleClimate(WorldX, WorldY, Settings);
+          ''')
+          if new_climate not in text:
+              if old_climate not in text:
+                  raise RuntimeError('missing climate block')
+              text = text.replace(old_climate, new_climate, 1)
+
+          old_hydro = textwrap.dedent('''
+              const bool bHasHydrology = Settings.bGenerateRivers && Settings.HydrologySettings.bEnabled;
+              const FCubusHydrologySample Hydrology = bHasHydrology
+                  ? FCubusHydrologyField::Sample(WorldX, WorldY, Settings.HydrologySettings)
+                  : FCubusHydrologySample();
+          ''')
+          new_hydro = textwrap.dedent('''
+              const bool bHasHydrology = Settings.bGenerateRivers && Settings.HydrologySettings.bEnabled;
+              const FCubusHydrologySample Hydrology = bHasHydrology
+                  ? (TerrainContext.bHasHydrologySample
+                      ? TerrainContext.HydrologySample
+                      : FCubusHydrologyField::Sample(WorldX, WorldY, Settings.HydrologySettings))
+                  : FCubusHydrologySample();
+          ''')
+          if new_hydro not in text:
+              if old_hydro not in text:
+                  raise RuntimeError('missing hydrology block')
+              text = text.replace(old_hydro, new_hydro, 1)
+
+          old_parent = textwrap.dedent('''
+              const float ParentMaterial = FMath::Clamp(
+                  0.5f + SampleFbm(WarpedX + 7937.0f, WarpedY - 12011.0f, Settings.Frequency * 0.88f, 3, 0.50f) * 0.5f,
+                  0.0f,
+                  1.0f
+              );
+          ''')
+          if old_parent in text:
+              text = text.replace(old_parent, '    const float ParentMaterial = Climate.ParentMaterial;\n', 1)
+
+          # Existing body references now consume the prepared climate values.
+          for name in (
+              'ProvinceMoisture', 'RegionalMoisture', 'LocalHumidity',
+              'ProvinceTemperature', 'RegionalTemperature', 'LocalTemperature'
+          ):
+              text = re.sub(rf'(?<![\w.]){name}\b', f'Climate.{name}', text)
+          for index in range(4):
+              text = re.sub(rf'(?<!\.)CommunityPatch\[{index}\]', f'Climate.CommunityPatch[{index}]', text)
+
+          climate_methods = textwrap.dedent('''
+          FCubusBiomeClimateContext FCubusBiomeField::SampleClimate(
+              const float WorldX,
+              const float WorldY,
+              const FCubusBiomeFieldSettings& InSettings
+          )
+          {
+              FCubusBiomeFieldSettings Settings = InSettings;
+              Settings.Frequency = FMath::Max(0.000001f, Settings.Frequency);
+
+              const float BiomeX = WorldX + static_cast<float>(Settings.BiomeOffsetX);
+              const float BiomeY = WorldY + static_cast<float>(Settings.BiomeOffsetY);
+              const float ClimateProvinceFrequency = Settings.Frequency * 0.18f;
+              const float ClimateRegionalFrequency = Settings.Frequency * 0.62f;
+              const float ClimateLocalFrequency = Settings.Frequency * 1.55f;
+              const float WarpFrequency = ClimateProvinceFrequency * 0.55f;
+              const float WarpAmplitude = FMath::Clamp(0.18f / ClimateProvinceFrequency, 96.0f, 520.0f);
+              const float WarpedX = BiomeX + SampleFbm(
+                  BiomeX + 3527.0f,
+                  BiomeY - 1871.0f,
+                  WarpFrequency,
+                  3,
+                  0.5f
+              ) * WarpAmplitude;
+              const float WarpedY = BiomeY + SampleFbm(
+                  BiomeX - 6173.0f,
+                  BiomeY + 2593.0f,
+                  WarpFrequency,
+                  3,
+                  0.5f
+              ) * WarpAmplitude;
+
+              FCubusBiomeClimateContext Result;
+              Result.ProvinceMoisture = SampleFbm(WarpedX + 4219.0f, WarpedY - 1877.0f, ClimateProvinceFrequency * 0.95f, 4, 0.52f);
+              Result.RegionalMoisture = SampleFbm(WarpedX - 11549.0f, WarpedY + 9011.0f, ClimateRegionalFrequency * 0.90f, 3, 0.50f);
+              Result.LocalHumidity = SampleFbm(WarpedX + 1013.0f, WarpedY + 6427.0f, ClimateLocalFrequency, 2, 0.45f);
+              Result.ProvinceTemperature = SampleFbm(WarpedX - 8111.0f, WarpedY + 3203.0f, ClimateProvinceFrequency * 0.78f, 4, 0.52f);
+              Result.RegionalTemperature = SampleFbm(WarpedX + 14831.0f, WarpedY - 10427.0f, ClimateRegionalFrequency * 0.82f, 3, 0.50f);
+              Result.LocalTemperature = SampleFbm(WarpedX - 2791.0f, WarpedY - 15317.0f, ClimateLocalFrequency * 0.72f, 2, 0.45f);
+              Result.CommunityPatch[0] = FMath::Clamp(0.5f + SampleFbm(WarpedX + 17011.0f, WarpedY - 9017.0f, Settings.Frequency * 0.95f, 2, 0.48f) * 0.5f, 0.0f, 1.0f);
+              Result.CommunityPatch[1] = FMath::Clamp(0.5f + SampleFbm(WarpedX - 2477.0f, WarpedY + 19421.0f, Settings.Frequency * 1.25f, 2, 0.48f) * 0.5f, 0.0f, 1.0f);
+              Result.CommunityPatch[2] = FMath::Clamp(0.5f + SampleFbm(WarpedX + 29831.0f, WarpedY + 4711.0f, Settings.Frequency * 1.55f, 2, 0.46f) * 0.5f, 0.0f, 1.0f);
+              Result.CommunityPatch[3] = FMath::Clamp(0.5f + SampleFbm(WarpedX - 15331.0f, WarpedY - 22051.0f, Settings.Frequency * 0.72f, 2, 0.50f) * 0.5f, 0.0f, 1.0f);
+              Result.ParentMaterial = FMath::Clamp(
+                  0.5f + SampleFbm(WarpedX + 7937.0f, WarpedY - 12011.0f, Settings.Frequency * 0.88f, 3, 0.50f) * 0.5f,
+                  0.0f,
+                  1.0f
+              );
+              return Result;
+          }
+
+          FCubusBiomeClimateContext FCubusBiomeField::LerpClimate(
+              const FCubusBiomeClimateContext& A,
+              const FCubusBiomeClimateContext& B,
+              const float Alpha
+          )
+          {
+              const float T = FMath::Clamp(Alpha, 0.0f, 1.0f);
+              FCubusBiomeClimateContext Result;
+              Result.ProvinceMoisture = FMath::Lerp(A.ProvinceMoisture, B.ProvinceMoisture, T);
+              Result.RegionalMoisture = FMath::Lerp(A.RegionalMoisture, B.RegionalMoisture, T);
+              Result.LocalHumidity = FMath::Lerp(A.LocalHumidity, B.LocalHumidity, T);
+              Result.ProvinceTemperature = FMath::Lerp(A.ProvinceTemperature, B.ProvinceTemperature, T);
+              Result.RegionalTemperature = FMath::Lerp(A.RegionalTemperature, B.RegionalTemperature, T);
+              Result.LocalTemperature = FMath::Lerp(A.LocalTemperature, B.LocalTemperature, T);
+              for (int32 Index = 0; Index < 4; ++Index)
+              {
+                  Result.CommunityPatch[Index] = FMath::Lerp(A.CommunityPatch[Index], B.CommunityPatch[Index], T);
+              }
+              Result.ParentMaterial = FMath::Lerp(A.ParentMaterial, B.ParentMaterial, T);
+              return Result;
+          }
+
+          ''')
+          marker = 'FCubusBiomeSample FCubusBiomeField::Sample(\n'
+          if 'FCubusBiomeClimateContext FCubusBiomeField::SampleClimate(' not in text:
+              if marker not in text:
+                  raise RuntimeError('missing insertion marker for climate methods')
+              text = text.replace(marker, climate_methods + marker, 1)
+
+          biome_cpp.write_text(text, encoding='utf-8')
+
+          # --------------------------------------------------------------
+          # Density field: cache/interpolate climate and reuse hydrology/form.
+          # --------------------------------------------------------------
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h',
+              '''
+                  struct FSurfaceData
+                  {
+                      float SurfaceVoxelHeight = 0.0f;
+                      FCubusTerrainFormSample FormSample;
+                  };
+              ''',
+              '''
+                  struct FSurfaceData
+                  {
+                      float SurfaceVoxelHeight = 0.0f;
+                      FCubusTerrainFormSample FormSample;
+                      bool bHasHydrologySample = false;
+                      FCubusHydrologySample HydrologySample;
+                  };
+              '''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h',
+              '''
+                  static constexpr float CoordinateCacheScale = 20.0f;
+
+                  mutable TMap<FIntPoint, FSurfaceData> SurfaceCache;
+                  mutable TMap<FIntPoint, FColumnData> ColumnCache;
+              ''',
+              '''
+                  static constexpr float CoordinateCacheScale = 20.0f;
+                  static constexpr float BiomeClimateCacheCellSize = 4.0f;
+
+                  mutable TMap<FIntPoint, FSurfaceData> SurfaceCache;
+                  mutable TMap<FIntPoint, FColumnData> ColumnCache;
+                  mutable TMap<FIntPoint, FCubusBiomeClimateContext> BiomeClimateCache;
+              '''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h',
+              '''
+                  const FSurfaceData& GetCachedSurfaceData(float WorldX, float WorldY) const;
+                  float GetCachedSurfaceVoxelHeight(float WorldX, float WorldY) const;
+                  const FColumnData& GetColumnData(float WorldX, float WorldY) const;
+              ''',
+              '''
+                  const FSurfaceData& GetCachedSurfaceData(float WorldX, float WorldY) const;
+                  float GetCachedSurfaceVoxelHeight(float WorldX, float WorldY) const;
+                  const FColumnData& GetColumnData(float WorldX, float WorldY) const;
+                  const FCubusBiomeClimateContext& GetCachedBiomeClimateCell(const FIntPoint& CellCoordinate) const;
+                  FCubusBiomeClimateContext GetInterpolatedBiomeClimate(float WorldX, float WorldY) const;
+              '''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h',
+              '''
+                  float SampleRiverDistance(float WorldX, float WorldY) const;
+                  float ApplyRiverLowering(float SurfaceHeight, float WorldX, float WorldY) const;
+              ''',
+              '''
+                  float SampleRiverDistance(float WorldX, float WorldY) const;
+                  float ApplyRiverLowering(float SurfaceHeight, float WorldX, float WorldY) const;
+                  float ApplyRiverLowering(float SurfaceHeight, const FCubusHydrologySample& Hydrology) const;
+              '''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp',
+              '''
+                  SurfaceCache.Reserve(1600);
+                  ColumnCache.Reserve(1600);
+              ''',
+              '''
+                  SurfaceCache.Reserve(1600);
+                  ColumnCache.Reserve(1600);
+                  BiomeClimateCache.Reserve(256);
+              '''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp',
+              '''
+                      Surface.FormSample = FCubusTerrainForm::Sample(TerrainX, TerrainY, TerrainFormSettings);
+                      const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
+                      Surface.SurfaceVoxelHeight = ApplyRiverLowering(Surface.FormSample.Height + LandmarkSample.HeightOffset, WorldX, WorldY);
+              ''',
+              '''
+                      Surface.FormSample = FCubusTerrainForm::Sample(TerrainX, TerrainY, TerrainFormSettings);
+                      const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
+                      const float UncarvedSurfaceHeight = Surface.FormSample.Height + LandmarkSample.HeightOffset;
+                      if (HydrologySettings.bEnabled)
+                      {
+                          Surface.HydrologySample = FCubusHydrologyField::Sample(WorldX, WorldY, HydrologySettings);
+                          Surface.bHasHydrologySample = true;
+                          Surface.SurfaceVoxelHeight = ApplyRiverLowering(UncarvedSurfaceHeight, Surface.HydrologySample);
+                      }
+                      else
+                      {
+                          Surface.SurfaceVoxelHeight = UncarvedSurfaceHeight;
+                      }
+              '''
+          )
+
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp',
+              '''
+                  Column.BiomeSample = FCubusBiomeField::Sample(
+                      WorldX,
+                      WorldY,
+                      Column.SurfaceVoxelHeight,
+                      Column.Slope,
+                      Settings.BiomeSettings
+                  );
+              ''',
+              '''
+                  if (Settings.BiomeSettings.bEnabled)
+                  {
+                      FCubusBiomeTerrainContext BiomeTerrainContext;
+                      BiomeTerrainContext.Gradient = Column.Gradient;
+                      BiomeTerrainContext.bHasTerrainFormSample = true;
+                      BiomeTerrainContext.TerrainFormSample = Column.FormSample;
+                      BiomeTerrainContext.bHasHydrologySample = Surface.bHasHydrologySample;
+                      BiomeTerrainContext.HydrologySample = Surface.HydrologySample;
+
+                      const FCubusBiomeClimateContext Climate = GetInterpolatedBiomeClimate(WorldX, WorldY);
+                      Column.BiomeSample = FCubusBiomeField::Sample(
+                          WorldX,
+                          WorldY,
+                          Column.SurfaceVoxelHeight,
+                          Column.Slope,
+                          Settings.BiomeSettings,
+                          BiomeTerrainContext,
+                          &Climate
+                      );
+                  }
+                  else
+                  {
+                      Column.BiomeSample = FCubusBiomeField::Sample(
+                          WorldX,
+                          WorldY,
+                          Column.SurfaceVoxelHeight,
+                          Column.Slope,
+                          Settings.BiomeSettings
+                      );
+                  }
+              '''
+          )
+
+          density_cpp = Path('Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp')
+          text = density_cpp.read_text(encoding='utf-8')
+          climate_cache_methods = textwrap.dedent('''
+          const FCubusBiomeClimateContext& FCubusTerrainDensityField::GetCachedBiomeClimateCell(const FIntPoint& CellCoordinate) const
+          {
+              if (const FCubusBiomeClimateContext* Existing = BiomeClimateCache.Find(CellCoordinate))
+              {
+                  return *Existing;
+              }
+
+              const float WorldX = static_cast<float>(CellCoordinate.X) * BiomeClimateCacheCellSize;
+              const float WorldY = static_cast<float>(CellCoordinate.Y) * BiomeClimateCacheCellSize;
+              BiomeClimateCache.Add(CellCoordinate, FCubusBiomeField::SampleClimate(WorldX, WorldY, Settings.BiomeSettings));
+              return BiomeClimateCache.FindChecked(CellCoordinate);
+          }
+
+          FCubusBiomeClimateContext FCubusTerrainDensityField::GetInterpolatedBiomeClimate(const float WorldX, const float WorldY) const
+          {
+              const float GridX = WorldX / BiomeClimateCacheCellSize;
+              const float GridY = WorldY / BiomeClimateCacheCellSize;
+              const int32 CellX = FMath::FloorToInt(GridX);
+              const int32 CellY = FMath::FloorToInt(GridY);
+              const float AlphaX = GridX - static_cast<float>(CellX);
+              const float AlphaY = GridY - static_cast<float>(CellY);
+
+              const FCubusBiomeClimateContext& C00 = GetCachedBiomeClimateCell(FIntPoint(CellX, CellY));
+              const FCubusBiomeClimateContext& C10 = GetCachedBiomeClimateCell(FIntPoint(CellX + 1, CellY));
+              const FCubusBiomeClimateContext& C01 = GetCachedBiomeClimateCell(FIntPoint(CellX, CellY + 1));
+              const FCubusBiomeClimateContext& C11 = GetCachedBiomeClimateCell(FIntPoint(CellX + 1, CellY + 1));
+
+              const FCubusBiomeClimateContext Bottom = FCubusBiomeField::LerpClimate(C00, C10, AlphaX);
+              const FCubusBiomeClimateContext Top = FCubusBiomeField::LerpClimate(C01, C11, AlphaX);
+              return FCubusBiomeField::LerpClimate(Bottom, Top, AlphaY);
+          }
+
+          ''')
+          marker = 'FCubusTerrainDensityField::FTerrainRegionWeights FCubusTerrainDensityField::SampleTerrainRegions('
+          if 'FCubusTerrainDensityField::GetCachedBiomeClimateCell(' not in text:
+              if marker not in text:
+                  raise RuntimeError('missing density climate cache insertion marker')
+              text = text.replace(marker, climate_cache_methods + marker, 1)
+
+          old_apply_prefix = textwrap.dedent('''
+          float FCubusTerrainDensityField::ApplyRiverLowering(const float SurfaceHeight, const float WorldX, const float WorldY) const
+          {
+              if (!HydrologySettings.bEnabled)
+              {
+                  return SurfaceHeight;
+              }
+
+              const FCubusHydrologySample Hydrology = FCubusHydrologyField::Sample(WorldX, WorldY, HydrologySettings);
+              if (!Hydrology.IsChannel())
+          ''')
+          new_apply_prefix = textwrap.dedent('''
+          float FCubusTerrainDensityField::ApplyRiverLowering(const float SurfaceHeight, const float WorldX, const float WorldY) const
+          {
+              if (!HydrologySettings.bEnabled)
+              {
+                  return SurfaceHeight;
+              }
+
+              return ApplyRiverLowering(
+                  SurfaceHeight,
+                  FCubusHydrologyField::Sample(WorldX, WorldY, HydrologySettings)
+              );
+          }
+
+          float FCubusTerrainDensityField::ApplyRiverLowering(
+              const float SurfaceHeight,
+              const FCubusHydrologySample& Hydrology
+          ) const
+          {
+              if (!Hydrology.IsChannel())
+          ''')
+          if new_apply_prefix not in text:
+              if old_apply_prefix not in text:
+                  raise RuntimeError('missing river lowering refactor anchor')
+              text = text.replace(old_apply_prefix, new_apply_prefix, 1)
+          density_cpp.write_text(text, encoding='utf-8')
+
+          # Generation output changes slightly because the slow climate backbone is bilinearly interpolated.
+          replace_once(
+              'Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h',
+              '''
+                  // Bumped to 16: vegetation species and placement ecology now consume the v2
+                  // elevation, treeline, hydrology, solar-exposure and erosion habitat fields.
+                  static constexpr uint32 CurrentGenerationVersion = 16;
+              ''',
+              '''
+                  // Bumped to 17: biome cold generation reuses authoritative terrain/hydrology
+                  // and interpolates the slow climate backbone on a deterministic 4-voxel lattice.
+                  static constexpr uint32 CurrentGenerationVersion = 17;
+              '''
+          )
+
+          # Regression coverage for exact standalone climate and cached density sampling.
+          tests = Path('Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp')
+          text = tests.read_text(encoding='utf-8')
+          insert = textwrap.dedent('''
+          IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+              FCubusBiomePreparedClimateTest,
+              "Orakai.Cubus.Generation.BiomePreparedClimate",
+              EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+          )
+
+          bool FCubusBiomePreparedClimateTest::RunTest(const FString& Parameters)
+          {
+              (void)Parameters;
+
+              FCubusBiomeFieldSettings Settings;
+              Settings.bEnabled = true;
+              Settings.BiomeOffsetX = 1387;
+              Settings.BiomeOffsetY = -2911;
+
+              FCubusBiomeTerrainContext Terrain;
+              Terrain.bHasTerrainFormSample = true;
+              Terrain.TerrainFormSample = FCubusTerrainForm::Sample(120.0f, -75.0f, Settings.HydrologySettings.TerrainFormSettings);
+              Terrain.Gradient = FVector2D(0.12f, -0.08f);
+
+              const FCubusBiomeClimateContext Climate = FCubusBiomeField::SampleClimate(120.0f, -75.0f, Settings);
+              const FCubusBiomeSample Prepared = FCubusBiomeField::Sample(120.0f, -75.0f, 16.0f, 0.25f, Settings, Terrain, &Climate);
+              const FCubusBiomeSample Repeated = FCubusBiomeField::Sample(120.0f, -75.0f, 16.0f, 0.25f, Settings, Terrain, &Climate);
+
+              TestEqual(TEXT("Prepared climate is deterministic"), Prepared.Moisture, Repeated.Moisture);
+              TestEqual(TEXT("Prepared climate keeps biome identity deterministic"), Prepared.BiomeName, Repeated.BiomeName);
+
+              const FCubusBiomeClimateContext A = FCubusBiomeField::SampleClimate(120.0f, -75.0f, Settings);
+              const FCubusBiomeClimateContext B = FCubusBiomeField::SampleClimate(124.0f, -75.0f, Settings);
+              const FCubusBiomeClimateContext Mid = FCubusBiomeField::LerpClimate(A, B, 0.5f);
+              TestTrue(TEXT("Climate interpolation stays between neighbouring moisture samples"),
+                  Mid.ProvinceMoisture >= FMath::Min(A.ProvinceMoisture, B.ProvinceMoisture) &&
+                  Mid.ProvinceMoisture <= FMath::Max(A.ProvinceMoisture, B.ProvinceMoisture));
+              TestTrue(TEXT("Climate interpolation keeps parent material normalized"), Mid.ParentMaterial >= 0.0f && Mid.ParentMaterial <= 1.0f);
+              return true;
+          }
+
+          ''')
+          marker = 'IMPLEMENT_SIMPLE_AUTOMATION_TEST(\n    FCubusBiomeEcologicalNicheTest,'
+          if 'FCubusBiomePreparedClimateTest' not in text:
+              if marker not in text:
+                  raise RuntimeError('missing biome test insertion marker')
+              text = text.replace(marker, insert + marker, 1)
+          tests.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          grep -n 'FCubusBiomeClimateContext' Source/Orakai/CubusCore/Generation/CubusBiomeField.h
+          grep -n 'bHasTerrainFormSample' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
+          grep -n 'bHasHydrologySample' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
+          grep -n 'BiomeClimateCacheCellSize = 4.0f' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h
+          grep -n 'GetInterpolatedBiomeClimate' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
+          grep -n 'ApplyRiverLowering(UncarvedSurfaceHeight, Surface.HydrologySample)' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
+          grep -n 'CurrentGenerationVersion = 17' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
+          grep -n 'FCubusBiomePreparedClimateTest' Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp
+
+          python3 - <<'PY'
+          from pathlib import Path
+          biome = Path('Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp').read_text(encoding='utf-8')
+          density = Path('Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp').read_text(encoding='utf-8')
+          assert biome.count('FCubusBiomeClimateContext FCubusBiomeField::SampleClimate(') == 1
+          assert biome.count('FCubusBiomeClimateContext FCubusBiomeField::LerpClimate(') == 1
+          assert 'Climate.ProvinceMoisture * 0.26f' in biome
+          assert 'Climate.CommunityPatch[0]' in biome
+          assert 'const float ParentMaterial = Climate.ParentMaterial;' in biome
+          assert 'TerrainContext.bHasTerrainFormSample' in biome
+          assert 'TerrainContext.bHasHydrologySample' in biome
+          assert density.count('FCubusBiomeField::SampleClimate(') == 1
+          assert 'BiomeClimateCache.Reserve(256);' in density
+          assert 'BiomeTerrainContext.bHasTerrainFormSample = true;' in density
+          assert 'BiomeTerrainContext.bHasHydrologySample = Surface.bHasHydrologySample;' in density
+          assert density.index('GetInterpolatedBiomeClimate(WorldX, WorldY)') < density.index('Column.BiomeSample = FCubusBiomeField::Sample(', density.index('GetInterpolatedBiomeClimate(WorldX, WorldY)'))
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            Source/Orakai/CubusCore/Generation/CubusBiomeField.h \
+            Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp \
+            Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h \
+            Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp \
+            Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h \
+            Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp
+          git commit -m 'Optimize biome cold generation'
+          git push origin HEAD:agent/density-meshing
