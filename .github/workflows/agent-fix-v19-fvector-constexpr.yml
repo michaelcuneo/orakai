@@ -1,0 +1,43 @@
+name: Fix v19 FVector constexpr compile
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Fix UE 5.8 FVector2D constexpr incompatibility
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp')
+          text = path.read_text(encoding='utf-8')
+          old = '    constexpr FVector2D SkyDirections[] = {'
+          new = '    static const FVector2D SkyDirections[] = {'
+          count = text.count(old)
+          if count != 1:
+              raise RuntimeError(f'expected exactly one SkyDirections constexpr declaration, found {count}')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+          grep -n 'static const FVector2D SkyDirections' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
+          if grep -R -n 'constexpr FVector2D SkyDirections' Source/Orakai/CubusCore; then
+            echo 'Old constexpr SkyDirections declaration still exists'
+            exit 1
+          fi
+          grep -n 'CurrentGenerationVersion = 19' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
+          git commit -m 'Fix UE 5.8 biome horizon direction table'
+          git push origin HEAD:agent/density-meshing
