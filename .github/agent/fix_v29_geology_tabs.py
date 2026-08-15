@@ -1,13 +1,11 @@
 from pathlib import Path
 
-# One-shot cleanup for the generated v29 geology function.
+# One-shot v29 correctness cleanup.
 path = Path('Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp')
 text = path.read_text()
-start = text.index('float FCubusTerrainDensityField::SampleGeologicalDensity(')
-end = text.index('float FCubusTerrainDensityField::SampleCaveDensity(', start)
-section = text[start:end]
-if '\\t' not in section:
-    raise RuntimeError('Expected literal \\t sequences in generated geology section')
-section = section.replace('\\t', '\t')
-path.write_text(text[:start] + section + text[end:])
-print('Fixed literal tab escapes in v29 geology function')
+old = '\tif (FMath::Abs(MacroTerrainDensity) < 2.5f)'
+new = '\tif (Settings.bUseHeightTerrain && FMath::Abs(MacroTerrainDensity) < 2.5f)'
+if text.count(old) != 1:
+    raise RuntimeError(f'Expected one fine-relief guard, found {text.count(old)}')
+path.write_text(text.replace(old, new, 1))
+print('Restricted v29 sub-voxel relief to generated height terrain')
