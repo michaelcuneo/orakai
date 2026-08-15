@@ -23,7 +23,9 @@ struct ORAKAI_API FCubusDensityChunkStoreContext
 class ORAKAI_API FCubusDensityChunkStore
 {
 public:
-    static constexpr uint32 CurrentFormatVersion = 1;
+    // Format 2 intentionally invalidates all previously written .cubusd files.
+    // Generation v21 is the first namespace written with this format.
+    static constexpr uint32 CurrentFormatVersion = 2;
 
     static bool SaveBuffer(
         const FCubusDensitySamplingBuffer& Buffer,
