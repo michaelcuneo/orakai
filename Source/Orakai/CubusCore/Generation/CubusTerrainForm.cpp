@@ -32,8 +32,8 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     Settings.MountainBlend = FMath::Clamp(Settings.MountainBlend, 0.001f, 1.0f);
     Settings.MountainElevationScale = FMath::Clamp(Settings.MountainElevationScale, 1.0f, 4.0f);
 
-    // The tectonic carrier remains deliberately slow so complete mountain
-    // systems are connected over kilometre scales.
+    // Kilometre-scale tectonic carrier. This provides the long connected spine,
+    // but it no longer acts as the global on/off switch for mountain terrain.
     const float TectonicFrequency = FMath::Max(
         0.000001f,
         Settings.RegionFrequency * 0.10f
@@ -44,8 +44,8 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         TectonicFrequency * 0.65f
     );
     const float FormWarpAmplitude = FMath::Max(
-        256.0f,
-        Settings.ValleyWarpAmplitude * 12.0f
+        192.0f,
+        Settings.ValleyWarpAmplitude * 9.0f
     );
     const float WarpX = SampleFbm(
         WorldX + 4871.0f,
@@ -66,8 +66,6 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float TerrainX = WorldX + WarpX;
     const float TerrainY = WorldY + WarpY;
 
-    // Mountain ranges follow warped tectonic zero contours rather than isolated
-    // threshold blobs, keeping the macro structure connected.
     const float TectonicSignal = SampleFbm(
         TerrainX + 10427.0f,
         TerrainY - 8633.0f,
@@ -118,43 +116,44 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         )) * RangeContinuity;
 
     /*
-     * Regional highland provinces are independent of the tectonic spine.
+     * Regional terrain province.
      *
-     * Previously almost every new v20 landform multiplied FoothillBelt or
-     * RangeCore. A player outside that legacy mask therefore saw the old world
-     * even though a completely fresh density cache was being generated. The
-     * province field now decides whether a broad region is elevated or basinal;
-     * tectonic zero contours remain the strongest connected range spines inside
-     * those provinces instead of being the global on/off switch.
+     * The v22 pass used a ridged province as a direct vertical displacement,
+     * which made obvious synthetic shelves. A realistic temperate mountain
+     * valley instead starts with a very broad elevation province. Tectonic
+     * spines and massifs add relief inside the high country; broad low provinces
+     * become basins rather than giant stamped depressions.
      */
-    const float ProvinceRidge = SampleRidgedFbm(
-        TerrainX * 0.74f - TerrainY * 0.67f + 41891.0f,
-        TerrainX * 0.67f + TerrainY * 0.74f - 27617.0f,
-        Settings.RegionFrequency * 0.46f,
-        4
-    );
-    const float ProvinceWarp = FMath::Clamp(
+    const float ProvinceElevation = FMath::Clamp(
         0.5f + 0.5f * SampleFbm(
-            TerrainX * 0.58f + TerrainY * 0.81f - 33461.0f,
-            TerrainY * 0.58f - TerrainX * 0.81f + 19603.0f,
-            Settings.RegionFrequency * 0.73f,
-            3,
-            2.03f,
-            0.50f
+            TerrainX * 0.77f - TerrainY * 0.64f + 41891.0f,
+            TerrainX * 0.64f + TerrainY * 0.77f - 27617.0f,
+            Settings.RegionFrequency * 0.34f,
+            4,
+            2.01f,
+            0.52f
         ),
         0.0f,
         1.0f
     );
-    const float HighlandProvince = SmoothStep(
-        0.26f,
-        0.67f,
-        ProvinceRidge * 0.78f + ProvinceWarp * 0.22f
+    const float ProvinceRuggedness = SampleRidgedFbm(
+        TerrainX * 0.58f + TerrainY * 0.81f - 33461.0f,
+        TerrainY * 0.58f - TerrainX * 0.81f + 19603.0f,
+        Settings.RegionFrequency * 0.78f,
+        3
     );
-    const float BasinProvince = SmoothStep(
-        0.30f,
-        0.72f,
-        (1.0f - ProvinceRidge) * (0.72f + (1.0f - ProvinceWarp) * 0.28f)
-    ) * (1.0f - FoothillBelt * 0.55f);
+    const float HighlandProvince = FMath::Clamp(
+        SmoothStep(0.48f, 0.72f, ProvinceElevation) *
+        FMath::Lerp(0.72f, 1.0f, ProvinceRuggedness),
+        0.0f,
+        1.0f
+    );
+    const float BasinProvince = FMath::Clamp(
+        SmoothStep(0.58f, 0.82f, 1.0f - ProvinceElevation) *
+        (1.0f - FoothillBelt * 0.62f),
+        0.0f,
+        1.0f
+    );
 
     const float RegionSignal = SampleFbm(
         TerrainX - 11717.0f,
@@ -172,23 +171,23 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
 
     FCubusTerrainFormSample Result;
     Result.MountainCore = FMath::Clamp(
-        FMath::Max(RangeCore, HighlandProvince * 0.42f),
+        FMath::Max(RangeCore, HighlandProvince * 0.22f),
         0.0f,
         1.0f
     );
     Result.FoothillWeight = FMath::Clamp(
-        FMath::Max(FMath::Max(FoothillBelt, RangeCore), HighlandProvince * 0.72f),
+        FMath::Max(FMath::Max(FoothillBelt, RangeCore), HighlandProvince * 0.56f),
         0.0f,
         1.0f
     );
     Result.PlainsWeight =
         (1.0f - PlainsExit) *
         (1.0f - Result.FoothillWeight) *
-        FMath::Lerp(1.0f, 0.35f, BasinProvince);
+        FMath::Lerp(1.0f, 0.76f, BasinProvince);
     Result.MountainWeight = FMath::Clamp(
         FMath::Max(
             RangeCore + FoothillBelt * 0.48f,
-            HighlandProvince * 0.78f
+            HighlandProvince * 0.58f
         ),
         0.0f,
         1.0f
@@ -336,16 +335,31 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         0.0f,
         1.0f
     );
-    Result.Ridge = FMath::Max(LocalRidge, MajorRidge * FMath::Max(RangeCore, HighlandProvince * 0.48f));
+    const float PassRhythm = FMath::Clamp(
+        0.5f + 0.5f * SampleFbm(
+            TerrainX * 0.38f + TerrainY * 0.92f + 15877.0f,
+            TerrainY * 0.38f - TerrainX * 0.92f - 24601.0f,
+            Settings.RegionFrequency * 0.92f,
+            3,
+            1.93f,
+            0.54f
+        ),
+        0.0f,
+        1.0f
+    );
+    Result.Ridge = FMath::Max(
+        LocalRidge,
+        MajorRidge * FMath::Max(RangeCore, HighlandProvince * 0.34f)
+    );
 
     /*
-     * Meso-scale massifs are now driven by the highland province as well as
-     * the old tectonic belt. This makes them visible in ordinary streamed
-     * neighbourhoods without spraying mountain noise across genuine basins.
+     * Meso-scale massifs are hundreds of voxels across. Their envelope is
+     * broad and low-amplitude; sharper ridges are reserved for the tectonic
+     * spine. This avoids the repeated "mountain bumps" look.
      */
     const float MesoscaleFrequency = FMath::Max(
-        Settings.RegionFrequency * 1.35f,
-        TectonicFrequency * 7.0f
+        Settings.RegionFrequency * 0.95f,
+        TectonicFrequency * 6.0f
     );
     const float MassifBroad = SampleRidgedFbm(
         TerrainX * 0.84f - TerrainY * 0.54f + 22391.0f,
@@ -356,52 +370,52 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const float MassifFine = SampleRidgedFbm(
         TerrainX * 0.63f + TerrainY * 0.78f - 17311.0f,
         TerrainY * 0.63f - TerrainX * 0.78f + 25793.0f,
-        MesoscaleFrequency * 1.72f,
+        MesoscaleFrequency * 1.65f,
         3
     );
     const float LegacyMassifCarrier = FMath::Clamp(
-        FoothillBelt * 0.82f + RangeCore * 0.55f,
+        FoothillBelt * 0.78f + RangeCore * 0.52f,
         0.0f,
         1.0f
     );
     const float MassifCarrier = FMath::Clamp(
-        FMath::Max(LegacyMassifCarrier, HighlandProvince * 0.92f),
+        FMath::Max(LegacyMassifCarrier, HighlandProvince * 0.70f),
         0.0f,
         1.0f
     );
     Result.MassifWeight = FMath::Clamp(
-        (MassifBroad * 0.68f + MassifFine * 0.32f) * MassifCarrier,
+        (MassifBroad * 0.72f + MassifFine * 0.28f) * MassifCarrier,
         0.0f,
         1.0f
     );
-    Result.Ridge = FMath::Max(Result.Ridge, MassifFine * Result.MassifWeight);
+    Result.Ridge = FMath::Max(Result.Ridge, MassifFine * Result.MassifWeight * 0.82f);
 
-    // A regional front follows both massif structure and the boundary of a
-    // highland province. It therefore exists where mountain country meets a
-    // basin even if the legacy tectonic zero-contour is somewhere else.
+    // Mountain fronts are primarily a structural/exposure signal. The height
+    // contribution later is deliberately small; volumetric geology can make a
+    // true cliff where the resulting slope and rock structure support it.
     const float EscarpmentSignal = SampleFbm(
         TerrainX * 0.91f + TerrainY * 0.41f + 31991.0f,
         TerrainY * 0.91f - TerrainX * 0.41f - 11813.0f,
-        Settings.RegionFrequency * 1.55f,
+        Settings.RegionFrequency * 0.95f,
         3,
         2.03f,
         0.50f
     );
-    const float EscarpmentPlateau = SmoothStep(-0.16f, 0.16f, EscarpmentSignal);
+    const float EscarpmentPlateau = SmoothStep(-0.20f, 0.20f, EscarpmentSignal);
     const float EscarpmentEdge = 1.0f - SmoothStep(
-        0.045f,
-        0.25f,
+        0.055f,
+        0.31f,
         FMath::Abs(EscarpmentSignal)
     );
     const float ProvinceFront = 1.0f - SmoothStep(
         0.12f,
-        0.42f,
+        0.38f,
         FMath::Abs(HighlandProvince - 0.46f)
     );
     const float EscarpmentCarrier = FMath::Clamp(
         FMath::Max(
-            MassifCarrier * (0.38f + MassifBroad * 0.62f),
-            ProvinceFront * 0.78f
+            LegacyMassifCarrier * (0.32f + MassifBroad * 0.46f),
+            ProvinceFront * 0.32f
         ),
         0.0f,
         1.0f
@@ -412,62 +426,70 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         1.0f
     );
 
-    // Main trunk and tributary valley hierarchy.
+    /*
+     * Valley hierarchy.
+     *
+     * Trunk valleys are intentionally much lower-frequency and wider than the
+     * old procedural channel. Tributaries are smaller and only appear in a
+     * catchment. This creates a readable main valley with side valleys instead
+     * of a uniform web of equally-sized cuts.
+     */
     const float MainDrainage = SampleChannelMask(
         TerrainX - 1379.0f,
         TerrainY + 733.0f,
-        Settings.ValleyFrequency,
-        Settings.ValleyWidth,
-        Settings.ValleyFalloff
+        Settings.ValleyFrequency * 0.42f,
+        Settings.ValleyWidth * 1.35f,
+        Settings.ValleyFalloff * 1.25f
     );
     const float Tributary = SampleChannelMask(
         TerrainX * 0.82f - TerrainY * 0.57f + 6197.0f,
         TerrainX * 0.57f + TerrainY * 0.82f - 2467.0f,
-        Settings.ValleyFrequency * 1.85f,
-        Settings.ValleyWidth * 0.62f,
-        Settings.ValleyFalloff * 0.55f
+        Settings.ValleyFrequency * 1.45f,
+        Settings.ValleyWidth * 0.58f,
+        Settings.ValleyFalloff * 0.52f
     );
     const float Catchment = SmoothStep(
-        -0.18f,
-        0.34f,
+        -0.20f,
+        0.36f,
         SampleFbm(
             TerrainX - 7213.0f,
             TerrainY + 3907.0f,
-            Settings.RegionFrequency * 1.6f,
+            Settings.RegionFrequency * 1.25f,
             2,
             2.0f,
             0.5f
         )
     );
-    const float TributaryDrainage = Tributary * Catchment * 0.78f;
+    const float TributaryDrainage = Tributary * Catchment * 0.72f;
     Result.Drainage = FMath::Max(MainDrainage, TributaryDrainage);
 
-    // Wide shoulders establish readable valleys from a distance while the
-    // stronger floor term retains a narrower incised channel at LOD0.
+    // A broad shoulder plus narrow floor gives a glacial/fluvial valley cross
+    // section. The lower exponent widens the shoulder; the higher exponent
+    // confines the strong incision to the trunk floor.
     const float MainValleyShoulder = FMath::Pow(
         FMath::Clamp(MainDrainage, 0.0f, 1.0f),
-        0.52f
+        0.72f
     );
     const float MainValleyFloor = FMath::Pow(
         FMath::Clamp(MainDrainage, 0.0f, 1.0f),
-        1.48f
+        1.85f
     );
     const float TributaryValley = FMath::Pow(
         FMath::Clamp(TributaryDrainage, 0.0f, 1.0f),
-        1.18f
+        1.40f
     );
     Result.ValleyCarve = FMath::Clamp(
-        FMath::Max(MainValleyShoulder, TributaryValley * 0.78f),
+        FMath::Max(MainValleyShoulder, TributaryValley * 0.72f),
         0.0f,
         1.0f
     );
 
-    // Broad glacial-style bowls/cirques follow the new highland envelope too.
+    // Cirques are sparse headwall bowls in mountain country, not random holes.
     const float CirqueField = FMath::Clamp(
         0.5f + 0.5f * SampleFbm(
             TerrainX * 0.72f - TerrainY * 0.69f + 27103.0f,
             TerrainX * 0.69f + TerrainY * 0.72f - 33791.0f,
-            FMath::Max(Settings.RegionFrequency * 2.35f, Settings.ValleyFrequency * 0.72f),
+            FMath::Max(Settings.RegionFrequency * 1.80f, Settings.ValleyFrequency * 0.55f),
             3,
             2.01f,
             0.48f
@@ -476,9 +498,9 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
         1.0f
     );
     Result.Cirque = FMath::Clamp(
-        SmoothStep(0.54f, 0.80f, CirqueField) *
-        FMath::Max(FMath::Max(Result.MountainWeight, Result.MassifWeight), HighlandProvince * 0.72f) *
-        (1.0f - MainValleyFloor * 0.70f),
+        SmoothStep(0.64f, 0.86f, CirqueField) *
+        FMath::Max(Result.MountainWeight, Result.MassifWeight) *
+        (1.0f - MainValleyFloor * 0.78f),
         0.0f,
         1.0f
     );
@@ -504,49 +526,49 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     );
 
     const float ContinentStrength =
-        0.28f * Result.PlainsWeight +
+        0.30f * Result.PlainsWeight +
         0.72f * Result.RollingWeight +
         1.0f * Result.MountainWeight;
     const float HillStrength =
         0.08f * Result.PlainsWeight +
         1.0f * Result.RollingWeight +
-        0.52f * Result.MountainWeight;
+        0.48f * Result.MountainWeight;
     const float RidgeStrength =
         0.0f * Result.PlainsWeight +
-        0.18f * Result.RollingWeight +
+        0.16f * Result.RollingWeight +
         1.0f * Result.MountainWeight;
     const float ValleyStrength =
-        0.32f * Result.PlainsWeight +
-        0.78f * Result.RollingWeight +
+        0.38f * Result.PlainsWeight +
+        0.76f * Result.RollingWeight +
         1.0f * Result.MountainWeight;
 
     const float ValleyFloor = Result.Drainage * Result.Drainage;
-    const float Erosion = FMath::Clamp(1.0f - ValleyFloor * 0.82f, 0.12f, 1.0f);
+    const float Erosion = FMath::Clamp(1.0f - ValleyFloor * 0.84f, 0.14f, 1.0f);
     const float DetailStrength =
-        (0.20f * Result.PlainsWeight +
-         0.52f * Result.RollingWeight +
-         0.88f * Result.MountainWeight) *
+        (0.18f * Result.PlainsWeight +
+         0.48f * Result.RollingWeight +
+         0.82f * Result.MountainWeight) *
         Erosion;
-    const float PatchStrength = FMath::Lerp(0.32f, 1.0f, SurfacePatch);
+    const float PatchStrength = FMath::Lerp(0.30f, 1.0f, SurfacePatch);
     const float UndulationStrength =
         (0.72f * Result.PlainsWeight +
-         0.88f * Result.RollingWeight +
-         0.54f * Result.MountainWeight) *
-        FMath::Clamp(1.0f - ValleyFloor * 0.62f, 0.28f, 1.0f);
+         0.84f * Result.RollingWeight +
+         0.50f * Result.MountainWeight) *
+        FMath::Clamp(1.0f - ValleyFloor * 0.68f, 0.24f, 1.0f);
     const float MicroStrength =
-        (0.34f * Result.PlainsWeight +
-         0.76f * Result.RollingWeight +
-         1.0f * Result.MountainWeight) *
+        (0.30f * Result.PlainsWeight +
+         0.70f * Result.RollingWeight +
+         0.92f * Result.MountainWeight) *
         PatchStrength * Erosion;
     const float BrokenGroundStrength =
-        (0.08f * Result.PlainsWeight +
-         0.48f * Result.RollingWeight +
-         1.0f * Result.MountainWeight) *
-        SmoothStep(0.28f, 0.76f, SurfacePatch) * Erosion;
+        (0.06f * Result.PlainsWeight +
+         0.42f * Result.RollingWeight +
+         0.90f * Result.MountainWeight) *
+        SmoothStep(0.30f, 0.78f, SurfacePatch) * Erosion;
     const float RillStrength =
-        (0.04f * Result.PlainsWeight +
-         0.38f * Result.RollingWeight +
-         1.0f * Result.MountainWeight) *
+        (0.03f * Result.PlainsWeight +
+         0.32f * Result.RollingWeight +
+         0.90f * Result.MountainWeight) *
         FMath::Lerp(0.42f, 1.0f, Catchment) *
         (1.0f - ValleyFloor);
     Result.SurfaceRoughness = FMath::Clamp(
@@ -561,56 +583,64 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     );
 
     const float BroadSurfaceRelief =
-        SoilUndulation * Settings.DetailAmplitude * 0.70f * UndulationStrength;
+        SoilUndulation * Settings.DetailAmplitude * 0.62f * UndulationStrength;
     const float RawFineSurfaceRelief =
-        Detail * Settings.DetailAmplitude * 0.46f * DetailStrength +
-        MicroRelief * Settings.DetailAmplitude * 0.54f * MicroStrength +
-        BrokenGround * Settings.DetailAmplitude * 0.24f * BrokenGroundStrength -
-        LocalRills * Settings.DetailAmplitude * 0.62f * RillStrength;
+        Detail * Settings.DetailAmplitude * 0.42f * DetailStrength +
+        MicroRelief * Settings.DetailAmplitude * 0.46f * MicroStrength +
+        BrokenGround * Settings.DetailAmplitude * 0.18f * BrokenGroundStrength -
+        LocalRills * Settings.DetailAmplitude * 0.54f * RillStrength;
     const float FineSurfaceReliefLimit =
         Settings.DetailAmplitude *
-        FMath::Lerp(0.48f, 0.82f, SurfacePatch) *
-        FMath::Lerp(0.82f, 1.0f, Erosion);
+        FMath::Lerp(0.42f, 0.74f, SurfacePatch) *
+        FMath::Lerp(0.80f, 1.0f, Erosion);
     const float FineSurfaceRelief = FMath::Clamp(
         RawFineSurfaceRelief,
         -FineSurfaceReliefLimit,
         FineSurfaceReliefLimit
     );
 
+    /*
+     * Relief budget.
+     *
+     * These terms are intentionally hierarchical rather than additive copies
+     * of the same noise. Province uplift is broad and modest; ranges provide
+     * most alpine elevation; massifs articulate the range; passes reduce ridge
+     * height locally; valleys and cirques remove material where expected.
+     */
     const float RangeUplift =
         Settings.RidgeAmplitude * Settings.MountainElevationScale *
         (
-            FoothillBelt * 0.78f +
-            RangeCore * (1.08f + MajorRidge * 0.92f)
+            FoothillBelt * 0.56f +
+            RangeCore * (0.92f + MajorRidge * 0.72f)
         ) *
-        (0.82f + PeakRhythm * 0.38f);
+        (0.78f + PeakRhythm * 0.30f) *
+        (0.72f + PassRhythm * 0.30f);
     const float HighlandUplift =
-        Settings.RidgeAmplitude * Settings.MountainElevationScale * 1.18f *
-        FMath::Pow(HighlandProvince, 1.24f) *
-        (0.66f + MassifBroad * 0.52f);
+        Settings.RidgeAmplitude * Settings.MountainElevationScale * 0.42f *
+        FMath::Pow(HighlandProvince, 1.35f) *
+        (0.78f + MassifBroad * 0.22f);
     const float MassifUplift =
-        Settings.RidgeAmplitude * Settings.MountainElevationScale * 0.96f *
+        Settings.RidgeAmplitude * Settings.MountainElevationScale * 0.48f *
         Result.MassifWeight *
-        (0.72f + PeakRhythm * 0.28f);
+        (0.76f + PeakRhythm * 0.24f);
     const float EscarpmentLift =
         (EscarpmentPlateau * 2.0f - 1.0f) *
-        Settings.RidgeAmplitude * 0.92f *
-        EscarpmentCarrier;
+        Settings.RidgeAmplitude * 0.24f *
+        Result.Escarpment;
     const float BasinCut =
-        Settings.ValleyDepth * 1.28f * BasinProvince *
-        (0.76f + (1.0f - HighlandProvince) * 0.24f);
+        Settings.ValleyDepth * 0.44f * BasinProvince;
     const float MainValleyCut =
         Settings.ValleyDepth * ValleyStrength *
-        (MainValleyFloor * 1.08f +
-         FMath::Max(0.0f, MainValleyShoulder - MainValleyFloor) * 0.64f);
+        (MainValleyFloor * 0.84f +
+         FMath::Max(0.0f, MainValleyShoulder - MainValleyFloor) * 0.34f);
     const float TributaryValleyCut =
-        Settings.ValleyDepth * ValleyStrength * TributaryValley * 0.66f;
+        Settings.ValleyDepth * ValleyStrength * TributaryValley * 0.38f;
     const float CirqueCut =
         Settings.ValleyDepth *
-        FMath::Lerp(0.58f, 1.02f, Result.MountainWeight) *
+        FMath::Lerp(0.52f, 0.82f, Result.MountainWeight) *
         Result.Cirque;
     const float LocalCrestRelief =
-        LocalRidge * Settings.RidgeAmplitude * RidgeStrength * Erosion * 0.58f;
+        LocalRidge * Settings.RidgeAmplitude * RidgeStrength * Erosion * 0.38f;
     const float Continent =
         MacroRelief * 0.68f +
         RegionalRelief * 0.32f;
