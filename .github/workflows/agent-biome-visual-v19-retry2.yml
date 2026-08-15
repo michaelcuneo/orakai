@@ -1,41 +1,8 @@
-name: Finalize biome visual phenotype v19
+name: Archived biome visual phenotype v19 final
 on:
-  push:
-    branches:
-      - agent/density-meshing
-permissions:
-  contents: write
+  workflow_dispatch:
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  archived:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/density-meshing
-          fetch-depth: 0
-      - name: Apply final biome visual phenotype v19
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('.github/agent/biome_visual_v19.py')
-          text = p.read_text(encoding='utf-8')
-          start = text.index('# Make per-instance stature reflect the dominant community structure too.')
-          end = text.index('# Same phenotype scale for regional/far tree generation.', start)
-          replacement = '''# Make the first near-chunk instance block phenotype-aware.\np = Path(veg_cpp)\ntext = p.read_text(encoding='utf-8')\nold_near = \'\'\'            Instance.Scale = FMath::Lerp(0.85f, 1.15f, HashToUnitFloat(HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 307)));\n            Instance.TypeId = Selection.TypeId;\n\'\'\'\nnew_near = \'\'\'            Instance.Scale = FMath::Lerp(0.85f, 1.15f, HashToUnitFloat(HashWorldColumn(WorldX, WorldY, VegetationSeed ^ 307)));\n            if (IsTreeType(Selection.TypeId))\n            {\n                Instance.Scale *= FMath::Lerp(0.86f, 1.18f, BiomeSample.VisualTreeCover);\n            }\n            else if (Selection.TypeId == CubusVegetationType::Shrub)\n            {\n                Instance.Scale *= FMath::Lerp(0.84f, 1.16f, BiomeSample.VisualShrubCover);\n            }\n            Instance.TypeId = Selection.TypeId;\n\'\'\'\nif old_near not in text:\n    raise RuntimeError('missing near vegetation instance scale block')\ntext = text.replace(old_near, new_near, 1)\np.write_text(text, encoding='utf-8')\n\n'''
-          text = text[:start] + replacement + text[end:]
-          text = text.replace("require(veg_cpp, 'VisualConiferPreference', 2)", "require(veg_cpp, 'VisualConiferPreference', 3)")
-          p.write_text(text, encoding='utf-8')
-          PY
-          python3 .github/agent/biome_visual_v19.py
-          git diff --check
-          grep -n 'CurrentGenerationVersion = 19' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
-          grep -n 'VisualTreeCover' Source/Orakai/CubusCore/Generation/CubusBiomeField.h
-          grep -n 'ResolveCommunityVisualProfile' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
-          grep -n 'Cubus biome runtime:' Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Source/Orakai/CubusCore/Generation/CubusBiomeField.h Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp Source/Orakai/CubusCore/Generation/CubusBlockVegetationGenerator.cpp Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp
-          git commit -m 'Make biome communities visually distinct'
-          git push origin HEAD:agent/density-meshing
+      - run: echo 'Archived; source change already applied.'
