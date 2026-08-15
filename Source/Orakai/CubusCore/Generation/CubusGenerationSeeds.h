@@ -11,9 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 19: ecological communities now emit an explicit visible phenotype
-    // that strongly drives tree composition and ground-cover structure.
-    static constexpr uint32 CurrentGenerationVersion = 19;
+    // Bumped to 20: the density terrain zero-crossing now contains playable-scale
+    // massifs, mountain-front escarpments, broad/incised valley systems and cirques.
+    static constexpr uint32 CurrentGenerationVersion = 20;
 
     int64 World = 1;
     int32 Terrain = 0;
