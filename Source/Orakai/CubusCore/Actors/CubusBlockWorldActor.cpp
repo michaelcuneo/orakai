@@ -51,7 +51,10 @@ void ACubusBlockWorldActor::OnConstruction(const FTransform& Transform)
 	DensityNearSampleSpacing   = FMath::Clamp(DensityNearSampleSpacing, 1.0f, GeneratedVoxelSize);
 	DensityMiddleSampleSpacing = FMath::Clamp(DensityMiddleSampleSpacing, DensityNearSampleSpacing, GeneratedVoxelSize);
 	DensityFarSampleSpacing	   = FMath::Clamp(DensityFarSampleSpacing, DensityMiddleSampleSpacing, GeneratedVoxelSize);
-	DensityNearChunkRadius	   = FMath::Max(0, DensityNearChunkRadius);
+	// Keep the finest 20 cm density ring at least two chunks wide. This places
+	// the 20->40 cm transition outside the immediate spawn/walking area and
+	// also upgrades older saved Blueprint defaults that still carry radius 1.
+	DensityNearChunkRadius	   = FMath::Max(2, DensityNearChunkRadius);
 	DensityMiddleChunkRadius   = FMath::Max(DensityNearChunkRadius, DensityMiddleChunkRadius);
 
 	TerrainContinentAmplitude  = FMath::Max(0.0f, TerrainContinentAmplitude);

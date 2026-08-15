@@ -170,7 +170,7 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD",
 			  meta = (EditCondition = "bEnableDensityLod", ClampMin = "0", UIMax = "8"))
-	int32 DensityNearChunkRadius = 1;
+	int32 DensityNearChunkRadius = 2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD",
 			  meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", ClampMax = "100.0", Units = "cm"))
