@@ -1,0 +1,57 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+class FCubusDensitySamplingBuffer;
+
+/**
+ * Identity of one generated density baseline on local disk.
+ *
+ * Player edits are intentionally excluded: the cached baseline is deterministic
+ * generated world state, while sparse edits remain authoritative in persistence
+ * and are applied after the baseline is loaded.
+ */
+struct ORAKAI_API FCubusDensityChunkStoreContext
+{
+    int64 WorldSeed = 1;
+    uint32 GenerationVersion = 1;
+    float VoxelSize = 100.0f;
+    int32 SubdivisionsPerVoxel = 1;
+};
+
+/** Versioned binary storage for canonical density sampling buffers. */
+class ORAKAI_API FCubusDensityChunkStore
+{
+public:
+    static constexpr uint32 CurrentFormatVersion = 1;
+
+    static bool SaveBuffer(
+        const FCubusDensitySamplingBuffer& Buffer,
+        const FCubusDensityChunkStoreContext& Context
+    );
+
+    static bool LoadBuffer(
+        const FIntVector& ChunkCoordinate,
+        const FCubusDensityChunkStoreContext& Context,
+        FCubusDensitySamplingBuffer& OutBuffer
+    );
+
+    static bool HasBuffer(
+        const FIntVector& ChunkCoordinate,
+        const FCubusDensityChunkStoreContext& Context
+    );
+
+    static bool DeleteBuffer(
+        const FIntVector& ChunkCoordinate,
+        const FCubusDensityChunkStoreContext& Context
+    );
+
+    static FString GetBufferPath(
+        const FIntVector& ChunkCoordinate,
+        const FCubusDensityChunkStoreContext& Context
+    );
+
+    static FString GetDensityStoreDirectory(
+        const FCubusDensityChunkStoreContext& Context
+    );
+};

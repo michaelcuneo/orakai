@@ -6,6 +6,7 @@
 #include "CubusCore/Generation/CubusBlockVegetationGenerator.h"
 #include "CubusCore/Generation/CubusTerrainClutterGenerator.h"
 #include "CubusCore/Storage/CubusChunkStore.h"
+#include "CubusCore/Storage/CubusDensityChunkStore.h"
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
 
 #include "ProceduralMeshComponent.h"
@@ -19,16 +20,39 @@ FCubusChunkStoreContext MakeContext(const FCubusBlockChunkData& ChunkData)
 	Context.GenerationVersion = FCubusGenerationSeeds::CurrentGenerationVersion;
 	return Context;
 }
+
+FCubusDensityChunkStoreContext MakeDensityContext(const ACubusVoxelVolumeActor& Actor, const FCubusBlockChunkData& ChunkData)
+{
+	FCubusDensityChunkStoreContext Context;
+	const ACubusBlockWorldActor* BlockWorld = Actor.GetOwningBlockWorld();
+	Context.WorldSeed = IsValid(BlockWorld) ? BlockWorld->GetWorldSeed() : ChunkData.GetGenerationSeeds().World;
+	Context.GenerationVersion = FCubusGenerationSeeds::CurrentGenerationVersion;
+	Context.VoxelSize = Actor.GetVoxelSize();
+	Context.SubdivisionsPerVoxel = FCubusDensityLod::NormalizeSubdivisions(Actor.GetDensitySubdivisionsPerVoxel());
+	return Context;
+}
 } // namespace CubusVoxelVolumeActorStorage
 
 bool ACubusVoxelVolumeActor::TryLoadCachedChunk()
 {
+	EnsureChunkData();
+
 	if (GetEffectiveRenderMode() == ECubusVoxelRenderMode::Density)
 	{
-		return false;
-	}
+		FCubusDensitySamplingBuffer LoadedBuffer;
+		const FCubusDensityChunkStoreContext Context = CubusVoxelVolumeActorStorage::MakeDensityContext(*this, *ChunkData);
 
-	EnsureChunkData();
+		if (!FCubusDensityChunkStore::LoadBuffer(ChunkCoordinate, Context, LoadedBuffer))
+		{
+			return false;
+		}
+
+		CachedGeneratedDensityBuffer =
+			MakeShared<FCubusDensitySamplingBuffer, ESPMode::ThreadSafe>(MoveTemp(LoadedBuffer));
+		bHasCachedGeneratedDensityBuffer = true;
+		bChunkCacheDirty = false;
+		return true;
+	}
 
 	if (!ChunkData.IsValid())
 	{
@@ -57,14 +81,20 @@ bool ACubusVoxelVolumeActor::TryLoadCachedChunk()
 
 bool ACubusVoxelVolumeActor::SaveCachedChunk() const
 {
-	if (GetEffectiveRenderMode() == ECubusVoxelRenderMode::Density)
-	{
-		return true;
-	}
-
 	if (!ChunkData.IsValid())
 	{
 		return false;
+	}
+
+	if (GetEffectiveRenderMode() == ECubusVoxelRenderMode::Density)
+	{
+		if (!bHasCachedGeneratedDensityBuffer || !CachedGeneratedDensityBuffer.IsValid() || !CachedGeneratedDensityBuffer->IsBuilt())
+		{
+			return true;
+		}
+
+		const FCubusDensityChunkStoreContext DensityContext = CubusVoxelVolumeActorStorage::MakeDensityContext(*this, *ChunkData);
+		return FCubusDensityChunkStore::SaveBuffer(*CachedGeneratedDensityBuffer, DensityContext);
 	}
 
 	if (!bChunkCacheDirty)

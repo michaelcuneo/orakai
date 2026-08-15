@@ -14,6 +14,7 @@
 #include "CubusCore/Meshing/CubusBlockMesher.h"
 #include "CubusCore/Meshing/CubusDensityMesher.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
+#include "CubusCore/Storage/CubusDensityChunkStore.h"
 
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformTime.h"
@@ -675,6 +676,16 @@ FCubusDensityMeshBuildInput ACubusVoxelVolumeActor::CaptureDensityMeshBuildInput
 
 	Input.IsoLevel = 0.0f;
 
+	if (IsValid(OwningBlockWorld.Get()))
+	{
+		Input.WorldSeed = OwningBlockWorld->GetWorldSeed();
+	}
+	else
+	{
+		Input.WorldSeed = ChunkData->GetGenerationSeeds().World;
+	}
+	Input.GenerationVersion = FCubusGenerationSeeds::CurrentGenerationVersion;
+
 	if (bHasCachedGeneratedDensityBuffer && CachedGeneratedDensityBuffer.IsValid() && CachedGeneratedDensityBuffer->IsBuilt())
 	{
 		/*
@@ -716,16 +727,33 @@ FCubusDensityMeshBuildResult ACubusVoxelVolumeActor::BuildDensityMeshData(const 
 		}
 		else
 		{
+			FCubusDensityChunkStoreContext CacheContext;
+			CacheContext.WorldSeed = Input.WorldSeed;
+			CacheContext.GenerationVersion = Input.GenerationVersion;
+			CacheContext.VoxelSize = Input.VoxelSize;
+			CacheContext.SubdivisionsPerVoxel = Subdivisions;
+
+			const bool bLoadedDiskBaseline =
+				Input.bUseDiskDensityCache &&
+				FCubusDensityChunkStore::LoadBuffer(Input.ChunkCoordinate, CacheContext, DensityBuffer);
+
+			if (!bLoadedDiskBaseline)
+			{
+				/* Generate the expensive edit-free terrain baseline exactly once. */
+				DensityBuffer.Build(Input.ChunkCoordinate, DensityField);
+
+				/* Streaming workers write unique chunk files, keeping disk I/O off the game thread. */
+				if (Input.bUseDiskDensityCache)
+				{
+					FCubusDensityChunkStore::SaveBuffer(DensityBuffer, CacheContext);
+				}
+			}
+
 			/*
-			 * First build for this chunk/configuration.
-			 *
-			 * Generate the canonical baseline once and return it to the actor so
-			 * subsequent edit transactions can reuse it.
+			 * Whether generated or loaded, return the immutable baseline to the actor.
+			 * Later density edits copy and mutate this baseline only in worker-local memory.
 			 */
-			DensityBuffer.Build(Input.ChunkCoordinate, DensityField);
-
 			Result.GeneratedDensityBuffer = DensityBuffer;
-
 			Result.bHasGeneratedDensityBuffer = true;
 		}
 

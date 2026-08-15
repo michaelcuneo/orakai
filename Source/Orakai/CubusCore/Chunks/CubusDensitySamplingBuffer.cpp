@@ -56,6 +56,31 @@ void FCubusDensitySamplingBuffer::Reset()
     Samples.Reset();
 }
 
+bool FCubusDensitySamplingBuffer::RestoreGeneratedBaseline(
+    const FIntVector& InChunkCoordinate,
+    const FVector& InSampleOffsetInVoxels,
+    TArray<FCubusDensitySample>&& InSamples
+)
+{
+    if (InSamples.Num() != SampleCount || InSampleOffsetInVoxels.ContainsNaN())
+    {
+        return false;
+    }
+
+    for (const FCubusDensitySample& Sample : InSamples)
+    {
+        if (!FMath::IsFinite(Sample.Density) || Sample.MaterialId < 0)
+        {
+            return false;
+        }
+    }
+
+    ChunkCoordinate = InChunkCoordinate;
+    SampleOffsetInVoxels = InSampleOffsetInVoxels;
+    Samples = MoveTemp(InSamples);
+    return true;
+}
+
 void FCubusDensitySamplingBuffer::ApplyEdits(
     const FCubusDensityEditMap& DensityEdits
 )

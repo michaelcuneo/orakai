@@ -39,6 +39,9 @@ struct FCubusDensityMeshBuildInput
 	int32 SubdivisionsPerVoxel = 1;
 	float IsoLevel			   = 0.0f;
 
+	int64 WorldSeed = 1;
+	uint32 GenerationVersion = FCubusGenerationSeeds::CurrentGenerationVersion;
+	bool bUseDiskDensityCache = true;
 	bool bHasGeneratedDensityBuffer = false;
 };
 

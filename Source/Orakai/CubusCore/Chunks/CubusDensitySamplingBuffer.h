@@ -52,6 +52,18 @@ public:
         return Samples.Num() == SampleCount;
     }
 
+    TConstArrayView<FCubusDensitySample> GetSamples() const
+    {
+        return MakeArrayView(Samples);
+    }
+
+    /** Restores one validated, edit-free generated baseline from local disk. */
+    bool RestoreGeneratedBaseline(
+        const FIntVector& InChunkCoordinate,
+        const FVector& InSampleOffsetInVoxels,
+        TArray<FCubusDensitySample>&& InSamples
+    );
+
     const FIntVector& GetChunkCoordinate() const
     {
         return ChunkCoordinate;
