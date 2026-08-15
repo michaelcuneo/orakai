@@ -216,7 +216,7 @@ FCubusDensitySample FCubusTerrainDensityField::SampleContinuous(const FVector& G
 	 * detached spike or move a cliff by metres.
 	 */
 	float FineSurfaceDisplacement = 0.0f;
-	if (FMath::Abs(MacroTerrainDensity) < 2.5f)
+	if (Settings.bUseHeightTerrain && FMath::Abs(MacroTerrainDensity) < 2.5f)
 	{
 		const float WorldX = static_cast<float>(GlobalSampleCoordinate.X) + static_cast<float>(Settings.TerrainOffsetX);
 		const float WorldY = static_cast<float>(GlobalSampleCoordinate.Y) + static_cast<float>(Settings.TerrainOffsetY);
