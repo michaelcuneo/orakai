@@ -45,20 +45,29 @@ replace_once(
     "\tconst FVector SourceOrigin = LogicalOrigin * static_cast<double>(SafeStride);\n",
 )
 
-# Make the generation/cache identity explicit even though this correction is a
-# renderer-coordinate fix: the current v24 density cache itself remains valid,
-# but bumping prevents any confusion while evaluating the corrected terrain and
-# guarantees all visible tiers are rebuilt from the same generation settings.
+# Explicit cache identity for the corrected terrain/LOD relationship.
 replace_once(
     "Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h",
-    "    // Bumped to 24: legacy cellular mesa landmarks no longer modify the terrain;\n"
-    "    // natural large-scale features now come only from coherent geomorphology.\n"
     "    static constexpr uint32 CurrentGenerationVersion = 24;\n",
+    "    static constexpr uint32 CurrentGenerationVersion = 25;\n",
+)
+
+# Update the nearby explanatory comment independently of its previous wording.
+seeds_path = Path("Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h")
+seeds_text = seeds_path.read_text(encoding="utf-8")
+old_comment = (
+    "    // Bumped to 24: legacy cellular mesa landmarks no longer stamp arbitrary\n"
+    "    // height offsets into otherwise coherent mountain-valley terrain. Large\n"
+    "    // natural features now come from the shared geomorphology hierarchy.\n"
+)
+new_comment = (
     "    // Bumped to 25: coarse terrain LOD now samples the exact absolute canonical\n"
     "    // density coordinates used by LOD0; the old half-tile XYZ offset created a\n"
     "    // false elevated mountain/snow ring at the outer terrain tiers.\n"
-    "    static constexpr uint32 CurrentGenerationVersion = 25;\n",
 )
+if old_comment in seeds_text:
+    seeds_text = seeds_text.replace(old_comment, new_comment, 1)
+seeds_path.write_text(seeds_text, encoding="utf-8")
 
 # Static sanity guards.
 density = Path("Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp").read_text(encoding="utf-8")
