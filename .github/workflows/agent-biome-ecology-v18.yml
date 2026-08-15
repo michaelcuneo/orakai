@@ -17,6 +17,14 @@ jobs:
       - name: Apply biome ecology v18 refinement
         shell: bash
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/agent/biome_ecology_v18.py')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace('                RangeSuitability(Result.SolarExposure, Definition.MinimumSolarExposure, Definition.MaximumSolarExposure, Softness) *', '      RangeSuitability(Result.SolarExposure, Definition.MinimumSolarExposure, Definition.MaximumSolarExposure, Softness) *')
+          text = text.replace('                RangeSuitability(Result.Fertility, Definition.MinimumFertility, Definition.MaximumFertility, Softness) *', '      RangeSuitability(Result.Fertility, Definition.MinimumFertility, Definition.MaximumFertility, Softness) *')
+          p.write_text(text, encoding='utf-8')
+          PY
           python3 .github/agent/biome_ecology_v18.py
           git diff --check
           grep -n 'CurrentGenerationVersion = 18' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
