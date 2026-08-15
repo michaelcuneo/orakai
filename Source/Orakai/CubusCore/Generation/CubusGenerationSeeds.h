@@ -11,10 +11,9 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-    // Bumped to 21 to force a clean post-geomorphology density namespace. v20
-    // may already contain baselines produced during the terrain-shape rollout,
-    // so it is not trusted as a cache identity for the final geometry pass.
-    static constexpr uint32 CurrentGenerationVersion = 21;
+    // Bumped to 22: regional highland and basin provinces now reshape the
+    // density terrain independently of the legacy tectonic mountain mask.
+    static constexpr uint32 CurrentGenerationVersion = 22;
 
     int64 World = 1;
     int32 Terrain = 0;
