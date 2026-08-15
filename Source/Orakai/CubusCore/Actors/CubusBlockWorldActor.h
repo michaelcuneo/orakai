@@ -25,12 +25,16 @@ struct FCubusStreamingChunkBuild
 	TWeakObjectPtr<ACubusVoxelVolumeActor> Chunk;
 
 	UE::Tasks::TTask<FCubusDensityMeshBuildResult> Task;
+	UE::Tasks::TTask<FCubusBlockMeshBuildResult>   BlockTask;
+	UE::Tasks::TTask<FCubusHybridMeshBuildResult>  HybridTask;
+	bool										   bIsBlockBuild  = false;
+	bool										   bIsHybridBuild = false;
 
 	// Resolution and six-face topology captured by this worker. If either
 	// changes while the task runs, the result is discarded rather than
 	// publishing a mesh with an obsolete seam contract.
-	int32 SubdivisionsPerVoxel = 1;
-	uint32 TransitionSignature = 0;
+	int32  SubdivisionsPerVoxel = 1;
+	uint32 TransitionSignature	= 0;
 };
 
 UCLASS(BlueprintType, Blueprintable, Config = GameUserSettings, ClassGroup = "Cubus", meta = (DisplayName = "Cubus Block World"))
@@ -80,10 +84,7 @@ public:
 	/** Canonical LOD0 voxel size used by world-space systems such as vegetation. */
 	float GetGeneratedVoxelSize() const { return GeneratedVoxelSize; }
 
-	FCubusDensityTransitionFaces BuildDensityTransitionFaces(
-		const FIntVector& ChunkCoordinate,
-		int32 SelfSubdivisions
-	) const;
+	FCubusDensityTransitionFaces BuildDensityTransitionFaces(const FIntVector& ChunkCoordinate, int32 SelfSubdivisions) const;
 
 	bool IsWorldVegetationEnabled() const { return bEnableWorldVegetation; }
 
@@ -213,7 +214,7 @@ protected:
 	int32 VerticalViewRadius = 2;
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
-	int32 MaxChunksGeneratedPerTick = 1;
+	int32 MaxChunksGeneratedPerTick = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "32"))
 	int32 MaxChunksRemovedPerTick = 1;
@@ -259,11 +260,11 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn",
 			  meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
-	int32 MaxConcurrentStreamingChunkBuilds = 1;
+	int32 MaxConcurrentStreamingChunkBuilds = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn",
 			  meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
-	int32 MaxStreamingChunkUploadsPerTick = 1;
+	int32 MaxStreamingChunkUploadsPerTick = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming|Spawn",
 			  meta = (ClampMin = "0", ClampMax = "4", UIMax = "2"))
@@ -373,6 +374,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
 	int32 PendingRuntimeChunkCount = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+	int32 StreamingDensityBuildCount = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+	int32 ReadyStreamingDensityChunkCount = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
 	bool bInitialSpawnAreaReady = false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
 	bool bWeatherMaterialBridgeConnected = false;
@@ -409,6 +414,7 @@ private:
 	TSet<FIntVector> StreamingChunksBuilding;
 
 	TSet<FIntVector> StreamingChunksReady;
+	TSet<FIntVector> DensitySurfaceRetryCoordinates;
 
 	/*
 	 * Current hidden density rebuild transaction.

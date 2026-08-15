@@ -8,6 +8,7 @@
 #include "CubusCore/Generation/CubusDensityEditField.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
+#include "CubusCore/Meshing/CubusBlockMesher.h"
 #include "CubusCore/Meshing/CubusDensityLod.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
 #include "CubusCore/Rendering/CubusVoxelRenderMode.h"
@@ -35,15 +36,15 @@ struct FCubusDensityMeshBuildInput
 
 	FIntVector ChunkCoordinate = FIntVector::ZeroValue;
 
-	float VoxelSize			   = 100.0f;
-	int32 SubdivisionsPerVoxel = 1;
+	float						 VoxelSize			  = 100.0f;
+	int32						 SubdivisionsPerVoxel = 1;
 	FCubusDensityTransitionFaces TransitionFaces;
-	float IsoLevel			   = 0.0f;
+	float						 IsoLevel = 0.0f;
 
-	int64 WorldSeed = 1;
-	uint32 GenerationVersion = FCubusGenerationSeeds::CurrentGenerationVersion;
-	bool bUseDiskDensityCache = true;
-	bool bHasGeneratedDensityBuffer = false;
+	int64  WorldSeed				  = 1;
+	uint32 GenerationVersion		  = FCubusGenerationSeeds::CurrentGenerationVersion;
+	bool   bUseDiskDensityCache		  = true;
+	bool   bHasGeneratedDensityBuffer = false;
 };
 
 struct FCubusDensityMeshBuildResult
@@ -75,6 +76,32 @@ struct FCubusDensityMeshBuildResult
 	}
 };
 
+struct FCubusBlockMeshBuildInput
+{
+	FCubusBlockNeighborhoodMeshSnapshot Neighborhood;
+	FCubusBlockMaterialMeshSnapshot		Materials;
+	float								VoxelSize = 100.0f;
+};
+
+struct FCubusBlockMeshBuildResult
+{
+	FCubusMaterialMeshMap MaterialMeshes;
+	int32				  GeneratedFaceCount	= 0;
+	double				  BuildTimeMilliseconds = 0.0;
+};
+
+struct FCubusHybridMeshBuildInput
+{
+	FCubusBlockMeshBuildInput	Block;
+	FCubusDensityMeshBuildInput Density;
+};
+
+struct FCubusHybridMeshBuildResult
+{
+	FCubusBlockMeshBuildResult	 Block;
+	FCubusDensityMeshBuildResult Density;
+};
+
 UCLASS(BlueprintType, Blueprintable, ClassGroup = "Cubus", meta = (DisplayName = "Cubus Voxel Chunk"))
 class ORAKAI_API ACubusVoxelVolumeActor : public AActor
 {
@@ -90,14 +117,20 @@ public:
 	void RebuildVolume();
 
 	FCubusTerrainDensitySettings CaptureTerrainDensitySettings() const { return BuildDensitySettings(); }
+	bool						 IsDensitySurfaceExpected() const;
 
 	const UCubusGeologyProfile* GetGeologyProfile() const { return GeologyProfile.Get(); }
 
 	FCubusDensityMeshBuildInput CaptureDensityMeshBuildInput() const;
+	FCubusBlockMeshBuildInput	CaptureBlockMeshBuildInput() const;
 
 	static FCubusDensityMeshBuildResult BuildDensityMeshData(const FCubusDensityMeshBuildInput& Input);
+	static FCubusBlockMeshBuildResult	BuildBlockMeshData(const FCubusBlockMeshBuildInput& Input);
+	static FCubusHybridMeshBuildResult	BuildHybridMeshData(const FCubusHybridMeshBuildInput& Input);
 
 	bool BuildStagedVolumeFromDensityMesh(FCubusDensityMeshBuildResult& BuildResult);
+	bool BuildStagedVolumeFromBlockMesh(FCubusBlockMeshBuildResult& BuildResult);
+	bool BuildStagedVolumeFromHybridMesh(FCubusHybridMeshBuildResult& BuildResult);
 
 	/*
 	 * Builds a complete replacement mesh into the hidden staging component.

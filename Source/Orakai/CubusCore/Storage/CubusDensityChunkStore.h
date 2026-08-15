@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CubusCore/Meshing/CubusMeshData.h"
 
 class FCubusDensitySamplingBuffer;
 
@@ -13,47 +14,37 @@ class FCubusDensitySamplingBuffer;
  */
 struct ORAKAI_API FCubusDensityChunkStoreContext
 {
-    int64 WorldSeed = 1;
-    uint32 GenerationVersion = 1;
-    float VoxelSize = 100.0f;
-    int32 SubdivisionsPerVoxel = 1;
+	int64  WorldSeed			= 1;
+	uint32 GenerationVersion	= 1;
+	float  VoxelSize			= 100.0f;
+	int32  SubdivisionsPerVoxel = 1;
 };
 
 /** Versioned binary storage for canonical density sampling buffers. */
 class ORAKAI_API FCubusDensityChunkStore
 {
 public:
-    // Format 2 intentionally invalidates all previously written .cubusd files.
-    // Generation v21 is the first namespace written with this format.
-    static constexpr uint32 CurrentFormatVersion = 2;
+	// Format 2 intentionally invalidates all previously written .cubusd files.
+	// Generation v21 is the first namespace written with this format.
+	static constexpr uint32 CurrentFormatVersion	 = 2;
+	static constexpr uint32 CurrentMeshFormatVersion = 1;
 
-    static bool SaveBuffer(
-        const FCubusDensitySamplingBuffer& Buffer,
-        const FCubusDensityChunkStoreContext& Context
-    );
+	static bool SaveMesh(const FIntVector& ChunkCoordinate, const FCubusDensityChunkStoreContext& Context, uint32 TransitionSignature,
+						 const TMap<int32, FCubusMeshData>& MaterialMeshes, int32 GeneratedTriangleCount);
 
-    static bool LoadBuffer(
-        const FIntVector& ChunkCoordinate,
-        const FCubusDensityChunkStoreContext& Context,
-        FCubusDensitySamplingBuffer& OutBuffer
-    );
+	static bool LoadMesh(const FIntVector& ChunkCoordinate, const FCubusDensityChunkStoreContext& Context, uint32 TransitionSignature,
+						 TMap<int32, FCubusMeshData>& OutMaterialMeshes, int32& OutGeneratedTriangleCount);
 
-    static bool HasBuffer(
-        const FIntVector& ChunkCoordinate,
-        const FCubusDensityChunkStoreContext& Context
-    );
+	static bool SaveBuffer(const FCubusDensitySamplingBuffer& Buffer, const FCubusDensityChunkStoreContext& Context);
 
-    static bool DeleteBuffer(
-        const FIntVector& ChunkCoordinate,
-        const FCubusDensityChunkStoreContext& Context
-    );
+	static bool LoadBuffer(const FIntVector& ChunkCoordinate, const FCubusDensityChunkStoreContext& Context,
+						   FCubusDensitySamplingBuffer& OutBuffer);
 
-    static FString GetBufferPath(
-        const FIntVector& ChunkCoordinate,
-        const FCubusDensityChunkStoreContext& Context
-    );
+	static bool HasBuffer(const FIntVector& ChunkCoordinate, const FCubusDensityChunkStoreContext& Context);
 
-    static FString GetDensityStoreDirectory(
-        const FCubusDensityChunkStoreContext& Context
-    );
+	static bool DeleteBuffer(const FIntVector& ChunkCoordinate, const FCubusDensityChunkStoreContext& Context);
+
+	static FString GetBufferPath(const FIntVector& ChunkCoordinate, const FCubusDensityChunkStoreContext& Context);
+
+	static FString GetDensityStoreDirectory(const FCubusDensityChunkStoreContext& Context);
 };
