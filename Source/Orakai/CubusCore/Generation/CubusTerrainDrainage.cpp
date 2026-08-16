@@ -124,7 +124,7 @@ namespace CubusTerrainDrainage
     FCriticalSection CacheMutex;
     TMap<FCacheKey, TSharedPtr<const FRegion, ESPMode::ThreadSafe>> Cache;
 
-    constexpr FIntPoint Neighbours[8] =
+    const FIntPoint Neighbours[8] =
     {
         FIntPoint(-1, -1), FIntPoint(0, -1), FIntPoint(1, -1),
         FIntPoint(-1, 0),                         FIntPoint(1, 0),
