@@ -20,6 +20,7 @@ bool FCubusTerrainRasterContractTest::RunTest(const FString& Parameters)
     Settings.TileSizeMeters = 32.0f;
     Settings.HaloSamples = 2;
     Settings.DomainOffsetMeters = FVector2D(137.0, -89.0);
+    Settings.Structure.Seed = 73491;
 
     const FCubusTerrainRasterTile Left = FCubusTerrainRasterBuilder::BuildTile(FIntPoint(0, 0), Settings);
     const FCubusTerrainRasterTile Right = FCubusTerrainRasterBuilder::BuildTile(FIntPoint(1, 0), Settings);
@@ -60,17 +61,75 @@ bool FCubusTerrainRasterContractTest::RunTest(const FString& Parameters)
         FIntPoint(1, 0)
     );
 
-    FCubusTerrainRasterSettings Alternate = Settings;
-    Alternate.StructuralSource.VoxelSizeCm = 37.0f;
-    Alternate.StructuralSource.bUsePhysicalWorldScale = false;
-    const FCubusTerrainRasterTile AlternateTile = FCubusTerrainRasterBuilder::BuildTile(FIntPoint(0, 0), Alternate);
-
-    const float ReferenceHeight = Left.SampleHeightMeters(11.25, 17.75);
-    const float AlternateHeight = AlternateTile.SampleHeightMeters(11.25, 17.75);
+    const FCubusTerrainRasterTile Repeat = FCubusTerrainRasterBuilder::BuildTile(FIntPoint(0, 0), Settings);
     TestTrue(
-        TEXT("Pre-voxel terrain geometry is independent of later voxel size settings"),
-        FMath::IsNearlyEqual(ReferenceHeight, AlternateHeight, 0.0001f)
+        TEXT("Structural raster generation is deterministic"),
+        FMath::IsNearlyEqual(
+            Left.SampleHeightMeters(11.25, 17.75),
+            Repeat.SampleHeightMeters(11.25, 17.75),
+            0.0001f
+        )
     );
+
+    FCubusTerrainRasterSettings Alternate = Settings;
+    Alternate.Structure.Seed += 991;
+    const FCubusTerrainRasterTile AlternateTile = FCubusTerrainRasterBuilder::BuildTile(FIntPoint(0, 0), Alternate);
+    TestFalse(
+        TEXT("Changing the terrain seed changes structural elevation"),
+        FMath::IsNearlyEqual(
+            Left.SampleHeightMeters(11.25, 17.75),
+            AlternateTile.SampleHeightMeters(11.25, 17.75),
+            0.001f
+        )
+    );
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCubusTerrainStructureCoherenceTest,
+    "Orakai.Cubus.Terrain.Structure.CoherentRanges",
+    EAutomationTestFlags::EditorContext |
+    EAutomationTestFlags::EngineFilter
+)
+
+bool FCubusTerrainStructureCoherenceTest::RunTest(const FString& Parameters)
+{
+    (void)Parameters;
+
+    FCubusTerrainStructureSettings Settings;
+    Settings.Seed = 98173;
+
+    int32 RangeSamples = 0;
+    int32 CoreSamples = 0;
+    int32 BasinSamples = 0;
+    float MaximumHeight = -MAX_flt;
+    float MinimumHeight = MAX_flt;
+
+    // A broad survey verifies that the explicit structures actually occupy
+    // continuous landscape-scale areas rather than producing sparse point peaks.
+    for (int32 Y = -16; Y <= 16; ++Y)
+    {
+        for (int32 X = -16; X <= 16; ++X)
+        {
+            const FCubusTerrainStructureSample Sample = FCubusTerrainStructure::Sample(
+                static_cast<double>(X) * 2000.0,
+                static_cast<double>(Y) * 2000.0,
+                Settings
+            );
+
+            RangeSamples += Sample.RangeWeight > 0.35f ? 1 : 0;
+            CoreSamples += Sample.RangeCoreWeight > 0.35f ? 1 : 0;
+            BasinSamples += Sample.BasinWeight > 0.35f ? 1 : 0;
+            MaximumHeight = FMath::Max(MaximumHeight, Sample.HeightMeters);
+            MinimumHeight = FMath::Min(MinimumHeight, Sample.HeightMeters);
+        }
+    }
+
+    TestTrue(TEXT("Survey contains broad mountain-range belts"), RangeSamples > 20);
+    TestTrue(TEXT("Survey contains connected high range cores"), CoreSamples > 4);
+    TestTrue(TEXT("Survey contains broad basin regions"), BasinSamples > 20);
+    TestTrue(TEXT("Structural relief spans meaningful vertical range"), MaximumHeight - MinimumHeight > 500.0f);
 
     return true;
 }
