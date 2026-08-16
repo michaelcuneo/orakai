@@ -27,7 +27,7 @@ public:
 	// Format 2 intentionally invalidates all previously written .cubusd files.
 	// Generation v21 is the first namespace written with this format.
 	static constexpr uint32 CurrentFormatVersion	 = 2;
-	static constexpr uint32 CurrentMeshFormatVersion = 1;
+	static constexpr uint32 CurrentMeshFormatVersion = 2;
 
 	static bool SaveMesh(const FIntVector& ChunkCoordinate, const FCubusDensityChunkStoreContext& Context, uint32 TransitionSignature,
 						 const TMap<int32, FCubusMeshData>& MaterialMeshes, int32 GeneratedTriangleCount);

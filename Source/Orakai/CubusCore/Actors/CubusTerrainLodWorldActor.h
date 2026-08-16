@@ -18,22 +18,22 @@ class UMaterialInterface;
 struct FCubusTerrainLodTileBuildInput
 {
 	FCubusTerrainDensitySettings DensitySettings;
-	FIntVector TileCoordinate = FIntVector::ZeroValue;
-	int32 CanonicalVoxelStride = 2;
-	int32 MeshingSubdivisions = 2;
+	FIntVector					 TileCoordinate		  = FIntVector::ZeroValue;
+	int32						 CanonicalVoxelStride = 2;
+	int32						 MeshingSubdivisions  = 2;
 	FCubusDensityTransitionFaces TransitionFaces;
-	float CanonicalVoxelSize = 100.0f;
-	float IsoLevel = 0.0f;
+	float						 CanonicalVoxelSize = 100.0f;
+	float						 IsoLevel			= 0.0f;
 };
 
 struct FCubusTerrainLodTileBuildResult
 {
-	FIntVector TileCoordinate = FIntVector::ZeroValue;
+	FIntVector					TileCoordinate = FIntVector::ZeroValue;
 	TMap<int32, FCubusMeshData> MaterialMeshes;
-	int32 GeneratedTriangleCount = 0;
-	double BuildTimeMilliseconds = 0.0;
-	int32 AppliedRefinement = 2;
-	uint32 TransitionSignature = 0;
+	int32						GeneratedTriangleCount = 0;
+	double						BuildTimeMilliseconds  = 0.0;
+	int32						AppliedRefinement	   = 2;
+	uint32						TransitionSignature	   = 0;
 };
 
 struct FCubusTerrainLodTileBuild
@@ -44,22 +44,22 @@ struct FCubusTerrainLodTileBuild
 
 struct FCubusTerrainLodTierRuntime
 {
-	int32 LodLevel = 1;
+	int32 LodLevel			   = 1;
 	int32 CanonicalVoxelStride = 2;
-	int32 MeshingSubdivisions = 2;
-	int32 InnerRadiusTiles = 0;
-	int32 OuterRadiusTiles = 4;
-	int32 VerticalRadiusTiles = 0;
-	int32 OverlapTiles = 0;
+	int32 MeshingSubdivisions  = 2;
+	int32 InnerRadiusTiles	   = 0;
+	int32 OuterRadiusTiles	   = 4;
+	int32 VerticalRadiusTiles  = 0;
+	int32 OverlapTiles		   = 0;
 
 	TMap<FIntVector, TObjectPtr<UProceduralMeshComponent>> TileComponents;
-	TSet<FIntVector> RequiredTiles;
-	TSet<FIntVector> ResolvedTiles;
-	TSet<FIntVector> TilesBuilding;
-	TArray<FIntVector> PendingTiles;
-	TArray<FCubusTerrainLodTileBuild> ActiveBuilds;
-	TArray<FCubusTerrainLodTileBuildResult> CompletedBuilds;
-	TMap<FIntVector, int32> RefinementOverrides;
+	TSet<FIntVector>									   RequiredTiles;
+	TSet<FIntVector>									   ResolvedTiles;
+	TSet<FIntVector>									   TilesBuilding;
+	TArray<FIntVector>									   PendingTiles;
+	TArray<FCubusTerrainLodTileBuild>					   ActiveBuilds;
+	TArray<FCubusTerrainLodTileBuildResult>				   CompletedBuilds;
+	TMap<FIntVector, int32>								   RefinementOverrides;
 
 	FIntVector LastCentreTile = FIntVector(MAX_int32, MAX_int32, MAX_int32);
 };
@@ -190,11 +190,8 @@ private:
 	void ClearAllTiles();
 	void ClearTier(FCubusTerrainLodTierRuntime& Tier);
 
-	static int32 ResolveTierSubdivisions(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
-	static FCubusDensityTransitionFaces BuildTierTransitionFaces(
-		const FCubusTerrainLodTierRuntime& Tier,
-		const FIntVector& TileCoordinate
-	);
+	static int32						ResolveTierSubdivisions(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
+	static FCubusDensityTransitionFaces BuildTierTransitionFaces(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
 	void InvalidateTierTransitionDependencies(FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
 
 	UProceduralMeshComponent* CreateTileComponent(FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate, float TileWorldSize);
@@ -215,4 +212,6 @@ private:
 	FCubusTerrainLodTierRuntime Lod6Runtime;
 
 	float TimeUntilStreamingUpdate = 0.0f;
+	int32 NextLodBuildTierIndex	   = 0;
+	int32 NextLodUploadTierIndex   = 0;
 };
