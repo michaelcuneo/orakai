@@ -25,3 +25,4 @@ jobs:
           git diff --cached --check
           git diff --cached --quiet || git commit -m 'Restore density LOD world distance'
           git push origin HEAD:agent/density-meshing
+# density-lod-distance-trigger
