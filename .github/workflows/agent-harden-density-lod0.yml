@@ -1,0 +1,28 @@
+name: Harden density LOD streaming
+on:
+  push:
+    branches: [agent/density-meshing]
+    paths:
+      - '.github/agent/harden_density_lod0.py'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Apply guarded density LOD hardening
+        run: python3 .github/agent/harden_density_lod0.py
+      - name: Verify and commit
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Source/Orakai/CubusCore/Meshing/CubusDensityLod.h Source/Orakai/CubusCore/Meshing/CubusDensityMesher.cpp Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.h Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
+          git diff --cached --check
+          git diff --cached --quiet || git commit -m 'Harden density LOD streaming and seams'
+          git push origin HEAD:agent/density-meshing
