@@ -88,6 +88,19 @@ public:
         const FCubusTerrainRasterSettings& Settings
     );
 
+    /**
+     * Authoritative continuous source beneath the 1 m raster.
+     *
+     * Large pre-voxel analysis passes such as drainage use this rather than
+     * materialising every intervening 1 m tile. BuildTile() uses the exact same
+     * function, so analysis and authored raster heights cannot drift apart.
+     */
+    static float SampleStructuralHeightMeters(
+        double WorldXmeters,
+        double WorldYmeters,
+        const FCubusTerrainRasterSettings& Settings
+    );
+
     /** Resolve the unique tile containing a physical XY point. */
     static FIntPoint WorldToTileCoordinate(
         double WorldXmeters,
