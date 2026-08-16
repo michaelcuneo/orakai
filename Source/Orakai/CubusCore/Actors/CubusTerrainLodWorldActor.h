@@ -44,24 +44,22 @@ struct FCubusTerrainLodTileBuild
 
 struct FCubusTerrainLodTierRuntime
 {
-	int32 LodLevel			   = 1;
+	int32 LodLevel = 1;
 	int32 CanonicalVoxelStride = 2;
-	int32 MeshingSubdivisions  = 2;
-	int32 InnerRadiusTiles	   = 0;
-	int32 OuterRadiusTiles	   = 4;
-	int32 VerticalRadiusTiles  = 0;
-	int32 OverlapTiles		   = 0;
+	int32 MeshingSubdivisions = 2;
+	int32 VerticalRadiusTiles = 0;
+
+	FCubusDensityTileBounds2D InnerBounds;
+	FCubusDensityTileBounds2D OuterBounds;
 
 	TMap<FIntVector, TObjectPtr<UProceduralMeshComponent>> TileComponents;
-	TSet<FIntVector>									   RequiredTiles;
-	TSet<FIntVector>									   ResolvedTiles;
-	TSet<FIntVector>									   TilesBuilding;
-	TArray<FIntVector>									   PendingTiles;
-	TArray<FCubusTerrainLodTileBuild>					   ActiveBuilds;
-	TArray<FCubusTerrainLodTileBuildResult>				   CompletedBuilds;
-	TMap<FIntVector, int32>								   RefinementOverrides;
-
-	FIntVector LastCentreTile = FIntVector(MAX_int32, MAX_int32, MAX_int32);
+	TSet<FIntVector> RequiredTiles;
+	TSet<FIntVector> ResolvedTiles;
+	TSet<FIntVector> TilesBuilding;
+	TArray<FIntVector> PendingTiles;
+	TArray<FCubusTerrainLodTileBuild> ActiveBuilds;
+	TArray<FCubusTerrainLodTileBuildResult> CompletedBuilds;
+	TMap<FIntVector, uint32> ResolvedTransitionSignatures;
 };
 
 /**
@@ -176,10 +174,15 @@ protected:
 private:
 	void ResolveBlockWorld();
 	void UpdateStreaming();
-	void UpdateTierStreaming(FCubusTerrainLodTierRuntime& Tier, const FVector& StreamingGridLocation,
-							 const FCubusTerrainDensityField& DensityField, float CanonicalChunkWorldSize,
-							 double PreviousTierHalfExtentCanonicalChunks, int32 CanonicalVoxelStride, int32 OverlapTiles,
-							 int32 OuterRadiusTiles, int32 VerticalRadiusTiles);
+	void UpdateTierStreaming(
+		FCubusTerrainLodTierRuntime& Tier,
+		const FCubusTerrainDensityField& DensityField,
+		float CanonicalChunkWorldSize,
+		const FCubusDensityTileBounds2D& InnerBounds,
+		const FCubusDensityTileBounds2D& OuterBounds,
+		int32 CanonicalVoxelStride,
+		int32 VerticalRadiusTiles
+	);
 	void CollectCompletedBuilds();
 	void CollectCompletedBuildsForTier(FCubusTerrainLodTierRuntime& Tier);
 	void StartPendingBuilds();
@@ -187,12 +190,13 @@ private:
 	bool UploadOneCompletedBuild(FCubusTerrainLodTierRuntime& Tier, float CanonicalVoxelSize, UMaterialInterface* TerrainMaterial,
 								 double& WorkerMilliseconds);
 	void RemoveUnneededTiles(FCubusTerrainLodTierRuntime& Tier);
+	bool IsTierWindowResident(const FCubusTerrainLodTierRuntime& Tier) const;
+	void RetireStableTierWindows();
 	void ClearAllTiles();
 	void ClearTier(FCubusTerrainLodTierRuntime& Tier);
 
-	static int32						ResolveTierSubdivisions(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
+	static int32 ResolveTierSubdivisions(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
 	static FCubusDensityTransitionFaces BuildTierTransitionFaces(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
-	void InvalidateTierTransitionDependencies(FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
 
 	UProceduralMeshComponent* CreateTileComponent(FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate, float TileWorldSize);
 

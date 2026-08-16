@@ -72,7 +72,7 @@ void ACubusTerrainLodWorldActor::Tick(const float DeltaSeconds)
 
 	StartPendingBuilds();
 
-	FCubusTerrainLodTierRuntime* Tiers[] = {&Lod6Runtime, &Lod5Runtime, &Lod4Runtime, &Lod3Runtime, &Lod2Runtime, &Lod1Runtime};
+	FCubusTerrainLodTierRuntime* Tiers[] = {&Lod1Runtime, &Lod2Runtime, &Lod3Runtime, &Lod4Runtime, &Lod5Runtime, &Lod6Runtime};
 
 	LoadedLodTileCount	 = 0;
 	BuildingLodTileCount = 0;
@@ -83,6 +83,8 @@ void ACubusTerrainLodWorldActor::Tick(const float DeltaSeconds)
 		BuildingLodTileCount += Tier->ActiveBuilds.Num();
 		PendingLodTileCount += Tier->PendingTiles.Num();
 	}
+
+	RetireStableTierWindows();
 }
 
 void ACubusTerrainLodWorldActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -117,157 +119,126 @@ void ACubusTerrainLodWorldActor::ResolveBlockWorld()
 
 void ACubusTerrainLodWorldActor::UpdateStreaming()
 {
-	if (!bEnableTerrainLod || !IsValid(BlockWorld))
-	{
-		return;
-	}
-
-	const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
-
-	if (!IsValid(PlayerPawn))
+	if (!bEnableTerrainLod || !IsValid(BlockWorld) || !BlockWorld->IsDensityStreamingCoverageReady())
 	{
 		return;
 	}
 
 	ACubusVoxelVolumeActor* SnapshotChunk = nullptr;
-
 	for (const auto& Pair : BlockWorld->GetRegisteredChunks())
 	{
 		ACubusVoxelVolumeActor* Candidate = Pair.Value.Get();
-
 		if (IsValid(Candidate) && Candidate->GetChunkData() != nullptr)
 		{
 			SnapshotChunk = Candidate;
 			break;
 		}
 	}
-
 	if (!IsValid(SnapshotChunk))
 	{
 		return;
 	}
 
-	const float						CanonicalVoxelSize = FMath::Max(1.0f, SnapshotChunk->GetVoxelSize());
+	const float CanonicalVoxelSize = FMath::Max(1.0f, SnapshotChunk->GetVoxelSize());
+	const float CanonicalChunkWorldSize = static_cast<float>(Cubus::ChunkSize) * CanonicalVoxelSize;
 	const FCubusTerrainDensityField DensityField(SnapshotChunk->CaptureTerrainDensitySettings());
-	const float						CanonicalChunkWorldSize = static_cast<float>(Cubus::ChunkSize) * CanonicalVoxelSize;
 
-	const FVector WorldGridOrigin		= ResolveWorldGridOrigin(CanonicalChunkWorldSize);
-	const FVector WorldGridCornerOrigin = WorldGridOrigin - FVector(CanonicalChunkWorldSize * 0.5f);
-
-	/*
-	 * World ownership follows the controlled pawn, not the camera.
-	 *
-	 * A third-person boom camera can orbit, lag and cross a coarse tile
-	 * boundary without the player moving through that boundary. Using it as
-	 * the streaming origin makes terrain change underneath the character.
-	 */
-	const FVector StreamingGridLocation = PlayerPawn->GetActorLocation() - WorldGridCornerOrigin;
-
-	const int32 Lod0HorizontalRadiusChunks = FMath::Max(0, BlockWorld->GetClientHorizontalViewDistance());
-
-	const double Lod0HalfExtentCanonicalChunks = static_cast<double>(Lod0HorizontalRadiusChunks) + 0.5;
-
-	/*
-	 * Keep every visual tier exactly one 2:1 sampling step from the previous
-	 * tier, without sacrificing the original world draw distance. The previous
-	 * three-tier 4/16/64 layout reached roughly 288 canonical chunks with the
-	 * default radius. The six-tier 2/4/8/16/32/64 chain reaches the same outer
-	 * scale while every boundary remains a Transvoxel-compatible 2:1 step.
-	 */
 	struct FTierUpdate
 	{
 		FCubusTerrainLodTierRuntime* Runtime;
-		int32						 Stride;
-		int32						 OuterRadius;
-		int32						 VerticalRadius;
+		int32 Stride;
+		int32 OuterRadius;
+		int32 VerticalRadius;
+	};
+	FTierUpdate TierUpdates[] =
+	{
+		{ &Lod1Runtime, 2,  Lod1OuterRadiusTiles, Lod1VerticalRadiusTiles },
+		{ &Lod2Runtime, 4,  Lod2OuterRadiusTiles, Lod2VerticalRadiusTiles },
+		{ &Lod3Runtime, 8,  Lod3OuterRadiusTiles, Lod3VerticalRadiusTiles },
+		{ &Lod4Runtime, 16, Lod4OuterRadiusTiles, Lod4VerticalRadiusTiles },
+		{ &Lod5Runtime, 32, Lod5OuterRadiusTiles, Lod5VerticalRadiusTiles },
+		{ &Lod6Runtime, 64, Lod6OuterRadiusTiles, Lod6VerticalRadiusTiles }
 	};
 
-	FTierUpdate TierUpdates[] = {{&Lod1Runtime, 2, Lod1OuterRadiusTiles, Lod1VerticalRadiusTiles},
-								 {&Lod2Runtime, 4, Lod2OuterRadiusTiles, Lod2VerticalRadiusTiles},
-								 {&Lod3Runtime, 8, Lod3OuterRadiusTiles, Lod3VerticalRadiusTiles},
-								 {&Lod4Runtime, 16, Lod4OuterRadiusTiles, Lod4VerticalRadiusTiles},
-								 {&Lod5Runtime, 32, Lod5OuterRadiusTiles, Lod5VerticalRadiusTiles},
-								 {&Lod6Runtime, 64, Lod6OuterRadiusTiles, Lod6VerticalRadiusTiles}};
-
-	double PreviousHalfExtentCanonicalChunks = Lod0HalfExtentCanonicalChunks;
-	for (const FTierUpdate& TierUpdate : TierUpdates)
+	/*
+	 * Every tier is derived from the exact committed bounds of the previous
+	 * finer tier. No tier independently follows the pawn. Bounds are even and
+	 * power-of-two aligned, so a parent face always coincides with a complete
+	 * group of child faces and moves only on the child grid cadence.
+	 */
+	FCubusDensityTileBounds2D PreviousBounds = BlockWorld->GetDensityStreamingCoverageBounds();
+	for (const FTierUpdate& Update : TierUpdates)
 	{
-		UpdateTierStreaming(*TierUpdate.Runtime, StreamingGridLocation, DensityField, CanonicalChunkWorldSize,
-							PreviousHalfExtentCanonicalChunks, TierUpdate.Stride, 0, TierUpdate.OuterRadius, TierUpdate.VerticalRadius);
+		const FCubusDensityTileBounds2D InnerBounds = FCubusDensityLod::ScaleDownExact(PreviousBounds, 2);
+		const int32 MinimumHalfSpan = FMath::Max(
+			(InnerBounds.WidthX() + 1) / 2,
+			(InnerBounds.WidthY() + 1) / 2
+		);
+		/* +1 preserves/slightly exceeds the old radius+0.5 physical reach while keeping an even tile width. */
+		const int32 OuterHalfSpan = FMath::Max(MinimumHalfSpan, Update.OuterRadius + 1);
+		const FCubusDensityTileBounds2D OuterBounds = FCubusDensityLod::BuildAlignedOuterBounds(
+			InnerBounds, OuterHalfSpan, 2
+		);
 
-		const int32 ResolvedOuterRadius	  = FMath::Max(TierUpdate.Runtime->InnerRadiusTiles + 1, TierUpdate.Runtime->OuterRadiusTiles);
-		PreviousHalfExtentCanonicalChunks = (static_cast<double>(ResolvedOuterRadius) + 0.5) * static_cast<double>(TierUpdate.Stride);
+		UpdateTierStreaming(
+			*Update.Runtime,
+			DensityField,
+			CanonicalChunkWorldSize,
+			InnerBounds,
+			OuterBounds,
+			Update.Stride,
+			Update.VerticalRadius
+		);
+		PreviousBounds = OuterBounds;
 	}
 }
 
-void ACubusTerrainLodWorldActor::UpdateTierStreaming(FCubusTerrainLodTierRuntime& Tier, const FVector& StreamingGridLocation,
-													 const FCubusTerrainDensityField& DensityField, const float CanonicalChunkWorldSize,
-													 const double PreviousTierHalfExtentCanonicalChunks, const int32 CanonicalVoxelStride,
-													 const int32 OverlapTiles, const int32 OuterRadiusTiles,
-													 const int32 VerticalRadiusTiles)
+void ACubusTerrainLodWorldActor::UpdateTierStreaming(
+	FCubusTerrainLodTierRuntime& Tier,
+	const FCubusTerrainDensityField& DensityField,
+	const float CanonicalChunkWorldSize,
+	const FCubusDensityTileBounds2D& InnerBounds,
+	const FCubusDensityTileBounds2D& OuterBounds,
+	const int32 CanonicalVoxelStride,
+	const int32 VerticalRadiusTiles
+)
 {
 	const int32 SafeStride = FMath::Clamp(CanonicalVoxelStride, 2, 256);
-
-	const int32 SafeOverlapTiles = FMath::Clamp(OverlapTiles, 0, 2);
-
 	const int32 SafeVerticalRadius = FMath::Clamp(VerticalRadiusTiles, 0, 4);
+	const bool bConfigurationChanged =
+		Tier.CanonicalVoxelStride != SafeStride ||
+		Tier.VerticalRadiusTiles != SafeVerticalRadius ||
+		Tier.InnerBounds != InnerBounds ||
+		Tier.OuterBounds != OuterBounds;
 
-	const double PreviousRadiusInCurrentTiles = PreviousTierHalfExtentCanonicalChunks / static_cast<double>(SafeStride);
-
-	/*
-	 * The preceding tier covers a circular/ellipsoidal horizontal footprint,
-	 * while this tier is indexed by square Chebyshev rings. Exclude a coarse
-	 * tile only when its farthest corner is still inside the previous radius;
-	 * otherwise diagonal gaps appear between the circle and square annulus.
-	 */
-	const double MaximumContainedChebyshevRadius = PreviousRadiusInCurrentTiles / FMath::Sqrt(2.0) - 0.5;
-	const int32	 SafeInnerRadius				 = FMath::Max(0, FMath::FloorToInt(MaximumContainedChebyshevRadius) - SafeOverlapTiles);
-
-	const int32 SafeOuterRadius = FMath::Max(SafeInnerRadius + 1, OuterRadiusTiles);
-
-	const bool bConfigurationChanged = Tier.CanonicalVoxelStride != SafeStride || Tier.InnerRadiusTiles != SafeInnerRadius ||
-									   Tier.OuterRadiusTiles != SafeOuterRadius || Tier.VerticalRadiusTiles != SafeVerticalRadius ||
-									   Tier.OverlapTiles != SafeOverlapTiles;
-
-	Tier.CanonicalVoxelStride = SafeStride;
-	Tier.InnerRadiusTiles	  = SafeInnerRadius;
-	Tier.OuterRadiusTiles	  = SafeOuterRadius;
-	Tier.VerticalRadiusTiles  = SafeVerticalRadius;
-	Tier.OverlapTiles		  = SafeOverlapTiles;
-
-	const float TileWorldSize = CanonicalChunkWorldSize * static_cast<float>(SafeStride);
-
-	const FIntVector CentreTile(FMath::FloorToInt(StreamingGridLocation.X / TileWorldSize),
-								FMath::FloorToInt(StreamingGridLocation.Y / TileWorldSize), 0);
-
-	if (CentreTile == Tier.LastCentreTile && !Tier.RequiredTiles.IsEmpty() && !bConfigurationChanged)
+	if (!bConfigurationChanged && !Tier.RequiredTiles.IsEmpty())
 	{
 		return;
 	}
 
-	Tier.LastCentreTile = CentreTile;
+	Tier.CanonicalVoxelStride = SafeStride;
+	Tier.VerticalRadiusTiles = SafeVerticalRadius;
+	Tier.InnerBounds = InnerBounds;
+	Tier.OuterBounds = OuterBounds;
 	Tier.RequiredTiles.Reset();
 	Tier.PendingTiles.Reset();
 
-	const double	TileSizeVoxels		  = static_cast<double>(Cubus::ChunkSize * SafeStride);
+	const double TileSizeVoxels = static_cast<double>(Cubus::ChunkSize * SafeStride);
 	constexpr int32 SurfaceSamplesPerAxis = 7;
 
-	for (int32 Y = -SafeOuterRadius; Y <= SafeOuterRadius; ++Y)
+	for (int32 TileY = OuterBounds.Min.Y; TileY < OuterBounds.MaxExclusive.Y; ++TileY)
 	{
-		for (int32 X = -SafeOuterRadius; X <= SafeOuterRadius; ++X)
+		for (int32 TileX = OuterBounds.Min.X; TileX < OuterBounds.MaxExclusive.X; ++TileX)
 		{
-			const int32 HorizontalDistance = FMath::Max(FMath::Abs(X), FMath::Abs(Y));
-			if (HorizontalDistance <= SafeInnerRadius || HorizontalDistance > SafeOuterRadius)
+			if (InnerBounds.Contains(TileX, TileY))
 			{
 				continue;
 			}
 
-			const int32	 TileX			= CentreTile.X + X;
-			const int32	 TileY			= CentreTile.Y + Y;
 			const double SourceMinimumX = static_cast<double>(TileX) * TileSizeVoxels;
 			const double SourceMinimumY = static_cast<double>(TileY) * TileSizeVoxels;
-			int32		 MinimumTileZ	= MAX_int32;
-			int32		 MaximumTileZ	= MIN_int32;
+			int32 MinimumTileZ = MAX_int32;
+			int32 MaximumTileZ = MIN_int32;
 
 			for (int32 SampleY = 0; SampleY < SurfaceSamplesPerAxis; ++SampleY)
 			{
@@ -275,12 +246,13 @@ void ACubusTerrainLodWorldActor::UpdateTierStreaming(FCubusTerrainLodTierRuntime
 				{
 					const double AlphaX = static_cast<double>(SampleX) / static_cast<double>(SurfaceSamplesPerAxis - 1);
 					const double AlphaY = static_cast<double>(SampleY) / static_cast<double>(SurfaceSamplesPerAxis - 1);
-					const float	 Height =
-						DensityField.SampleSurfaceVoxelHeight(static_cast<float>(SourceMinimumX + AlphaX * TileSizeVoxels),
-															  static_cast<float>(SourceMinimumY + AlphaY * TileSizeVoxels));
+					const float Height = DensityField.SampleSurfaceVoxelHeight(
+						static_cast<float>(SourceMinimumX + AlphaX * TileSizeVoxels),
+						static_cast<float>(SourceMinimumY + AlphaY * TileSizeVoxels)
+					);
 					const int32 SurfaceTileZ = FMath::FloorToInt(static_cast<double>(Height) / TileSizeVoxels);
-					MinimumTileZ			 = FMath::Min(MinimumTileZ, SurfaceTileZ);
-					MaximumTileZ			 = FMath::Max(MaximumTileZ, SurfaceTileZ);
+					MinimumTileZ = FMath::Min(MinimumTileZ, SurfaceTileZ);
+					MaximumTileZ = FMath::Max(MaximumTileZ, SurfaceTileZ);
 				}
 			}
 
@@ -291,70 +263,73 @@ void ACubusTerrainLodWorldActor::UpdateTierStreaming(FCubusTerrainLodTierRuntime
 		}
 	}
 
-	for (auto Iterator = Tier.RefinementOverrides.CreateIterator(); Iterator; ++Iterator)
-	{
-		if (!Tier.RequiredTiles.Contains(Iterator.Key()))
-		{
-			Iterator.RemoveCurrent();
-		}
-	}
-
 	/*
-	 * Make-before-break streaming.
-	 *
-	 * Do not destroy the previous edge immediately when the window moves.
-	 * Keep those tiles visible until every tile in the new window is resident,
-	 * then retire the stale edge as one completed handoff.
+	 * A coordinate can remain in the ring while its inner-boundary face changes.
+	 * Rebuild only those retained tiles whose transition signature changed.
+	 * The old component stays visible until the replacement uploads.
 	 */
 	for (const FIntVector& TileCoordinate : Tier.RequiredTiles)
 	{
+		const uint32 ExpectedSignature = BuildTierTransitionFaces(Tier, TileCoordinate)
+			.GetSignature(Tier.MeshingSubdivisions);
+		if (Tier.ResolvedTiles.Contains(TileCoordinate))
+		{
+			const uint32* ExistingSignature = Tier.ResolvedTransitionSignatures.Find(TileCoordinate);
+			if (ExistingSignature == nullptr || *ExistingSignature != ExpectedSignature)
+			{
+				Tier.ResolvedTiles.Remove(TileCoordinate);
+			}
+		}
+
 		const bool bCompletedPendingUpload = Tier.CompletedBuilds.ContainsByPredicate(
-			[&TileCoordinate](const FCubusTerrainLodTileBuildResult& Result) { return Result.TileCoordinate == TileCoordinate; });
-
-		if (Tier.ResolvedTiles.Contains(TileCoordinate) || Tier.TilesBuilding.Contains(TileCoordinate) || bCompletedPendingUpload)
+			[&TileCoordinate](const FCubusTerrainLodTileBuildResult& Result)
+			{
+				return Result.TileCoordinate == TileCoordinate;
+			}
+		);
+		if (!Tier.ResolvedTiles.Contains(TileCoordinate) &&
+			!Tier.TilesBuilding.Contains(TileCoordinate) &&
+			!bCompletedPendingUpload)
 		{
-			continue;
+			Tier.PendingTiles.Add(TileCoordinate);
 		}
-
-		Tier.PendingTiles.Add(TileCoordinate);
 	}
 
+	auto DistanceFromInner = [&InnerBounds](const FIntVector& Coordinate)
+	{
+		const int32 DeltaX = Coordinate.X < InnerBounds.Min.X
+			? InnerBounds.Min.X - Coordinate.X
+			: (Coordinate.X >= InnerBounds.MaxExclusive.X ? Coordinate.X - InnerBounds.MaxExclusive.X + 1 : 0);
+		const int32 DeltaY = Coordinate.Y < InnerBounds.Min.Y
+			? InnerBounds.Min.Y - Coordinate.Y
+			: (Coordinate.Y >= InnerBounds.MaxExclusive.Y ? Coordinate.Y - InnerBounds.MaxExclusive.Y + 1 : 0);
+		return FMath::Max(DeltaX, DeltaY);
+	};
 	Tier.PendingTiles.Sort(
-		[CentreTile](const FIntVector& A, const FIntVector& B)
+		[&DistanceFromInner](const FIntVector& A, const FIntVector& B)
 		{
-			const int32 DistanceA = FMath::Abs(A.X - CentreTile.X) + FMath::Abs(A.Y - CentreTile.Y) + FMath::Abs(A.Z - CentreTile.Z);
-
-			const int32 DistanceB = FMath::Abs(B.X - CentreTile.X) + FMath::Abs(B.Y - CentreTile.Y) + FMath::Abs(B.Z - CentreTile.Z);
-
-			return DistanceA > DistanceB;
-		});
-
-	bool bWindowResident = !Tier.RequiredTiles.IsEmpty();
-
-	for (const FIntVector& TileCoordinate : Tier.RequiredTiles)
-	{
-		if (!Tier.ResolvedTiles.Contains(TileCoordinate))
-		{
-			bWindowResident = false;
-			break;
+			const int32 DistanceA = DistanceFromInner(A);
+			const int32 DistanceB = DistanceFromInner(B);
+			if (DistanceA != DistanceB)
+			{
+				return DistanceA > DistanceB; // Pop() => seam first.
+			}
+			return FMath::Abs(A.Z) > FMath::Abs(B.Z);
 		}
-	}
-
-	if (bWindowResident)
-	{
-		RemoveUnneededTiles(Tier);
-	}
+	);
 
 	UE_LOG(LogTemp, Display,
-		   TEXT("Cubus terrain LOD%d window: centre=(%d,%d,%d) stride=%d inner=%d overlap=%d outer=%d required=%d loaded=%d pending=%d "
-				"building=%d tile=%.0fm"),
-		   Tier.LodLevel, CentreTile.X, CentreTile.Y, CentreTile.Z, SafeStride, SafeInnerRadius, SafeOverlapTiles, SafeOuterRadius,
-		   Tier.RequiredTiles.Num(), Tier.TileComponents.Num(), Tier.PendingTiles.Num(), Tier.ActiveBuilds.Num(), TileWorldSize / 100.0f);
+		TEXT("Cubus terrain LOD%d clipmap: stride=%d inner=[%d,%d)-[%d,%d) outer=[%d,%d)-[%d,%d) required=%d loaded=%d pending=%d building=%d tile=%.0fm"),
+		Tier.LodLevel, SafeStride,
+		InnerBounds.Min.X, InnerBounds.Min.Y, InnerBounds.MaxExclusive.X, InnerBounds.MaxExclusive.Y,
+		OuterBounds.Min.X, OuterBounds.Min.Y, OuterBounds.MaxExclusive.X, OuterBounds.MaxExclusive.Y,
+		Tier.RequiredTiles.Num(), Tier.TileComponents.Num(), Tier.PendingTiles.Num(), Tier.ActiveBuilds.Num(),
+		CanonicalChunkWorldSize * static_cast<float>(SafeStride) / 100.0f);
 }
 
 void ACubusTerrainLodWorldActor::CollectCompletedBuilds()
 {
-	FCubusTerrainLodTierRuntime* Tiers[] = {&Lod6Runtime, &Lod5Runtime, &Lod4Runtime, &Lod3Runtime, &Lod2Runtime, &Lod1Runtime};
+	FCubusTerrainLodTierRuntime* Tiers[] = {&Lod1Runtime, &Lod2Runtime, &Lod3Runtime, &Lod4Runtime, &Lod5Runtime, &Lod6Runtime};
 	for (FCubusTerrainLodTierRuntime* Tier : Tiers)
 	{
 		CollectCompletedBuildsForTier(*Tier);
@@ -392,7 +367,7 @@ void ACubusTerrainLodWorldActor::StartPendingBuilds()
 		return;
 	}
 
-	FCubusTerrainLodTierRuntime* Tiers[] = {&Lod6Runtime, &Lod5Runtime, &Lod4Runtime, &Lod3Runtime, &Lod2Runtime, &Lod1Runtime};
+	FCubusTerrainLodTierRuntime* Tiers[] = {&Lod1Runtime, &Lod2Runtime, &Lod3Runtime, &Lod4Runtime, &Lod5Runtime, &Lod6Runtime};
 
 	bool bHasPendingTiles = false;
 	for (const FCubusTerrainLodTierRuntime* Tier : Tiers)
@@ -497,7 +472,7 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
 		return;
 	}
 
-	FCubusTerrainLodTierRuntime* Tiers[] = {&Lod6Runtime, &Lod5Runtime, &Lod4Runtime, &Lod3Runtime, &Lod2Runtime, &Lod1Runtime};
+	FCubusTerrainLodTierRuntime* Tiers[] = {&Lod1Runtime, &Lod2Runtime, &Lod3Runtime, &Lod4Runtime, &Lod5Runtime, &Lod6Runtime};
 
 	bool bHasCompletedBuilds = false;
 	for (const FCubusTerrainLodTierRuntime* Tier : Tiers)
@@ -566,28 +541,6 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
 		}
 	}
 
-	const auto RetireStaleTilesIfResident = [this](FCubusTerrainLodTierRuntime& Tier)
-	{
-		if (Tier.RequiredTiles.IsEmpty())
-		{
-			return;
-		}
-
-		for (const FIntVector& TileCoordinate : Tier.RequiredTiles)
-		{
-			if (!Tier.ResolvedTiles.Contains(TileCoordinate))
-			{
-				return;
-			}
-		}
-
-		RemoveUnneededTiles(Tier);
-	};
-
-	for (FCubusTerrainLodTierRuntime* Tier : Tiers)
-	{
-		RetireStaleTilesIfResident(*Tier);
-	}
 
 	if (UploadedThisTick > 0)
 	{
@@ -627,17 +580,12 @@ bool ACubusTerrainLodWorldActor::UploadOneCompletedBuild(FCubusTerrainLodTierRun
 		return false;
 	}
 
-	const int32 CurrentSubdivisions = ResolveTierSubdivisions(Tier, Result.TileCoordinate);
-	if (Result.AppliedRefinement > CurrentSubdivisions)
-	{
-		Tier.RefinementOverrides.Add(Result.TileCoordinate, Result.AppliedRefinement);
-		InvalidateTierTransitionDependencies(Tier, Result.TileCoordinate);
-	}
+	const int32 ExpectedSubdivisions = ResolveTierSubdivisions(Tier, Result.TileCoordinate);
+	const uint32 ExpectedTransitionSignature = BuildTierTransitionFaces(Tier, Result.TileCoordinate)
+		.GetSignature(ExpectedSubdivisions);
 
-	const int32	 ExpectedSubdivisions		 = ResolveTierSubdivisions(Tier, Result.TileCoordinate);
-	const uint32 ExpectedTransitionSignature = BuildTierTransitionFaces(Tier, Result.TileCoordinate).GetSignature(ExpectedSubdivisions);
-
-	if (Result.TransitionSignature != ExpectedTransitionSignature || Result.AppliedRefinement != ExpectedSubdivisions)
+	if (Result.TransitionSignature != ExpectedTransitionSignature ||
+		Result.AppliedRefinement != ExpectedSubdivisions)
 	{
 		if (!Tier.TilesBuilding.Contains(Result.TileCoordinate))
 		{
@@ -648,13 +596,7 @@ bool ACubusTerrainLodWorldActor::UploadOneCompletedBuild(FCubusTerrainLodTierRun
 	}
 
 	Tier.ResolvedTiles.Add(Result.TileCoordinate);
-
-	if (Result.AppliedRefinement > Tier.MeshingSubdivisions)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Cubus terrain LOD%d tile (%d, %d, %d) promoted to %dx after an empty %dx pass"), Tier.LodLevel,
-			   Result.TileCoordinate.X, Result.TileCoordinate.Y, Result.TileCoordinate.Z, Result.AppliedRefinement,
-			   Tier.MeshingSubdivisions);
-	}
+	Tier.ResolvedTransitionSignatures.Add(Result.TileCoordinate, Result.TransitionSignature);
 
 	FCubusMeshData* MeshData = Result.MaterialMeshes.Find(FCubusDensityMesher::UnifiedDensityMaterialKey);
 	if (MeshData == nullptr || !MeshData->IsValid())
@@ -717,6 +659,7 @@ void ACubusTerrainLodWorldActor::RemoveUnneededTiles(FCubusTerrainLodTierRuntime
 
 		Tier.TileComponents.Remove(TileCoordinate);
 		Tier.ResolvedTiles.Remove(TileCoordinate);
+		Tier.ResolvedTransitionSignatures.Remove(TileCoordinate);
 	}
 
 	for (auto Iterator = Tier.ResolvedTiles.CreateIterator(); Iterator; ++Iterator)
@@ -731,6 +674,53 @@ void ACubusTerrainLodWorldActor::RemoveUnneededTiles(FCubusTerrainLodTierRuntime
 
 	Tier.CompletedBuilds.RemoveAll([&Tier](const FCubusTerrainLodTileBuildResult& Result)
 								   { return !Tier.RequiredTiles.Contains(Result.TileCoordinate); });
+}
+
+bool ACubusTerrainLodWorldActor::IsTierWindowResident(const FCubusTerrainLodTierRuntime& Tier) const
+{
+	if (Tier.RequiredTiles.IsEmpty())
+	{
+		return false;
+	}
+	for (const FIntVector& Coordinate : Tier.RequiredTiles)
+	{
+		if (!Tier.ResolvedTiles.Contains(Coordinate))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+void ACubusTerrainLodWorldActor::RetireStableTierWindows()
+{
+	if (!IsValid(BlockWorld) || !BlockWorld->IsDensityStreamingCoverageReady())
+	{
+		return;
+	}
+
+	FCubusTerrainLodTierRuntime* Tiers[] =
+	{
+		&Lod1Runtime, &Lod2Runtime, &Lod3Runtime,
+		&Lod4Runtime, &Lod5Runtime, &Lod6Runtime
+	};
+	for (const FCubusTerrainLodTierRuntime* Tier : Tiers)
+	{
+		if (!IsTierWindowResident(*Tier))
+		{
+			return;
+		}
+	}
+
+	/*
+	 * Retire the previous hierarchy only after the complete replacement
+	 * hierarchy is resident. This trades a short-lived overlap for zero holes
+	 * and prevents one tier from exposing a gap while its neighbour catches up.
+	 */
+	for (FCubusTerrainLodTierRuntime* Tier : Tiers)
+	{
+		RemoveUnneededTiles(*Tier);
+	}
 }
 
 void ACubusTerrainLodWorldActor::ClearAllTiles()
@@ -764,83 +754,47 @@ void ACubusTerrainLodWorldActor::ClearTier(FCubusTerrainLodTierRuntime& Tier)
 	Tier.PendingTiles.Reset();
 	Tier.ActiveBuilds.Reset();
 	Tier.CompletedBuilds.Reset();
-	Tier.RefinementOverrides.Reset();
-	Tier.LastCentreTile = FIntVector(MAX_int32, MAX_int32, MAX_int32);
+	Tier.ResolvedTransitionSignatures.Reset();
+	Tier.InnerBounds = FCubusDensityTileBounds2D();
+	Tier.OuterBounds = FCubusDensityTileBounds2D();
 }
 
-int32 ACubusTerrainLodWorldActor::ResolveTierSubdivisions(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate)
+int32 ACubusTerrainLodWorldActor::ResolveTierSubdivisions(
+	const FCubusTerrainLodTierRuntime& Tier,
+	const FIntVector& TileCoordinate
+)
 {
-	if (const int32* Override = Tier.RefinementOverrides.Find(TileCoordinate))
-	{
-		return FCubusDensityLod::NormalizeSubdivisions(*Override);
-	}
-
+	(void)TileCoordinate;
 	return FCubusDensityLod::NormalizeSubdivisions(Tier.MeshingSubdivisions);
 }
 
-FCubusDensityTransitionFaces ACubusTerrainLodWorldActor::BuildTierTransitionFaces(const FCubusTerrainLodTierRuntime& Tier,
-																				  const FIntVector&					 TileCoordinate)
+FCubusDensityTransitionFaces ACubusTerrainLodWorldActor::BuildTierTransitionFaces(
+	const FCubusTerrainLodTierRuntime& Tier,
+	const FIntVector& TileCoordinate
+)
 {
 	FCubusDensityTransitionFaces Result;
-	const int32					 SelfSubdivisions = ResolveTierSubdivisions(Tier, TileCoordinate);
+	const int32 SelfSubdivisions = ResolveTierSubdivisions(Tier, TileCoordinate);
 
-	for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
+	/*
+	 * Same-tier neighbours are identical resolution. Only a horizontal face
+	 * bordering the exact inner clipmap rectangle meets the previous finer tier.
+	 * The coarser tile owns that Transvoxel transition cell.
+	 */
+	const ECubusDensityFace HorizontalFaces[] =
 	{
-		const ECubusDensityFace Face				= static_cast<ECubusDensityFace>(FaceIndex);
-		const FIntVector		NeighbourCoordinate = TileCoordinate + FCubusDensityTransitionFaces::GetOffset(Face);
-
-		if (Tier.RequiredTiles.Contains(NeighbourCoordinate))
-		{
-			const int32 NeighbourSubdivisions = ResolveTierSubdivisions(Tier, NeighbourCoordinate);
-			if (NeighbourSubdivisions == SelfSubdivisions * 2)
-			{
-				Result.Set(Face, NeighbourSubdivisions);
-			}
-			continue;
-		}
-
-		/*
-		 * The inner X/Y boundary is owned by this coarser tier. A base 2x tile
-		 * sees the preceding tier at an equivalent 4x resolution in this
-		 * scaled coordinate space. A locally promoted 4x tile already matches
-		 * that finer tier and therefore needs no transition cell.
-		 */
-		if (Face == ECubusDensityFace::NegativeX || Face == ECubusDensityFace::PositiveX || Face == ECubusDensityFace::NegativeY ||
-			Face == ECubusDensityFace::PositiveY)
-		{
-			const FIntVector Offset				= NeighbourCoordinate - Tier.LastCentreTile;
-			const int32		 HorizontalDistance = FMath::Max(FMath::Abs(Offset.X), FMath::Abs(Offset.Y));
-			if (HorizontalDistance <= Tier.InnerRadiusTiles && SelfSubdivisions == Tier.MeshingSubdivisions)
-			{
-				Result.Set(Face, SelfSubdivisions * 2);
-			}
-		}
-	}
-
-	return Result;
-}
-
-void ACubusTerrainLodWorldActor::InvalidateTierTransitionDependencies(FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate)
-{
-	auto Invalidate = [&Tier](const FIntVector& Coordinate)
-	{
-		if (!Tier.RequiredTiles.Contains(Coordinate))
-		{
-			return;
-		}
-
-		Tier.ResolvedTiles.Remove(Coordinate);
-		if (!Tier.TilesBuilding.Contains(Coordinate))
-		{
-			Tier.PendingTiles.AddUnique(Coordinate);
-		}
+		ECubusDensityFace::NegativeX, ECubusDensityFace::PositiveX,
+		ECubusDensityFace::NegativeY, ECubusDensityFace::PositiveY
 	};
-
-	Invalidate(TileCoordinate);
-	for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
+	for (const ECubusDensityFace Face : HorizontalFaces)
 	{
-		Invalidate(TileCoordinate + FCubusDensityTransitionFaces::GetOffset(static_cast<ECubusDensityFace>(FaceIndex)));
+		const FIntVector Neighbour = TileCoordinate + FCubusDensityTransitionFaces::GetOffset(Face);
+		if (Tier.InnerBounds.Contains(Neighbour.X, Neighbour.Y))
+		{
+			Result.Set(Face, SelfSubdivisions * 2);
+		}
 	}
+	return Result;
 }
 
 UProceduralMeshComponent* ACubusTerrainLodWorldActor::CreateTileComponent(FCubusTerrainLodTierRuntime& Tier,
@@ -976,20 +930,12 @@ FCubusTerrainLodTileBuildResult ACubusTerrainLodWorldActor::BuildTile(const FCub
 
 	const float ScaledVoxelSize = Input.CanonicalVoxelSize * static_cast<float>(SafeStride);
 
-	FCubusDensityMesher::BuildAdaptiveChunk(ScaledField, Input.TileCoordinate, ScaledVoxelSize, BaseSubdivisions, Input.IsoLevel,
-											Result.MaterialMeshes, Result.GeneratedTriangleCount, Input.TransitionFaces, &ScaledField);
-	Result.AppliedRefinement   = BaseSubdivisions;
+	FCubusDensityMesher::BuildAdaptiveChunk(
+		ScaledField, Input.TileCoordinate, ScaledVoxelSize, BaseSubdivisions, Input.IsoLevel,
+		Result.MaterialMeshes, Result.GeneratedTriangleCount, Input.TransitionFaces, &ScaledField
+	);
+	Result.AppliedRefinement = BaseSubdivisions;
 	Result.TransitionSignature = Input.TransitionFaces.GetSignature(BaseSubdivisions);
-
-	if (Result.MaterialMeshes.IsEmpty() && BaseSubdivisions < 4)
-	{
-		Result.GeneratedTriangleCount = 0;
-		FCubusDensityTransitionFaces FineEquivalentFaces;
-		FCubusDensityMesher::BuildAdaptiveChunk(ScaledField, Input.TileCoordinate, ScaledVoxelSize, 4, Input.IsoLevel,
-												Result.MaterialMeshes, Result.GeneratedTriangleCount, FineEquivalentFaces, &ScaledField);
-		Result.AppliedRefinement   = 4;
-		Result.TransitionSignature = FineEquivalentFaces.GetSignature(4);
-	}
 
 	Result.BuildTimeMilliseconds = (FPlatformTime::Seconds() - BuildStartTime) * 1000.0;
 	return Result;
