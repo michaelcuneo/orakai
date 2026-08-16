@@ -218,9 +218,9 @@ protected:
 
 	/**
 	 * Density terrain follows the generated surface per XY column instead of
-	 * loading a tall ellipsoid around one Z anchor. One chunk of padding above
-	 * and below the surface is enough for the bounded geology band and removes
-	 * large amounts of empty/deep density work.
+	 * loading a tall ellipsoid around one Z anchor. This value adds a small
+	 * voxel-space safety allowance to the sampled per-column height range; it
+	 * no longer forces whole empty chunks above and below every column.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (ClampMin = "0", ClampMax = "2", UIMax = "2"))
 	int32 DensitySurfaceVerticalPaddingChunks = 1;

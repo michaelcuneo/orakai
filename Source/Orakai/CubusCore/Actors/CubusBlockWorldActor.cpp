@@ -5,6 +5,7 @@
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"
 #include "CubusCore/Generation/CubusTerrainForm.h"
+#include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "CubusCore/Meshing/CubusDensityLod.h"
 #include "CubusCore/Persistence/OrakaiPersistenceSubsystem.h"
@@ -1408,27 +1409,57 @@ void ACubusBlockWorldActor::BuildDensitySurfaceRequiredCoordinates(
 	}
 
 	const int32 SafePadding = FMath::Clamp(VerticalPadding, 0, 2);
-	const float HalfChunk = static_cast<float>(Cubus::ChunkSize) * 0.5f;
+	constexpr int32 SurfaceSamplesPerAxis = 3;
+	const float ChunkSizeVoxels = static_cast<float>(Cubus::ChunkSize);
+
+	/*
+	 * The fine surface and bounded geology can move the scalar zero by less
+	 * than about two canonical voxels. River lowering is the only larger
+	 * downward displacement in the current density biome, so reserve exactly
+	 * its configured depth rather than loading whole empty chunks above/below
+	 * every XY column.
+	 */
+	const float RiverDownwardSafety = IsValid(GeologyProfile) && GeologyProfile->bGenerateRivers
+		? FMath::Max(0.0f, GeologyProfile->RiverValleyDepth) +
+		  static_cast<float>(FMath::Max(0, GeologyProfile->RiverChannelDepth))
+		: 0.0f;
+	const float GeneralSurfaceSafety = 2.0f + static_cast<float>(SafePadding) * 2.0f;
+	const float DownwardSafety = GeneralSurfaceSafety + RiverDownwardSafety;
+	const float UpwardSafety = GeneralSurfaceSafety;
 
 	for (int32 ChunkY = CoverageBounds.Min.Y; ChunkY < CoverageBounds.MaxExclusive.Y; ++ChunkY)
 	{
 		for (int32 ChunkX = CoverageBounds.Min.X; ChunkX < CoverageBounds.MaxExclusive.X; ++ChunkX)
 		{
-			const float SurfaceSampleX =
-				static_cast<float>(ChunkX * Cubus::ChunkSize) + HalfChunk + static_cast<float>(TerrainOffsetX);
-			const float SurfaceSampleY =
-				static_cast<float>(ChunkY * Cubus::ChunkSize) + HalfChunk + static_cast<float>(TerrainOffsetY);
-
-			const float SurfaceVoxelZ = bUseHeightTerrain
-				? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, TerrainSettings).Height
-				: static_cast<float>(TerrainSurfaceWorldZ);
-			const int32 SurfaceChunkZ = FMath::FloorToInt(
-				SurfaceVoxelZ / static_cast<float>(Cubus::ChunkSize)
-			);
-
-			for (int32 DeltaZ = -SafePadding; DeltaZ <= SafePadding; ++DeltaZ)
+			float MinimumSurfaceVoxelZ = MAX_flt;
+			float MaximumSurfaceVoxelZ = -MAX_flt;
+			for (int32 SampleY = 0; SampleY < SurfaceSamplesPerAxis; ++SampleY)
 			{
-				OutCoordinates.Add(FIntVector(ChunkX, ChunkY, SurfaceChunkZ + DeltaZ));
+				for (int32 SampleX = 0; SampleX < SurfaceSamplesPerAxis; ++SampleX)
+				{
+					const float AlphaX = static_cast<float>(SampleX) / static_cast<float>(SurfaceSamplesPerAxis - 1);
+					const float AlphaY = static_cast<float>(SampleY) / static_cast<float>(SurfaceSamplesPerAxis - 1);
+					const float SurfaceSampleX =
+						(static_cast<float>(ChunkX) + AlphaX) * ChunkSizeVoxels + static_cast<float>(TerrainOffsetX);
+					const float SurfaceSampleY =
+						(static_cast<float>(ChunkY) + AlphaY) * ChunkSizeVoxels + static_cast<float>(TerrainOffsetY);
+					const float SurfaceVoxelZ = bUseHeightTerrain
+						? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, TerrainSettings).Height
+						: static_cast<float>(TerrainSurfaceWorldZ);
+					MinimumSurfaceVoxelZ = FMath::Min(MinimumSurfaceVoxelZ, SurfaceVoxelZ);
+					MaximumSurfaceVoxelZ = FMath::Max(MaximumSurfaceVoxelZ, SurfaceVoxelZ);
+				}
+			}
+
+			const int32 MinimumChunkZ = FMath::FloorToInt(
+				(MinimumSurfaceVoxelZ - DownwardSafety) / ChunkSizeVoxels
+			);
+			const int32 MaximumChunkZ = FMath::FloorToInt(
+				(MaximumSurfaceVoxelZ + UpwardSafety) / ChunkSizeVoxels
+			);
+			for (int32 ChunkZ = MinimumChunkZ; ChunkZ <= MaximumChunkZ; ++ChunkZ)
+			{
+				OutCoordinates.Add(FIntVector(ChunkX, ChunkY, ChunkZ));
 			}
 		}
 	}
@@ -1540,7 +1571,6 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 	const int32 VerticalRadius = bInitialSpawnAreaReady ? VerticalViewRadius : InitialVerticalLoadRadius;
 	TSet<FIntVector> DesiredRequiredCoordinates;
 	FCubusDensityTileBounds2D DesiredCoverageBounds;
-
 	if (bDensityWorld)
 	{
 		DesiredCoverageBounds = FCubusDensityLod::BuildAlignedCoverage(
@@ -1548,6 +1578,28 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 			FMath::Max(1, HorizontalRadius),
 			2
 		);
+	}
+
+	const bool bCentreChanged = CentreCoordinate != LastTrackedChunk;
+	const bool bCoverageChanged = bDensityWorld
+		? DesiredCoverageBounds != DensityStreamingCoverageBounds
+		: DensityStreamingCoverageBounds.IsValid();
+
+	/*
+	 * Keep the tracking coordinate current for spawn/priority work, but density
+	 * streaming itself moves only when its aligned 2-chunk clipmap moves. This
+	 * removes the full surface prepass and queue rebuild on every single chunk
+	 * crossed by the player.
+	 */
+	LastTrackedChunk = CentreCoordinate;
+	const bool bStreamingWindowChanged = bDensityWorld ? bCoverageChanged : (bCentreChanged || bCoverageChanged);
+	if (!bForce && !bStreamingWindowChanged)
+	{
+		return;
+	}
+
+	if (bDensityWorld)
+	{
 		BuildDensitySurfaceRequiredCoordinates(
 			DesiredCoverageBounds,
 			StreamingTerrainSettings,
@@ -1563,18 +1615,6 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 			CentreCoordinate, HorizontalRadius, VerticalRadius, DesiredRequiredCoordinates
 		);
 	}
-
-	const bool bCentreChanged = CentreCoordinate != LastTrackedChunk;
-	const bool bCoverageChanged = bDensityWorld
-		? DesiredCoverageBounds != DensityStreamingCoverageBounds
-		: DensityStreamingCoverageBounds.IsValid();
-
-	if (!bForce && !bCentreChanged && !bCoverageChanged)
-	{
-		return;
-	}
-
-	LastTrackedChunk = CentreCoordinate;
 	if (bDensityWorld)
 	{
 		DensityStreamingCoverageBounds = DesiredCoverageBounds;
