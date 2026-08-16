@@ -60,6 +60,7 @@ public:
 
 private:
     friend class FCubusTerrainRasterBuilder;
+    friend class FCubusTerrainCarving;
 
     static float CubicInterpolate(float P0, float P1, float P2, float P3, float Alpha);
     int32 StorageIndex(int32 GridX, int32 GridY) const;
