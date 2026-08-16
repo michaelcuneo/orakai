@@ -429,44 +429,46 @@ FTransitionFaceBasis GetTransitionFaceBasis(const ECubusDensityFace Face)
 	switch (Face)
 	{
 	case ECubusDensityFace::NegativeX:
-		Result.BoundaryOrigin = FVector(0.0, 0.0, 0.0);
-		Result.Inward		  = FVector(1.0, 0.0, 0.0);
-		Result.U			  = FVector(0.0, 1.0, 0.0);
-		Result.V			  = FVector(0.0, 0.0, 1.0);
+		Result.BoundaryOrigin = FVector(0.0, 0.0, Cubus::ChunkSize);
+		Result.Inward = FVector(1.0, 0.0, 0.0);
+		Result.U = FVector(0.0, 1.0, 0.0);
+		Result.V = FVector(0.0, 0.0, -1.0);
 		break;
 	case ECubusDensityFace::PositiveX:
 		Result.BoundaryOrigin = FVector(Cubus::ChunkSize, 0.0, 0.0);
-		Result.Inward		  = FVector(-1.0, 0.0, 0.0);
-		Result.U			  = FVector(0.0, 1.0, 0.0);
-		Result.V			  = FVector(0.0, 0.0, 1.0);
+		Result.Inward = FVector(-1.0, 0.0, 0.0);
+		Result.U = FVector(0.0, 1.0, 0.0);
+		Result.V = FVector(0.0, 0.0, 1.0);
 		break;
 	case ECubusDensityFace::NegativeY:
 		Result.BoundaryOrigin = FVector(0.0, 0.0, 0.0);
-		Result.Inward		  = FVector(0.0, 1.0, 0.0);
-		Result.U			  = FVector(1.0, 0.0, 0.0);
-		Result.V			  = FVector(0.0, 0.0, 1.0);
+		Result.Inward = FVector(0.0, 1.0, 0.0);
+		Result.U = FVector(1.0, 0.0, 0.0);
+		Result.V = FVector(0.0, 0.0, 1.0);
 		break;
 	case ECubusDensityFace::PositiveY:
-		Result.BoundaryOrigin = FVector(0.0, Cubus::ChunkSize, 0.0);
-		Result.Inward		  = FVector(0.0, -1.0, 0.0);
-		Result.U			  = FVector(1.0, 0.0, 0.0);
-		Result.V			  = FVector(0.0, 0.0, 1.0);
+		Result.BoundaryOrigin = FVector(0.0, Cubus::ChunkSize, Cubus::ChunkSize);
+		Result.Inward = FVector(0.0, -1.0, 0.0);
+		Result.U = FVector(1.0, 0.0, 0.0);
+		Result.V = FVector(0.0, 0.0, -1.0);
 		break;
 	case ECubusDensityFace::NegativeZ:
-		Result.BoundaryOrigin = FVector(0.0, 0.0, 0.0);
-		Result.Inward		  = FVector(0.0, 0.0, 1.0);
-		Result.U			  = FVector(1.0, 0.0, 0.0);
-		Result.V			  = FVector(0.0, 1.0, 0.0);
+		Result.BoundaryOrigin = FVector(0.0, Cubus::ChunkSize, 0.0);
+		Result.Inward = FVector(0.0, 0.0, 1.0);
+		Result.U = FVector(1.0, 0.0, 0.0);
+		Result.V = FVector(0.0, -1.0, 0.0);
 		break;
 	case ECubusDensityFace::PositiveZ:
 		Result.BoundaryOrigin = FVector(0.0, 0.0, Cubus::ChunkSize);
-		Result.Inward		  = FVector(0.0, 0.0, -1.0);
-		Result.U			  = FVector(1.0, 0.0, 0.0);
-		Result.V			  = FVector(0.0, 1.0, 0.0);
+		Result.Inward = FVector(0.0, 0.0, -1.0);
+		Result.U = FVector(1.0, 0.0, 0.0);
+		Result.V = FVector(0.0, 1.0, 0.0);
 		break;
 	default:
 		break;
 	}
+
+	checkSlow(FVector::DotProduct(FVector::CrossProduct(Result.U, Result.V), -Result.Inward) > 0.99);
 	return Result;
 }
 

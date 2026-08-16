@@ -69,6 +69,37 @@ struct ORAKAI_API FCubusDensityTransitionFaces
     }
 };
 
+/** Half-open aligned XY bounds used by the density clipmap hierarchy. */
+struct ORAKAI_API FCubusDensityTileBounds2D
+{
+    FIntPoint Min = FIntPoint::ZeroValue;
+    FIntPoint MaxExclusive = FIntPoint::ZeroValue;
+
+    bool IsValid() const
+    {
+        return MaxExclusive.X > Min.X && MaxExclusive.Y > Min.Y;
+    }
+
+    int32 WidthX() const { return MaxExclusive.X - Min.X; }
+    int32 WidthY() const { return MaxExclusive.Y - Min.Y; }
+
+    bool Contains(const int32 X, const int32 Y) const
+    {
+        return X >= Min.X && X < MaxExclusive.X &&
+               Y >= Min.Y && Y < MaxExclusive.Y;
+    }
+
+    bool operator==(const FCubusDensityTileBounds2D& Other) const
+    {
+        return Min == Other.Min && MaxExclusive == Other.MaxExclusive;
+    }
+
+    bool operator!=(const FCubusDensityTileBounds2D& Other) const
+    {
+        return !(*this == Other);
+    }
+};
+
 /**
  * Density-LOD scale rules shared by streaming, chunks and meshing.
  *
@@ -154,5 +185,132 @@ public:
             FMath::Abs(Delta.Y),
             FMath::Abs(Delta.Z)
         );
+    }
+
+    static int32 HorizontalChunkDistance(
+        const FIntVector& A,
+        const FIntVector& B
+    )
+    {
+        return FMath::Max(
+            FMath::Abs(A.X - B.X),
+            FMath::Abs(A.Y - B.Y)
+        );
+    }
+
+    static int32 FloorDivide(const int32 Value, const int32 Divisor)
+    {
+        check(Divisor > 0);
+        int32 Quotient = Value / Divisor;
+        const int32 Remainder = Value % Divisor;
+        if (Remainder < 0)
+        {
+            --Quotient;
+        }
+        return Quotient;
+    }
+
+    static int32 AlignDown(const int32 Value, const int32 Alignment)
+    {
+        const int32 SafeAlignment = FMath::Max(1, Alignment);
+        return FloorDivide(Value, SafeAlignment) * SafeAlignment;
+    }
+
+    static FCubusDensityTileBounds2D BuildAlignedCoverage(
+        const FIntPoint& Centre,
+        const int32 HalfSpan,
+        const int32 Alignment = 2
+    )
+    {
+        const int32 SafeHalfSpan = FMath::Max(1, HalfSpan);
+        const int32 SafeAlignment = FMath::Max(1, Alignment);
+        const int32 Width = SafeHalfSpan * 2;
+
+        FCubusDensityTileBounds2D Result;
+        Result.Min.X = AlignDown(Centre.X - SafeHalfSpan, SafeAlignment);
+        Result.Min.Y = AlignDown(Centre.Y - SafeHalfSpan, SafeAlignment);
+        Result.MaxExclusive = Result.Min + FIntPoint(Width, Width);
+
+        if (!Result.Contains(Centre.X, Centre.Y))
+        {
+            if (Centre.X < Result.Min.X)
+            {
+                Result.Min.X -= SafeAlignment;
+            }
+            else if (Centre.X >= Result.MaxExclusive.X)
+            {
+                Result.Min.X += SafeAlignment;
+            }
+
+            if (Centre.Y < Result.Min.Y)
+            {
+                Result.Min.Y -= SafeAlignment;
+            }
+            else if (Centre.Y >= Result.MaxExclusive.Y)
+            {
+                Result.Min.Y += SafeAlignment;
+            }
+            Result.MaxExclusive = Result.Min + FIntPoint(Width, Width);
+        }
+
+        return Result;
+    }
+
+    static FCubusDensityTileBounds2D ScaleDownExact(
+        const FCubusDensityTileBounds2D& Bounds,
+        const int32 Factor = 2
+    )
+    {
+        const int32 SafeFactor = FMath::Max(1, Factor);
+        ensureMsgf(
+            Bounds.Min.X % SafeFactor == 0 && Bounds.Min.Y % SafeFactor == 0 &&
+            Bounds.MaxExclusive.X % SafeFactor == 0 && Bounds.MaxExclusive.Y % SafeFactor == 0,
+            TEXT("Cubus density clipmap bounds must be exactly aligned before scaling")
+        );
+
+        FCubusDensityTileBounds2D Result;
+        Result.Min = FIntPoint(
+            FloorDivide(Bounds.Min.X, SafeFactor),
+            FloorDivide(Bounds.Min.Y, SafeFactor)
+        );
+        Result.MaxExclusive = FIntPoint(
+            FloorDivide(Bounds.MaxExclusive.X, SafeFactor),
+            FloorDivide(Bounds.MaxExclusive.Y, SafeFactor)
+        );
+        return Result;
+    }
+
+    static FCubusDensityTileBounds2D BuildAlignedOuterBounds(
+        const FCubusDensityTileBounds2D& InnerBounds,
+        const int32 HalfSpan,
+        const int32 Alignment = 2
+    )
+    {
+        check(InnerBounds.IsValid());
+        const int32 SafeHalfSpan = FMath::Max(2, HalfSpan);
+        const int32 SafeAlignment = FMath::Max(1, Alignment);
+        const int32 Width = SafeHalfSpan * 2;
+        check(Width >= InnerBounds.WidthX() && Width >= InnerBounds.WidthY());
+
+        auto ResolveAxis = [Width, SafeAlignment](const int32 InnerMin, const int32 InnerMax)
+        {
+            const int32 TwiceCentre = InnerMin + InnerMax;
+            int32 Minimum = AlignDown((TwiceCentre - Width) / 2, SafeAlignment);
+            while (Minimum > InnerMin)
+            {
+                Minimum -= SafeAlignment;
+            }
+            while (Minimum + Width < InnerMax)
+            {
+                Minimum += SafeAlignment;
+            }
+            return Minimum;
+        };
+
+        FCubusDensityTileBounds2D Result;
+        Result.Min.X = ResolveAxis(InnerBounds.Min.X, InnerBounds.MaxExclusive.X);
+        Result.Min.Y = ResolveAxis(InnerBounds.Min.Y, InnerBounds.MaxExclusive.Y);
+        Result.MaxExclusive = Result.Min + FIntPoint(Width, Width);
+        return Result;
     }
 };

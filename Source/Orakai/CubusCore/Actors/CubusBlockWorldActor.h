@@ -86,6 +86,9 @@ public:
 
 	FCubusDensityTransitionFaces BuildDensityTransitionFaces(const FIntVector& ChunkCoordinate, int32 SelfSubdivisions) const;
 
+	const FCubusDensityTileBounds2D& GetDensityStreamingCoverageBounds() const { return DensityStreamingCoverageBounds; }
+	bool IsDensityStreamingCoverageReady() const;
+
 	bool IsWorldVegetationEnabled() const { return bEnableWorldVegetation; }
 
 	UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Spawn")
@@ -212,6 +215,15 @@ protected:
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
 	int32 VerticalViewRadius = 2;
+
+	/**
+	 * Density terrain follows the generated surface per XY column instead of
+	 * loading a tall ellipsoid around one Z anchor. One chunk of padding above
+	 * and below the surface is enough for the bounded geology band and removes
+	 * large amounts of empty/deep density work.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (ClampMin = "0", ClampMax = "2", UIMax = "2"))
+	int32 DensitySurfaceVerticalPaddingChunks = 1;
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
 	int32 MaxChunksGeneratedPerTick = 4;
@@ -416,6 +428,11 @@ private:
 	TSet<FIntVector> StreamingChunksReady;
 	TSet<FIntVector> DensitySurfaceRetryCoordinates;
 
+	/* LOD resolution swaps are staged and published as one local topology transaction. */
+	TSet<FIntVector> ActiveDensityLodTransitionCoordinates;
+	TSet<FIntVector> StagedDensityLodTransitionCoordinates;
+	bool bDensityLodTransitionActive = false;
+
 	/*
 	 * Current hidden density rebuild transaction.
 	 *
@@ -482,6 +499,8 @@ private:
 	TObjectPtr<AActor> CachedWeatherActor = nullptr;
 
 	FIntVector LastTrackedChunk				  = FIntVector(MAX_int32, MAX_int32, MAX_int32);
+	FIntVector DensityLodCentreChunk		  = FIntVector(MAX_int32, MAX_int32, MAX_int32);
+	FCubusDensityTileBounds2D DensityStreamingCoverageBounds;
 	FVector	   HeldPawnLocation				  = FVector::ZeroVector;
 	bool	   bPawnHeldForStreaming		  = false;
 	bool	   bSpawnTimeoutReported		  = false;
@@ -524,6 +543,16 @@ private:
 	void	   ProcessDirtyChunkQueue();
 	void	   BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius,
 										TSet<FIntVector>& OutCoordinates) const;
+	void BuildDensitySurfaceRequiredCoordinates(
+		const FCubusDensityTileBounds2D& CoverageBounds,
+		const FCubusTerrainFormSettings& TerrainSettings,
+		int32 TerrainOffsetX,
+		int32 TerrainOffsetY,
+		int32 VerticalPadding,
+		TSet<FIntVector>& OutCoordinates
+	) const;
+	bool AreRequiredStreamingChunksReady() const;
+	void TryCommitDensityLodTransition();
 	FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;
 	int32	   ResolveDensitySubdivisions(const FIntVector& ChunkCoordinate) const;
 	void	   UpdateDensityLods();

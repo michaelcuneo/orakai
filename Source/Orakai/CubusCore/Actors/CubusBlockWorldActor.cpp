@@ -1392,6 +1392,75 @@ void ACubusBlockWorldActor::BuildRequiredCoordinates(const FIntVector& CentreCoo
 	OutCoordinates.Add(CentreCoordinate);
 }
 
+void ACubusBlockWorldActor::BuildDensitySurfaceRequiredCoordinates(
+	const FCubusDensityTileBounds2D& CoverageBounds,
+	const FCubusTerrainFormSettings& TerrainSettings,
+	const int32 TerrainOffsetX,
+	const int32 TerrainOffsetY,
+	const int32 VerticalPadding,
+	TSet<FIntVector>& OutCoordinates
+) const
+{
+	OutCoordinates.Reset();
+	if (!CoverageBounds.IsValid())
+	{
+		return;
+	}
+
+	const int32 SafePadding = FMath::Clamp(VerticalPadding, 0, 2);
+	const float HalfChunk = static_cast<float>(Cubus::ChunkSize) * 0.5f;
+
+	for (int32 ChunkY = CoverageBounds.Min.Y; ChunkY < CoverageBounds.MaxExclusive.Y; ++ChunkY)
+	{
+		for (int32 ChunkX = CoverageBounds.Min.X; ChunkX < CoverageBounds.MaxExclusive.X; ++ChunkX)
+		{
+			const float SurfaceSampleX =
+				static_cast<float>(ChunkX * Cubus::ChunkSize) + HalfChunk + static_cast<float>(TerrainOffsetX);
+			const float SurfaceSampleY =
+				static_cast<float>(ChunkY * Cubus::ChunkSize) + HalfChunk + static_cast<float>(TerrainOffsetY);
+
+			const float SurfaceVoxelZ = bUseHeightTerrain
+				? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, TerrainSettings).Height
+				: static_cast<float>(TerrainSurfaceWorldZ);
+			const int32 SurfaceChunkZ = FMath::FloorToInt(
+				SurfaceVoxelZ / static_cast<float>(Cubus::ChunkSize)
+			);
+
+			for (int32 DeltaZ = -SafePadding; DeltaZ <= SafePadding; ++DeltaZ)
+			{
+				OutCoordinates.Add(FIntVector(ChunkX, ChunkY, SurfaceChunkZ + DeltaZ));
+			}
+		}
+	}
+}
+
+bool ACubusBlockWorldActor::AreRequiredStreamingChunksReady() const
+{
+	if (RequiredChunkCoordinates.IsEmpty())
+	{
+		return false;
+	}
+
+	for (const FIntVector& Coordinate : RequiredChunkCoordinates)
+	{
+		if (!IsValid(FindChunk(Coordinate)) || !StreamingChunksReady.Contains(Coordinate))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool ACubusBlockWorldActor::IsDensityStreamingCoverageReady() const
+{
+	const ECubusVoxelRenderMode RenderMode = GetVoxelRenderMode();
+	if (RenderMode != ECubusVoxelRenderMode::Density && RenderMode != ECubusVoxelRenderMode::Hybrid)
+	{
+		return false;
+	}
+	return DensityStreamingCoverageBounds.IsValid() && AreRequiredStreamingChunksReady();
+}
+
 FIntVector ACubusBlockWorldActor::WorldLocationToChunkCoordinate(const FVector& WorldLocation) const
 {
 	const double ChunkWorldSize = static_cast<double>(Cubus::ChunkSize) * static_cast<double>(FMath::Max(1.0f, GeneratedVoxelSize));
@@ -1408,7 +1477,6 @@ FIntVector ACubusBlockWorldActor::WorldLocationToChunkCoordinate(const FVector& 
 void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 {
 	APawn* PlayerPawn = TrackedPawn.Get();
-
 	if (!IsValid(PlayerPawn))
 	{
 		PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
@@ -1418,85 +1486,131 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 		}
 	}
 
-	/*
-	 * Gameplay world ownership follows the pawn. A third-person
-	 * camera may orbit or lag independently and must not stream
-	 * terrain underneath the character.
-	 */
 	const FVector TrackingLocation =
 		bPawnHeldForStreaming ? HeldPawnLocation : (IsValid(PlayerPawn) ? PlayerPawn->GetActorLocation() : GetActorLocation());
-
-	/*
-	 * Terrain ownership follows the pawn horizontally, but never follows the
-	 * pawn into the sky or down through the ground. The old XYZ-centred
-	 * streaming window treated altitude as world traversal and destroyed the
-	 * surface chunks underneath a flying pawn.
-	 *
-	 * Resolve a deterministic surface chunk from the same macro terrain form
-	 * used by generation. Sampling the centre of the current horizontal chunk
-	 * keeps the anchor stable while the pawn moves vertically or moves around
-	 * inside that chunk. X/Y travel still advances streaming normally.
-	 */
 	const FIntVector PawnCoordinate = WorldLocationToChunkCoordinate(TrackingLocation);
 
 	FCubusTerrainFormSettings StreamingTerrainSettings;
-	StreamingTerrainSettings.BaseHeight			 = static_cast<float>(TerrainBaseHeight);
-	StreamingTerrainSettings.VoxelSizeCm		 = GeneratedVoxelSize;
-	StreamingTerrainSettings.ContinentAmplitude	 = TerrainContinentAmplitude;
-	StreamingTerrainSettings.ContinentFrequency	 = TerrainContinentFrequency;
-	StreamingTerrainSettings.HillAmplitude		 = TerrainHillAmplitude;
-	StreamingTerrainSettings.HillFrequency		 = TerrainHillFrequency;
-	StreamingTerrainSettings.DetailAmplitude	 = TerrainDetailAmplitude;
-	StreamingTerrainSettings.DetailFrequency	 = TerrainDetailFrequency;
-	StreamingTerrainSettings.RidgeAmplitude		 = TerrainRidgeAmplitude;
-	StreamingTerrainSettings.RidgeFrequency		 = TerrainRidgeFrequency;
-	StreamingTerrainSettings.ValleyDepth		 = TerrainValleyDepth;
-	StreamingTerrainSettings.ValleyFrequency	 = TerrainValleyFrequency;
-	StreamingTerrainSettings.ValleyWidth		 = TerrainValleyWidth;
-	StreamingTerrainSettings.ValleyFalloff		 = TerrainValleyFalloff;
+	StreamingTerrainSettings.BaseHeight = static_cast<float>(TerrainBaseHeight);
+	StreamingTerrainSettings.VoxelSizeCm = GeneratedVoxelSize;
+	StreamingTerrainSettings.ContinentAmplitude = TerrainContinentAmplitude;
+	StreamingTerrainSettings.ContinentFrequency = TerrainContinentFrequency;
+	StreamingTerrainSettings.HillAmplitude = TerrainHillAmplitude;
+	StreamingTerrainSettings.HillFrequency = TerrainHillFrequency;
+	StreamingTerrainSettings.DetailAmplitude = TerrainDetailAmplitude;
+	StreamingTerrainSettings.DetailFrequency = TerrainDetailFrequency;
+	StreamingTerrainSettings.RidgeAmplitude = TerrainRidgeAmplitude;
+	StreamingTerrainSettings.RidgeFrequency = TerrainRidgeFrequency;
+	StreamingTerrainSettings.ValleyDepth = TerrainValleyDepth;
+	StreamingTerrainSettings.ValleyFrequency = TerrainValleyFrequency;
+	StreamingTerrainSettings.ValleyWidth = TerrainValleyWidth;
+	StreamingTerrainSettings.ValleyFalloff = TerrainValleyFalloff;
 	StreamingTerrainSettings.ValleyWarpAmplitude = TerrainValleyWarpAmplitude;
 	StreamingTerrainSettings.ValleyWarpFrequency = TerrainValleyWarpFrequency;
-	StreamingTerrainSettings.RegionFrequency	 = TerrainRegionFrequency;
-	StreamingTerrainSettings.PlainsThreshold	 = TerrainPlainsThreshold;
-	StreamingTerrainSettings.PlainsBlend		 = TerrainPlainsBlend;
-	StreamingTerrainSettings.MountainThreshold	 = TerrainMountainThreshold;
-	StreamingTerrainSettings.MountainBlend		 = TerrainMountainBlend;
+	StreamingTerrainSettings.RegionFrequency = TerrainRegionFrequency;
+	StreamingTerrainSettings.PlainsThreshold = TerrainPlainsThreshold;
+	StreamingTerrainSettings.PlainsBlend = TerrainPlainsBlend;
+	StreamingTerrainSettings.MountainThreshold = TerrainMountainThreshold;
+	StreamingTerrainSettings.MountainBlend = TerrainMountainBlend;
 
 	const FCubusGenerationSeeds Seeds = GetGenerationSeeds();
-	const int32 TerrainOffsetX		  = (FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
-	const int32 TerrainOffsetY		  = (FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
+	const int32 TerrainOffsetX =
+		(FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
+	const int32 TerrainOffsetY =
+		(FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
 
 	const float HorizontalChunkCentreOffset = static_cast<float>(Cubus::ChunkSize) * 0.5f;
 	const float SurfaceSampleX =
 		static_cast<float>(PawnCoordinate.X * Cubus::ChunkSize) + HorizontalChunkCentreOffset + static_cast<float>(TerrainOffsetX);
 	const float SurfaceSampleY =
 		static_cast<float>(PawnCoordinate.Y * Cubus::ChunkSize) + HorizontalChunkCentreOffset + static_cast<float>(TerrainOffsetY);
-
 	const float TerrainSurfaceVoxelZ = bUseHeightTerrain
-										   ? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, StreamingTerrainSettings).Height
-										   : static_cast<float>(TerrainSurfaceWorldZ);
-	const int32 TerrainChunkZ		 = FMath::FloorToInt(TerrainSurfaceVoxelZ / static_cast<float>(Cubus::ChunkSize));
-
+		? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, StreamingTerrainSettings).Height
+		: static_cast<float>(TerrainSurfaceWorldZ);
+	const int32 TerrainChunkZ = FMath::FloorToInt(
+		TerrainSurfaceVoxelZ / static_cast<float>(Cubus::ChunkSize)
+	);
 	const FIntVector CentreCoordinate(PawnCoordinate.X, PawnCoordinate.Y, TerrainChunkZ);
 
-	if (!bForce && CentreCoordinate == LastTrackedChunk)
+	const ECubusVoxelRenderMode RenderMode = GetVoxelRenderMode();
+	const bool bDensityWorld =
+		RenderMode == ECubusVoxelRenderMode::Density || RenderMode == ECubusVoxelRenderMode::Hybrid;
+
+	const int32 HorizontalRadius = bInitialSpawnAreaReady ? HorizontalViewRadius : InitialLoadRadius;
+	const int32 VerticalRadius = bInitialSpawnAreaReady ? VerticalViewRadius : InitialVerticalLoadRadius;
+	TSet<FIntVector> DesiredRequiredCoordinates;
+	FCubusDensityTileBounds2D DesiredCoverageBounds;
+
+	if (bDensityWorld)
+	{
+		DesiredCoverageBounds = FCubusDensityLod::BuildAlignedCoverage(
+			FIntPoint(CentreCoordinate.X, CentreCoordinate.Y),
+			FMath::Max(1, HorizontalRadius),
+			2
+		);
+		BuildDensitySurfaceRequiredCoordinates(
+			DesiredCoverageBounds,
+			StreamingTerrainSettings,
+			TerrainOffsetX,
+			TerrainOffsetY,
+			FMath::Min(VerticalRadius, DensitySurfaceVerticalPaddingChunks),
+			DesiredRequiredCoordinates
+		);
+	}
+	else
+	{
+		BuildRequiredCoordinates(
+			CentreCoordinate, HorizontalRadius, VerticalRadius, DesiredRequiredCoordinates
+		);
+	}
+
+	const bool bCentreChanged = CentreCoordinate != LastTrackedChunk;
+	const bool bCoverageChanged = bDensityWorld
+		? DesiredCoverageBounds != DensityStreamingCoverageBounds
+		: DensityStreamingCoverageBounds.IsValid();
+
+	if (!bForce && !bCentreChanged && !bCoverageChanged)
 	{
 		return;
 	}
 
 	LastTrackedChunk = CentreCoordinate;
+	if (bDensityWorld)
+	{
+		DensityStreamingCoverageBounds = DesiredCoverageBounds;
+		const FIntPoint CoverageCentre(
+			(DesiredCoverageBounds.Min.X + DesiredCoverageBounds.MaxExclusive.X) / 2,
+			(DesiredCoverageBounds.Min.Y + DesiredCoverageBounds.MaxExclusive.Y) / 2
+		);
 
-	UpdateDensityLods();
+		/*
+		 * The LOD centre follows the aligned coverage block, not every player
+		 * chunk. That moves the 4x/2x rings only once per two-chunk clipmap step
+		 * and guarantees every outer LOD0 edge chunk is the 2x seam resolution.
+		 */
+		if (!bDensityLodTransitionActive || DensityLodCentreChunk.X == MAX_int32)
+		{
+			const FIntVector NewLodCentre(CoverageCentre.X, CoverageCentre.Y, CentreCoordinate.Z);
+			if (NewLodCentre.X != DensityLodCentreChunk.X || NewLodCentre.Y != DensityLodCentreChunk.Y)
+			{
+				DensityLodCentreChunk = NewLodCentre;
+				UpdateDensityLods();
+			}
+		}
+	}
+	else
+	{
+		DensityStreamingCoverageBounds = FCubusDensityTileBounds2D();
+	}
 
 	if (!bInitialSpawnAreaReady)
 	{
-		BuildRequiredCoordinates(CentreCoordinate, InitialLoadRadius, InitialVerticalLoadRadius, InitialRequiredCoordinates);
-
+		InitialRequiredCoordinates = DesiredRequiredCoordinates;
 		RequiredChunkCoordinates = InitialRequiredCoordinates;
 	}
 	else
 	{
-		BuildRequiredCoordinates(CentreCoordinate, HorizontalViewRadius, VerticalViewRadius, RequiredChunkCoordinates);
+		RequiredChunkCoordinates = MoveTemp(DesiredRequiredCoordinates);
 	}
 
 	PendingChunkGeneration.Reset();
@@ -1513,15 +1627,11 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 	PendingChunkGeneration.Sort(
 		[CentreCoordinate](const FIntVector& A, const FIntVector& B)
 		{
-			const int32 DistanceA =
-				FMath::Abs(A.X - CentreCoordinate.X) + FMath::Abs(A.Y - CentreCoordinate.Y) + FMath::Abs(A.Z - CentreCoordinate.Z);
-
-			const int32 DistanceB =
-				FMath::Abs(B.X - CentreCoordinate.X) + FMath::Abs(B.Y - CentreCoordinate.Y) + FMath::Abs(B.Z - CentreCoordinate.Z);
-
-			// Sort far-to-near so Pop() returns nearest-first in O(1).
+			const int32 DistanceA = FCubusDensityLod::ChunkDistance(A, CentreCoordinate);
+			const int32 DistanceB = FCubusDensityLod::ChunkDistance(B, CentreCoordinate);
 			return DistanceA > DistanceB;
-		});
+		}
+	);
 
 	for (const auto& Entry : ChunksByCoordinate)
 	{
@@ -1541,14 +1651,15 @@ int32 ACubusBlockWorldActor::ResolveDensitySubdivisions(const FIntVector& ChunkC
 		return 1;
 	}
 
-	const bool bHasTrackedChunk = LastTrackedChunk.X != MAX_int32 && LastTrackedChunk.Y != MAX_int32 && LastTrackedChunk.Z != MAX_int32;
-
+	const bool bHasLodCentre =
+		DensityLodCentreChunk.X != MAX_int32 && DensityLodCentreChunk.Y != MAX_int32;
 	float TargetSpacing = DensityFarSampleSpacing;
-	int32 Distance		= MAX_int32;
 
-	if (bHasTrackedChunk)
+	if (bHasLodCentre)
 	{
-		Distance = FCubusDensityLod::ChunkDistance(ChunkCoordinate, LastTrackedChunk);
+		const int32 Distance = FCubusDensityLod::HorizontalChunkDistance(
+			ChunkCoordinate, DensityLodCentreChunk
+		);
 		if (Distance <= DensityNearChunkRadius)
 		{
 			TargetSpacing = DensityNearSampleSpacing;
@@ -1559,15 +1670,12 @@ int32 ACubusBlockWorldActor::ResolveDensitySubdivisions(const FIntVector& ChunkC
 		}
 	}
 
-	int32 Resolved = FCubusDensityLod::ResolveSubdivisionsForSpacing(GeneratedVoxelSize, TargetSpacing);
-
-	/*
-	 * A 1x density mesh can miss sub-voxel surface crossings that the 2x/4x
-	 * adaptive path resolves. Do not stream a coarse annulus that can become
-	 * an invisible ring around the player; retain the 4x near field and use 2x
-	 * as the lowest visible density resolution.
-	 */
-	return DensitySurfaceRetryCoordinates.Contains(ChunkCoordinate) ? 4 : FMath::Clamp(Resolved, 2, 4);
+	const int32 Resolved = FCubusDensityLod::ResolveSubdivisionsForSpacing(
+		GeneratedVoxelSize, TargetSpacing
+	);
+	return DensitySurfaceRetryCoordinates.Contains(ChunkCoordinate)
+		? 4
+		: FMath::Clamp(Resolved, 2, 4);
 }
 
 FCubusDensityTransitionFaces ACubusBlockWorldActor::BuildDensityTransitionFaces(const FIntVector& ChunkCoordinate,
@@ -1597,9 +1705,14 @@ void ACubusBlockWorldActor::UpdateDensityLods()
 		return;
 	}
 
-	TArray<FIntVector> ChangedCoordinates;
+	TSet<FIntVector> AffectedCoordinates;
 	for (const auto& Entry : ChunksByCoordinate)
 	{
+		if (!RequiredChunkCoordinates.IsEmpty() && !RequiredChunkCoordinates.Contains(Entry.Key))
+		{
+			continue;
+		}
+
 		ACubusVoxelVolumeActor* ChunkActor = Entry.Value.Get();
 		if (!IsValid(ChunkActor))
 		{
@@ -1608,43 +1721,85 @@ void ACubusBlockWorldActor::UpdateDensityLods()
 
 		if (ChunkActor->ConfigureDensityResolution(ResolveDensitySubdivisions(Entry.Key)))
 		{
-			ChangedCoordinates.Add(Entry.Key);
+			AffectedCoordinates.Add(Entry.Key);
+			for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
+			{
+				const FIntVector Neighbour = Entry.Key + FCubusDensityTransitionFaces::GetOffset(
+					static_cast<ECubusDensityFace>(FaceIndex)
+				);
+				if (RequiredChunkCoordinates.Contains(Neighbour) && IsValid(FindChunk(Neighbour)))
+				{
+					AffectedCoordinates.Add(Neighbour);
+				}
+			}
 		}
 	}
 
-	for (const FIntVector& ChangedCoordinate : ChangedCoordinates)
+	if (AffectedCoordinates.IsEmpty())
 	{
-		auto InvalidateCoordinate = [this](const FIntVector& Coordinate)
-		{
-			ACubusVoxelVolumeActor* Chunk = FindChunk(Coordinate);
-			if (!IsValid(Chunk))
-			{
-				return;
-			}
+		return;
+	}
 
-			const ECubusVoxelRenderMode ChunkRenderMode = Chunk->GetEffectiveRenderMode();
-			if (bEnableRuntimeStreaming &&
-				(ChunkRenderMode == ECubusVoxelRenderMode::Density || ChunkRenderMode == ECubusVoxelRenderMode::Hybrid))
-			{
-				StreamingChunksReady.Remove(Coordinate);
-			}
-			else
-			{
-				QueueChunkForRebuild(Coordinate);
-			}
-		};
-
-		/*
-		 * A face neighbour can keep the same own LOD while gaining/losing a
-		 * transition face. Rebuild both sides whenever one resolution changes.
-		 */
-		InvalidateCoordinate(ChangedCoordinate);
-		for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
+	/* Restart cleanly if an empty-surface promotion changes topology mid-batch. */
+	if (bDensityLodTransitionActive)
+	{
+		for (const FIntVector& Coordinate : StagedDensityLodTransitionCoordinates)
 		{
-			const ECubusDensityFace Face = static_cast<ECubusDensityFace>(FaceIndex);
-			InvalidateCoordinate(ChangedCoordinate + FCubusDensityTransitionFaces::GetOffset(Face));
+			if (ACubusVoxelVolumeActor* Chunk = FindChunk(Coordinate))
+			{
+				Chunk->DiscardStagedVolume();
+			}
+		}
+		AffectedCoordinates.Append(ActiveDensityLodTransitionCoordinates);
+	}
+
+	ActiveDensityLodTransitionCoordinates = MoveTemp(AffectedCoordinates);
+	StagedDensityLodTransitionCoordinates.Reset();
+	bDensityLodTransitionActive = true;
+
+	for (const FIntVector& Coordinate : ActiveDensityLodTransitionCoordinates)
+	{
+		StreamingChunksReady.Remove(Coordinate);
+	}
+}
+
+void ACubusBlockWorldActor::TryCommitDensityLodTransition()
+{
+	if (!bDensityLodTransitionActive)
+	{
+		return;
+	}
+
+	for (auto Iterator = ActiveDensityLodTransitionCoordinates.CreateIterator(); Iterator; ++Iterator)
+	{
+		if (!RequiredChunkCoordinates.Contains(*Iterator) || !IsValid(FindChunk(*Iterator)))
+		{
+			StagedDensityLodTransitionCoordinates.Remove(*Iterator);
+			Iterator.RemoveCurrent();
 		}
 	}
+
+	for (const FIntVector& Coordinate : ActiveDensityLodTransitionCoordinates)
+	{
+		if (!StagedDensityLodTransitionCoordinates.Contains(Coordinate))
+		{
+			return;
+		}
+	}
+
+	for (const FIntVector& Coordinate : ActiveDensityLodTransitionCoordinates)
+	{
+		if (ACubusVoxelVolumeActor* Chunk = FindChunk(Coordinate))
+		{
+			Chunk->CommitStagedVolume();
+			StreamingChunksReady.Add(Coordinate);
+		}
+	}
+
+	ActiveDensityLodTransitionCoordinates.Reset();
+	StagedDensityLodTransitionCoordinates.Reset();
+	bDensityLodTransitionActive = false;
+	TimeUntilStreamingUpdate = 0.0f;
 }
 
 void ACubusBlockWorldActor::QueueStreamingChunkBuilds()
@@ -1697,7 +1852,8 @@ void ACubusBlockWorldActor::QueueStreamingChunkBuilds()
 			break;
 		}
 
-		if (StreamingChunksReady.Contains(Coordinate) || StreamingChunksBuilding.Contains(Coordinate))
+		if (StreamingChunksReady.Contains(Coordinate) || StreamingChunksBuilding.Contains(Coordinate) ||
+			StagedDensityLodTransitionCoordinates.Contains(Coordinate))
 		{
 			continue;
 		}
@@ -1888,8 +2044,15 @@ void ACubusBlockWorldActor::ProcessCompletedStreamingChunkBuilds()
 				}
 				else if (Chunk->BuildStagedVolumeFromDensityMesh(Result))
 				{
-					Chunk->CommitStagedVolume();
-					StreamingChunksReady.Add(Build.Coordinate);
+					if (bDensityLodTransitionActive && ActiveDensityLodTransitionCoordinates.Contains(Build.Coordinate))
+					{
+						StagedDensityLodTransitionCoordinates.Add(Build.Coordinate);
+					}
+					else
+					{
+						Chunk->CommitStagedVolume();
+						StreamingChunksReady.Add(Build.Coordinate);
+					}
 				}
 			}
 			else
@@ -1910,9 +2073,16 @@ void ACubusBlockWorldActor::ProcessCompletedStreamingChunkBuilds()
 
 				if (bStaged)
 				{
-					Chunk->CommitStagedVolume();
-
-					StreamingChunksReady.Add(Build.Coordinate);
+					if (Build.bIsHybridBuild && bDensityLodTransitionActive &&
+						ActiveDensityLodTransitionCoordinates.Contains(Build.Coordinate))
+					{
+						StagedDensityLodTransitionCoordinates.Add(Build.Coordinate);
+					}
+					else
+					{
+						Chunk->CommitStagedVolume();
+						StreamingChunksReady.Add(Build.Coordinate);
+					}
 				}
 			}
 		}
@@ -1925,13 +2095,16 @@ void ACubusBlockWorldActor::ProcessCompletedStreamingChunkBuilds()
 
 		++UploadedCount;
 	}
+
+	TryCommitDensityLodTransition();
 }
 
 void ACubusBlockWorldActor::ProcessRuntimeQueues()
 {
 	int32 RemovedCount = 0;
 
-	while (RemovedCount < MaxChunksRemovedPerTick && !PendingChunkRemoval.IsEmpty())
+	const bool bReplacementCoverageReady = AreRequiredStreamingChunksReady();
+	while (bReplacementCoverageReady && RemovedCount < MaxChunksRemovedPerTick && !PendingChunkRemoval.IsEmpty())
 	{
 		const FIntVector Coordinate = PendingChunkRemoval.Last();
 		PendingChunkRemoval.Pop(EAllowShrinking::No);
