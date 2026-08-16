@@ -14,6 +14,8 @@ jobs:
         with:
           ref: agent/density-meshing
           fetch-depth: 0
+      - name: Normalize migration
+        run: python3 .github/agent/normalize_outer_clipmap_helper.py
       - name: Apply outer clipmap hardening
         run: python3 .github/agent/harden_density_outer_clipmaps.py
       - name: Verify and commit source only
