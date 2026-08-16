@@ -95,6 +95,21 @@ double FCubusTerrainRasterBuilder::ResolveTileSizeMeters(const FCubusTerrainRast
     return static_cast<double>(ResolveInteriorCellCount(Settings)) * SafeSpacing;
 }
 
+float FCubusTerrainRasterBuilder::SampleStructuralHeightMeters(
+    const double WorldXmeters,
+    const double WorldYmeters,
+    const FCubusTerrainRasterSettings& Settings
+)
+{
+    const double SourceXmeters = WorldXmeters + Settings.DomainOffsetMeters.X;
+    const double SourceYmeters = WorldYmeters + Settings.DomainOffsetMeters.Y;
+    return FCubusTerrainStructure::Sample(
+        SourceXmeters,
+        SourceYmeters,
+        Settings.Structure
+    ).HeightMeters;
+}
+
 FIntPoint FCubusTerrainRasterBuilder::WorldToTileCoordinate(
     const double WorldXmeters,
     const double WorldYmeters,
@@ -136,15 +151,8 @@ FCubusTerrainRasterTile FCubusTerrainRasterBuilder::BuildTile(
         {
             const int32 GridX = StorageX - Tile.HaloSamples;
             const double WorldXmeters = TileMinimum.X + static_cast<double>(GridX) * Tile.SampleSpacingMeters;
-            const double SourceXmeters = WorldXmeters + Settings.DomainOffsetMeters.X;
-            const double SourceYmeters = WorldYmeters + Settings.DomainOffsetMeters.Y;
-
-            const FCubusTerrainStructureSample StructureSample = FCubusTerrainStructure::Sample(
-                SourceXmeters,
-                SourceYmeters,
-                Settings.Structure
-            );
-            Tile.HeightMeters[StorageY * Tile.StorageSampleCount + StorageX] = StructureSample.HeightMeters;
+            Tile.HeightMeters[StorageY * Tile.StorageSampleCount + StorageX] =
+                SampleStructuralHeightMeters(WorldXmeters, WorldYmeters, Settings);
         }
     }
 
