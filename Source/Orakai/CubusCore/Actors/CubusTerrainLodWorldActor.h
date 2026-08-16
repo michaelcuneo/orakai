@@ -6,6 +6,7 @@
 
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
+#include "CubusCore/Meshing/CubusDensityLod.h"
 
 #include "CubusTerrainLodWorldActor.generated.h"
 
@@ -17,19 +18,22 @@ class UMaterialInterface;
 struct FCubusTerrainLodTileBuildInput
 {
 	FCubusTerrainDensitySettings DensitySettings;
-	FIntVector					 TileCoordinate		  = FIntVector::ZeroValue;
-	int32						 CanonicalVoxelStride = 4;
-	float						 CanonicalVoxelSize	  = 100.0f;
-	float						 IsoLevel			  = 0.0f;
+	FIntVector TileCoordinate = FIntVector::ZeroValue;
+	int32 CanonicalVoxelStride = 2;
+	int32 MeshingSubdivisions = 2;
+	FCubusDensityTransitionFaces TransitionFaces;
+	float CanonicalVoxelSize = 100.0f;
+	float IsoLevel = 0.0f;
 };
 
 struct FCubusTerrainLodTileBuildResult
 {
-	FIntVector					TileCoordinate = FIntVector::ZeroValue;
+	FIntVector TileCoordinate = FIntVector::ZeroValue;
 	TMap<int32, FCubusMeshData> MaterialMeshes;
-	int32						GeneratedTriangleCount = 0;
-	double						BuildTimeMilliseconds  = 0.0;
-	int32						AppliedRefinement	   = 1;
+	int32 GeneratedTriangleCount = 0;
+	double BuildTimeMilliseconds = 0.0;
+	int32 AppliedRefinement = 2;
+	uint32 TransitionSignature = 0;
 };
 
 struct FCubusTerrainLodTileBuild
@@ -40,20 +44,22 @@ struct FCubusTerrainLodTileBuild
 
 struct FCubusTerrainLodTierRuntime
 {
-	int32 LodLevel			   = 1;
-	int32 CanonicalVoxelStride = 4;
-	int32 InnerRadiusTiles	   = 0;
-	int32 OuterRadiusTiles	   = 4;
-	int32 VerticalRadiusTiles  = 0;
-	int32 OverlapTiles		   = 1;
+	int32 LodLevel = 1;
+	int32 CanonicalVoxelStride = 2;
+	int32 MeshingSubdivisions = 2;
+	int32 InnerRadiusTiles = 0;
+	int32 OuterRadiusTiles = 4;
+	int32 VerticalRadiusTiles = 0;
+	int32 OverlapTiles = 0;
 
 	TMap<FIntVector, TObjectPtr<UProceduralMeshComponent>> TileComponents;
-	TSet<FIntVector>									   RequiredTiles;
-	TSet<FIntVector>									   ResolvedTiles;
-	TSet<FIntVector>									   TilesBuilding;
-	TArray<FIntVector>									   PendingTiles;
-	TArray<FCubusTerrainLodTileBuild>					   ActiveBuilds;
-	TArray<FCubusTerrainLodTileBuildResult>				   CompletedBuilds;
+	TSet<FIntVector> RequiredTiles;
+	TSet<FIntVector> ResolvedTiles;
+	TSet<FIntVector> TilesBuilding;
+	TArray<FIntVector> PendingTiles;
+	TArray<FCubusTerrainLodTileBuild> ActiveBuilds;
+	TArray<FCubusTerrainLodTileBuildResult> CompletedBuilds;
+	TMap<FIntVector, int32> RefinementOverrides;
 
 	FIntVector LastCentreTile = FIntVector(MAX_int32, MAX_int32, MAX_int32);
 };
@@ -83,13 +89,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD")
 	bool bEnableTerrainLod = true;
 
-	/** LOD1 samples one point every four canonical voxels. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "2", ClampMax = "64"))
-	int32 Lod1CanonicalVoxelStride = 4;
+	/** LOD1 parent scale. Runtime enforces the watertight 2 -> 4 -> 8 stride chain. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "2", ClampMax = "2"))
+	int32 Lod1CanonicalVoxelStride = 2;
 
 	/** Number of LOD1 tiles allowed to overlap the outer edge of LOD0. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "0", ClampMax = "2"))
-	int32 Lod1OverlapTiles = 1;
+	int32 Lod1OverlapTiles = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "1", ClampMax = "32"))
 	int32 Lod1OuterRadiusTiles = 4;
@@ -97,13 +103,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD1", meta = (ClampMin = "0", ClampMax = "4"))
 	int32 Lod1VerticalRadiusTiles = 0;
 
-	/** LOD2 samples one point every sixteen canonical voxels. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "4", ClampMax = "256"))
-	int32 Lod2CanonicalVoxelStride = 16;
+	/** LOD2 is exactly twice the LOD1 parent scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "4", ClampMax = "4"))
+	int32 Lod2CanonicalVoxelStride = 4;
 
 	/** Number of LOD2 tiles allowed to overlap the outer edge of LOD1. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "0", ClampMax = "2"))
-	int32 Lod2OverlapTiles = 1;
+	int32 Lod2OverlapTiles = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "1", ClampMax = "32"))
 	int32 Lod2OuterRadiusTiles = 4;
@@ -111,13 +117,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD2", meta = (ClampMin = "0", ClampMax = "4"))
 	int32 Lod2VerticalRadiusTiles = 0;
 
-	/** LOD3 samples one point every sixty-four canonical voxels. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "16", ClampMax = "256"))
-	int32 Lod3CanonicalVoxelStride = 64;
+	/** LOD3 is exactly twice the LOD2 parent scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "8", ClampMax = "8"))
+	int32 Lod3CanonicalVoxelStride = 8;
 
 	/** Number of LOD3 tiles allowed to overlap the outer edge of LOD2. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "0", ClampMax = "2"))
-	int32 Lod3OverlapTiles = 1;
+	int32 Lod3OverlapTiles = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "1", ClampMax = "32"))
 	int32 Lod3OuterRadiusTiles = 4;
@@ -162,6 +168,13 @@ private:
 	void RemoveUnneededTiles(FCubusTerrainLodTierRuntime& Tier);
 	void ClearAllTiles();
 	void ClearTier(FCubusTerrainLodTierRuntime& Tier);
+
+	static int32 ResolveTierSubdivisions(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
+	static FCubusDensityTransitionFaces BuildTierTransitionFaces(
+		const FCubusTerrainLodTierRuntime& Tier,
+		const FIntVector& TileCoordinate
+	);
+	void InvalidateTierTransitionDependencies(FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
 
 	UProceduralMeshComponent* CreateTileComponent(FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate, float TileWorldSize);
 

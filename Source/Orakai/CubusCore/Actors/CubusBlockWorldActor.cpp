@@ -1622,7 +1622,9 @@ void ACubusBlockWorldActor::UpdateDensityLods()
 				return;
 			}
 
-			if (bEnableRuntimeStreaming && Chunk->GetEffectiveRenderMode() == ECubusVoxelRenderMode::Density)
+			const ECubusVoxelRenderMode ChunkRenderMode = Chunk->GetEffectiveRenderMode();
+			if (bEnableRuntimeStreaming &&
+				(ChunkRenderMode == ECubusVoxelRenderMode::Density || ChunkRenderMode == ECubusVoxelRenderMode::Hybrid))
 			{
 				StreamingChunksReady.Remove(Coordinate);
 			}
@@ -1805,14 +1807,27 @@ void ACubusBlockWorldActor::ProcessInitialStreaming()
 		return;
 	}
 
-	if (!AreInitialChunksReady())
+	const bool bHasSupportCoordinate =
+		LastTrackedChunk.X != MAX_int32 &&
+		LastTrackedChunk.Y != MAX_int32 &&
+		LastTrackedChunk.Z != MAX_int32;
+
+	if (!bHasSupportCoordinate || !IsInitialChunkReady(LastTrackedChunk))
 	{
 		return;
 	}
 
+	/*
+	 * The enlarged initial area is important for immediate walking quality,
+	 * but it is not a loading-screen dependency. Release the pawn as soon as
+	 * the support chunk has committed collision; the rest of the LOD0 ring
+	 * continues through the normal support-first streaming queue.
+	 */
 	bInitialSpawnAreaReady = true;
 
-	UE_LOG(LogTemp, Display, TEXT("Cubus initial spawn area ready: %d chunks"), InitialRequiredCoordinates.Num());
+	UE_LOG(LogTemp, Display,
+		TEXT("Cubus spawn support ready at (%d, %d, %d); %d initial chunks continue streaming"),
+		LastTrackedChunk.X, LastTrackedChunk.Y, LastTrackedChunk.Z, InitialRequiredCoordinates.Num());
 
 	UpdateRuntimeStreaming(true);
 }
@@ -1846,13 +1861,19 @@ void ACubusBlockWorldActor::ProcessCompletedStreamingChunkBuilds()
 		 */
 		const bool bStillRequired = RequiredChunkCoordinates.Contains(Build.Coordinate);
 		const bool bResolutionStillCurrent =
-			Build.bIsBlockBuild || (IsValid(Chunk) && Chunk->GetDensitySubdivisionsPerVoxel() == Build.SubdivisionsPerVoxel);
-		const FCubusDensityTransitionFaces CurrentTransitionFaces =
-			bResolutionStillCurrent ? BuildDensityTransitionFaces(Build.Coordinate, Build.SubdivisionsPerVoxel)
-									: FCubusDensityTransitionFaces();
-		const bool bTopologyStillCurrent =
-			bResolutionStillCurrent && CurrentTransitionFaces.GetSignature(Build.SubdivisionsPerVoxel) == Build.TransitionSignature;
+			Build.bIsBlockBuild ||
+			(IsValid(Chunk) && Chunk->GetDensitySubdivisionsPerVoxel() == Build.SubdivisionsPerVoxel);
 
+		/*
+		 * Pure block jobs do not participate in density LOD topology. Their
+		 * TransitionSignature is intentionally zero, so never compare it to a
+		 * synthetic density-neighbour signature. Density and Hybrid jobs retain
+		 * the full stale-topology rejection.
+		 */
+		const bool bTopologyStillCurrent = Build.bIsBlockBuild ||
+			(bResolutionStillCurrent &&
+			 BuildDensityTransitionFaces(Build.Coordinate, Build.SubdivisionsPerVoxel)
+				 .GetSignature(Build.SubdivisionsPerVoxel) == Build.TransitionSignature);
 		if (IsValid(Chunk) && FindChunk(Build.Coordinate) == Chunk && bStillRequired && bTopologyStillCurrent)
 		{
 			if (!Build.bIsBlockBuild && !Build.bIsHybridBuild)
@@ -1920,6 +1941,7 @@ void ACubusBlockWorldActor::ProcessRuntimeQueues()
 		if (IsValid(ChunkActor))
 		{
 			StreamingChunksReady.Remove(Coordinate);
+			DensitySurfaceRetryCoordinates.Remove(Coordinate);
 
 			UnregisterChunk(ChunkActor);
 
