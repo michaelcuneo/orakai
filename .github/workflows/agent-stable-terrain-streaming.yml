@@ -14,72 +14,11 @@ jobs:
         with:
           ref: agent/density-meshing
           fetch-depth: 0
-      - name: Normalize latest topology anchor
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp')
-          s = p.read_text(encoding='utf-8')
-          old = '''\t\tconst bool bResolutionStillCurrent =
-\t\t\tBuild.bIsBlockBuild || (IsValid(Chunk) && Chunk->GetDensitySubdivisionsPerVoxel() == Build.SubdivisionsPerVoxel);
-\t\tconst FCubusDensityTransitionFaces CurrentTransitionFaces =
-\t\t\tbResolutionStillCurrent ? BuildDensityTransitionFaces(Build.Coordinate, Build.SubdivisionsPerVoxel)
-\t\t\t\t\t\t\t\t\t: FCubusDensityTransitionFaces();
-\t\tconst bool bTopologyStillCurrent =
-\t\t\tbResolutionStillCurrent && CurrentTransitionFaces.GetSignature(Build.SubdivisionsPerVoxel) == Build.TransitionSignature;'''
-          new = '''\t\tconst bool bResolutionStillCurrent =
-\t\t\tBuild.bIsBlockBuild ||
-\t\t\t(IsValid(Chunk) && Chunk->GetDensitySubdivisionsPerVoxel() == Build.SubdivisionsPerVoxel);
-
-\t\t/*
-\t\t * Pure block jobs do not participate in density LOD topology. Their
-\t\t * TransitionSignature is intentionally zero, so never compare it to a
-\t\t * synthetic density-neighbour signature. Density and Hybrid jobs retain
-\t\t * the full stale-topology rejection.
-\t\t */
-\t\tconst bool bTopologyStillCurrent = Build.bIsBlockBuild ||
-\t\t\t(bResolutionStillCurrent &&
-\t\t\t BuildDensityTransitionFaces(Build.Coordinate, Build.SubdivisionsPerVoxel)
-\t\t\t\t .GetSignature(Build.SubdivisionsPerVoxel) == Build.TransitionSignature);'''
-          if old in s:
-              s = s.replace(old, new, 1)
-              p.write_text(s, encoding='utf-8')
-          elif 'Pure block jobs do not participate in density LOD topology.' not in s:
-              raise RuntimeError('latest block topology anchor not found')
-
-          h = Path('.github/agent/lod_topology_cleanup.py')
-          t = h.read_text(encoding='utf-8')
-          old_fn = '''    new_text, count = re.subn(pattern, replacement, text, count=1, flags=flags)
-    if count != 1:
-        raise RuntimeError(f'{path}: regex expected one match, found {count}: {pattern[:140]!r}')
-    write(path, new_text)
-'''
-          new_fn = '''    new_text, count = re.subn(pattern, replacement, text, count=1, flags=flags)
-    if count == 0 and replacement in text:
-        return
-    if count != 1:
-        raise RuntimeError(f'{path}: regex expected one match, found {count}: {pattern[:140]!r}')
-    write(path, new_text)
-'''
-          if old_fn not in t:
-              raise RuntimeError('helper regex_once anchor not found')
-          h.write_text(t.replace(old_fn, new_fn, 1), encoding='utf-8')
-          PY
-      - name: Apply coherent LOD topology cleanup
+      - name: Normalize cleanup anchors
+        run: python3 .github/agent/normalize_lod_cleanup.py
+      - name: Apply coherent LOD cleanup
         run: python3 .github/agent/lod_topology_cleanup.py
-      - name: Verify and commit
-        run: |
-          git diff --check
-          grep -q 'Pure block jobs do not participate in density LOD topology' Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
-          grep -q 'Cubus spawn support ready' Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
-          grep -q 'constexpr int32 SafeLod1Stride = 2' Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
-          grep -q 'constexpr int32 SafeLod2Stride = 4' Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
-          grep -q 'constexpr int32 SafeLod3Stride = 8' Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
-          grep -q 'WorldGridCornerOrigin' Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
-          ! grep -q 'AlignmentOffset' Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h
-          git diff --cached --check
-          git diff --cached --quiet || git commit -m 'Make density LOD streaming coherent'
-          git push origin HEAD:agent/density-meshing
+      - name: Verify source
+        run: git diff --check
+      - name: Commit source
+        run: git config user.name 'github-actions[bot]' && git config user.email '41898282+github-actions[bot]@users.noreply.github.com' && git add Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h && git diff --cached --check && (git diff --cached --quiet || git commit -m 'Make density LOD streaming coherent') && git push origin HEAD:agent/density-meshing
