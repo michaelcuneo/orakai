@@ -131,6 +131,27 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD3", meta = (ClampMin = "0", ClampMax = "4"))
 	int32 Lod3VerticalRadiusTiles = 0;
 
+	/** LOD4 continues the fixed 2:1 visual hierarchy at stride 16. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD4", meta = (ClampMin = "1", ClampMax = "16"))
+	int32 Lod4OuterRadiusTiles = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD4", meta = (ClampMin = "0", ClampMax = "4"))
+	int32 Lod4VerticalRadiusTiles = 0;
+
+	/** LOD5 continues the fixed 2:1 visual hierarchy at stride 32. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD5", meta = (ClampMin = "1", ClampMax = "16"))
+	int32 Lod5OuterRadiusTiles = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD5", meta = (ClampMin = "0", ClampMax = "4"))
+	int32 Lod5VerticalRadiusTiles = 0;
+
+	/** LOD6 restores the former stride-64 outer reach without a 4:1 jump. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD6", meta = (ClampMin = "1", ClampMax = "16"))
+	int32 Lod6OuterRadiusTiles = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|LOD6", meta = (ClampMin = "0", ClampMax = "4"))
+	int32 Lod6VerticalRadiusTiles = 0;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain LOD|Streaming", meta = (ClampMin = "1", ClampMax = "16"))
 	int32 MaxConcurrentLodBuilds = 4;
 
@@ -189,6 +210,9 @@ private:
 	FCubusTerrainLodTierRuntime Lod1Runtime;
 	FCubusTerrainLodTierRuntime Lod2Runtime;
 	FCubusTerrainLodTierRuntime Lod3Runtime;
+	FCubusTerrainLodTierRuntime Lod4Runtime;
+	FCubusTerrainLodTierRuntime Lod5Runtime;
+	FCubusTerrainLodTierRuntime Lod6Runtime;
 
 	float TimeUntilStreamingUpdate = 0.0f;
 };

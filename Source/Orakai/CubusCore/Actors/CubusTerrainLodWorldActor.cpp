@@ -34,6 +34,9 @@ ACubusTerrainLodWorldActor::ACubusTerrainLodWorldActor()
 	Lod1Runtime.LodLevel = 1;
 	Lod2Runtime.LodLevel = 2;
 	Lod3Runtime.LodLevel = 3;
+	Lod4Runtime.LodLevel = 4;
+	Lod5Runtime.LodLevel = 5;
+	Lod6Runtime.LodLevel = 6;
 }
 
 void ACubusTerrainLodWorldActor::BeginPlay()
@@ -44,12 +47,11 @@ void ACubusTerrainLodWorldActor::BeginPlay()
 	TimeUntilStreamingUpdate = 0.0f;
 
 	UE_LOG(LogTemp, Display,
-		   TEXT("Cubus terrain LOD started: enabled=%s lod1=(stride=%d overlap=%d outer=%d vertical=%d) lod2=(stride=%d overlap=%d "
-				"outer=%d vertical=%d) lod3=(stride=%d overlap=%d outer=%d vertical=%d) concurrent=%d uploads=%d"),
-		   bEnableTerrainLod ? TEXT("true") : TEXT("false"), Lod1CanonicalVoxelStride, Lod1OverlapTiles, Lod1OuterRadiusTiles,
-		   Lod1VerticalRadiusTiles, Lod2CanonicalVoxelStride, Lod2OverlapTiles, Lod2OuterRadiusTiles, Lod2VerticalRadiusTiles,
-		   Lod3CanonicalVoxelStride, Lod3OverlapTiles, Lod3OuterRadiusTiles, Lod3VerticalRadiusTiles, MaxConcurrentLodBuilds,
-		   MaxLodUploadsPerTick);
+		TEXT("Cubus terrain LOD started: enabled=%s fixed-strides=(2,4,8,16,32,64) outer=(%d,%d,%d,%d,%d,%d) concurrent=%d uploads=%d"),
+		bEnableTerrainLod ? TEXT("true") : TEXT("false"),
+		Lod1OuterRadiusTiles, Lod2OuterRadiusTiles, Lod3OuterRadiusTiles,
+		Lod4OuterRadiusTiles, Lod5OuterRadiusTiles, Lod6OuterRadiusTiles,
+		MaxConcurrentLodBuilds, MaxLodUploadsPerTick);
 }
 
 void ACubusTerrainLodWorldActor::Tick(const float DeltaSeconds)
@@ -72,11 +74,21 @@ void ACubusTerrainLodWorldActor::Tick(const float DeltaSeconds)
 
 	StartPendingBuilds();
 
-	LoadedLodTileCount = Lod1Runtime.TileComponents.Num() + Lod2Runtime.TileComponents.Num() + Lod3Runtime.TileComponents.Num();
+	FCubusTerrainLodTierRuntime* Tiers[] =
+	{
+		&Lod1Runtime, &Lod2Runtime, &Lod3Runtime,
+		&Lod4Runtime, &Lod5Runtime, &Lod6Runtime
+	};
 
-	BuildingLodTileCount = Lod1Runtime.ActiveBuilds.Num() + Lod2Runtime.ActiveBuilds.Num() + Lod3Runtime.ActiveBuilds.Num();
-
-	PendingLodTileCount = Lod1Runtime.PendingTiles.Num() + Lod2Runtime.PendingTiles.Num() + Lod3Runtime.PendingTiles.Num();
+	LoadedLodTileCount = 0;
+	BuildingLodTileCount = 0;
+	PendingLodTileCount = 0;
+	for (const FCubusTerrainLodTierRuntime* Tier : Tiers)
+	{
+		LoadedLodTileCount += Tier->TileComponents.Num();
+		BuildingLodTileCount += Tier->ActiveBuilds.Num();
+		PendingLodTileCount += Tier->PendingTiles.Num();
+	}
 }
 
 void ACubusTerrainLodWorldActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -164,31 +176,52 @@ void ACubusTerrainLodWorldActor::UpdateStreaming()
 
 	/*
 	 * Keep every visual tier exactly one 2:1 sampling step from the previous
-	 * tier. Each tile is meshed at 2x internally, so with an 80 cm canonical
-	 * voxel the effective sequence is 80 cm -> 160 cm -> 320 cm outside the
-	 * 40 cm gameplay ring. Old Blueprint stride values are intentionally not
-	 * allowed to recreate the former 4:1 jumps.
+	 * tier, without sacrificing the original world draw distance. The previous
+	 * three-tier 4/16/64 layout reached roughly 288 canonical chunks with the
+	 * default radius. The six-tier 2/4/8/16/32/64 chain reaches the same outer
+	 * scale while every boundary remains a Transvoxel-compatible 2:1 step.
 	 */
-	constexpr int32 SafeLod1Stride = 2;
-	constexpr int32 SafeLod2Stride = 4;
-	constexpr int32 SafeLod3Stride = 8;
+	struct FTierUpdate
+	{
+		FCubusTerrainLodTierRuntime* Runtime;
+		int32 Stride;
+		int32 OuterRadius;
+		int32 VerticalRadius;
+	};
 
-	UpdateTierStreaming(Lod1Runtime, StreamingGridLocation, DensityField, CanonicalChunkWorldSize, Lod0HalfExtentCanonicalChunks,
-		SafeLod1Stride, 0, Lod1OuterRadiusTiles, Lod1VerticalRadiusTiles);
+	FTierUpdate TierUpdates[] =
+	{
+		{ &Lod1Runtime, 2,  Lod1OuterRadiusTiles, Lod1VerticalRadiusTiles },
+		{ &Lod2Runtime, 4,  Lod2OuterRadiusTiles, Lod2VerticalRadiusTiles },
+		{ &Lod3Runtime, 8,  Lod3OuterRadiusTiles, Lod3VerticalRadiusTiles },
+		{ &Lod4Runtime, 16, Lod4OuterRadiusTiles, Lod4VerticalRadiusTiles },
+		{ &Lod5Runtime, 32, Lod5OuterRadiusTiles, Lod5VerticalRadiusTiles },
+		{ &Lod6Runtime, 64, Lod6OuterRadiusTiles, Lod6VerticalRadiusTiles }
+	};
 
-	const int32 SafeLod1OuterRadius = FMath::Max(Lod1Runtime.InnerRadiusTiles + 1, Lod1Runtime.OuterRadiusTiles);
-	const double Lod1HalfExtentCanonicalChunks =
-		(static_cast<double>(SafeLod1OuterRadius) + 0.5) * static_cast<double>(SafeLod1Stride);
+	double PreviousHalfExtentCanonicalChunks = Lod0HalfExtentCanonicalChunks;
+	for (const FTierUpdate& TierUpdate : TierUpdates)
+	{
+		UpdateTierStreaming(
+			*TierUpdate.Runtime,
+			StreamingGridLocation,
+			DensityField,
+			CanonicalChunkWorldSize,
+			PreviousHalfExtentCanonicalChunks,
+			TierUpdate.Stride,
+			0,
+			TierUpdate.OuterRadius,
+			TierUpdate.VerticalRadius
+		);
 
-	UpdateTierStreaming(Lod2Runtime, StreamingGridLocation, DensityField, CanonicalChunkWorldSize, Lod1HalfExtentCanonicalChunks,
-		SafeLod2Stride, 0, Lod2OuterRadiusTiles, Lod2VerticalRadiusTiles);
-
-	const int32 SafeLod2OuterRadius = FMath::Max(Lod2Runtime.InnerRadiusTiles + 1, Lod2Runtime.OuterRadiusTiles);
-	const double Lod2HalfExtentCanonicalChunks =
-		(static_cast<double>(SafeLod2OuterRadius) + 0.5) * static_cast<double>(SafeLod2Stride);
-
-	UpdateTierStreaming(Lod3Runtime, StreamingGridLocation, DensityField, CanonicalChunkWorldSize, Lod2HalfExtentCanonicalChunks,
-		SafeLod3Stride, 0, Lod3OuterRadiusTiles, Lod3VerticalRadiusTiles);
+		const int32 ResolvedOuterRadius = FMath::Max(
+			TierUpdate.Runtime->InnerRadiusTiles + 1,
+			TierUpdate.Runtime->OuterRadiusTiles
+		);
+		PreviousHalfExtentCanonicalChunks =
+			(static_cast<double>(ResolvedOuterRadius) + 0.5) *
+			static_cast<double>(TierUpdate.Stride);
+	}
 }
 
 void ACubusTerrainLodWorldActor::UpdateTierStreaming(FCubusTerrainLodTierRuntime& Tier, const FVector& StreamingGridLocation,
@@ -348,9 +381,15 @@ void ACubusTerrainLodWorldActor::UpdateTierStreaming(FCubusTerrainLodTierRuntime
 
 void ACubusTerrainLodWorldActor::CollectCompletedBuilds()
 {
-	CollectCompletedBuildsForTier(Lod1Runtime);
-	CollectCompletedBuildsForTier(Lod2Runtime);
-	CollectCompletedBuildsForTier(Lod3Runtime);
+	FCubusTerrainLodTierRuntime* Tiers[] =
+	{
+		&Lod1Runtime, &Lod2Runtime, &Lod3Runtime,
+		&Lod4Runtime, &Lod5Runtime, &Lod6Runtime
+	};
+	for (FCubusTerrainLodTierRuntime* Tier : Tiers)
+	{
+		CollectCompletedBuildsForTier(*Tier);
+	}
 }
 
 void ACubusTerrainLodWorldActor::CollectCompletedBuildsForTier(FCubusTerrainLodTierRuntime& Tier)
@@ -384,7 +423,18 @@ void ACubusTerrainLodWorldActor::StartPendingBuilds()
 		return;
 	}
 
-	if (Lod1Runtime.PendingTiles.IsEmpty() && Lod2Runtime.PendingTiles.IsEmpty() && Lod3Runtime.PendingTiles.IsEmpty())
+	FCubusTerrainLodTierRuntime* Tiers[] =
+	{
+		&Lod1Runtime, &Lod2Runtime, &Lod3Runtime,
+		&Lod4Runtime, &Lod5Runtime, &Lod6Runtime
+	};
+
+	bool bHasPendingTiles = false;
+	for (const FCubusTerrainLodTierRuntime* Tier : Tiers)
+	{
+		bHasPendingTiles |= !Tier->PendingTiles.IsEmpty();
+	}
+	if (!bHasPendingTiles)
 	{
 		return;
 	}
@@ -419,7 +469,11 @@ void ACubusTerrainLodWorldActor::StartPendingBuilds()
 
 	while (StartedThisTick < SafeStartsPerTick)
 	{
-		const int32 ActiveBuildCount = Lod1Runtime.ActiveBuilds.Num() + Lod2Runtime.ActiveBuilds.Num() + Lod3Runtime.ActiveBuilds.Num();
+		int32 ActiveBuildCount = 0;
+		for (const FCubusTerrainLodTierRuntime* CandidateTier : Tiers)
+		{
+			ActiveBuildCount += CandidateTier->ActiveBuilds.Num();
+		}
 
 		if (ActiveBuildCount >= SafeConcurrentBuilds)
 		{
@@ -427,20 +481,15 @@ void ACubusTerrainLodWorldActor::StartPendingBuilds()
 		}
 
 		FCubusTerrainLodTierRuntime* Tier = nullptr;
-
-		if (!Lod1Runtime.PendingTiles.IsEmpty())
+		for (FCubusTerrainLodTierRuntime* CandidateTier : Tiers)
 		{
-			Tier = &Lod1Runtime;
+			if (!CandidateTier->PendingTiles.IsEmpty())
+			{
+				Tier = CandidateTier;
+				break;
+			}
 		}
-		else if (!Lod2Runtime.PendingTiles.IsEmpty())
-		{
-			Tier = &Lod2Runtime;
-		}
-		else if (!Lod3Runtime.PendingTiles.IsEmpty())
-		{
-			Tier = &Lod3Runtime;
-		}
-		else
+		if (Tier == nullptr)
 		{
 			break;
 		}
@@ -480,7 +529,18 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
 		return;
 	}
 
-	if (Lod1Runtime.CompletedBuilds.IsEmpty() && Lod2Runtime.CompletedBuilds.IsEmpty() && Lod3Runtime.CompletedBuilds.IsEmpty())
+	FCubusTerrainLodTierRuntime* Tiers[] =
+	{
+		&Lod1Runtime, &Lod2Runtime, &Lod3Runtime,
+		&Lod4Runtime, &Lod5Runtime, &Lod6Runtime
+	};
+
+	bool bHasCompletedBuilds = false;
+	for (const FCubusTerrainLodTierRuntime* Tier : Tiers)
+	{
+		bHasCompletedBuilds |= !Tier->CompletedBuilds.IsEmpty();
+	}
+	if (!bHasCompletedBuilds)
 	{
 		return;
 	}
@@ -517,20 +577,20 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
 	while (UploadedThisTick < UploadLimit)
 	{
 		bool bUploaded = false;
-
-		if (!Lod1Runtime.CompletedBuilds.IsEmpty())
+		bool bFoundCompletedTier = false;
+		for (FCubusTerrainLodTierRuntime* Tier : Tiers)
 		{
-			bUploaded = UploadOneCompletedBuild(Lod1Runtime, CanonicalVoxelSize, TerrainMaterial, WorkerMillisecondsThisTick);
+			if (Tier->CompletedBuilds.IsEmpty())
+			{
+				continue;
+			}
+			bFoundCompletedTier = true;
+			bUploaded = UploadOneCompletedBuild(
+				*Tier, CanonicalVoxelSize, TerrainMaterial, WorkerMillisecondsThisTick
+			);
+			break;
 		}
-		else if (!Lod2Runtime.CompletedBuilds.IsEmpty())
-		{
-			bUploaded = UploadOneCompletedBuild(Lod2Runtime, CanonicalVoxelSize, TerrainMaterial, WorkerMillisecondsThisTick);
-		}
-		else if (!Lod3Runtime.CompletedBuilds.IsEmpty())
-		{
-			bUploaded = UploadOneCompletedBuild(Lod3Runtime, CanonicalVoxelSize, TerrainMaterial, WorkerMillisecondsThisTick);
-		}
-		else
+		if (!bFoundCompletedTier)
 		{
 			break;
 		}
@@ -559,22 +619,30 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
 		RemoveUnneededTiles(Tier);
 	};
 
-	RetireStaleTilesIfResident(Lod1Runtime);
-	RetireStaleTilesIfResident(Lod2Runtime);
-	RetireStaleTilesIfResident(Lod3Runtime);
+	for (FCubusTerrainLodTierRuntime* Tier : Tiers)
+	{
+		RetireStaleTilesIfResident(*Tier);
+	}
 
 	if (UploadedThisTick > 0)
 	{
 		const double UploadMilliseconds = (FPlatformTime::Seconds() - UploadTickStart) * 1000.0;
+		int32 LoadedCount = 0;
+		int32 CompletedCount = 0;
+		int32 ActiveCount = 0;
+		int32 PendingCount = 0;
+		for (const FCubusTerrainLodTierRuntime* Tier : Tiers)
+		{
+			LoadedCount += Tier->TileComponents.Num();
+			CompletedCount += Tier->CompletedBuilds.Num();
+			ActiveCount += Tier->ActiveBuilds.Num();
+			PendingCount += Tier->PendingTiles.Num();
+		}
 
 		UE_LOG(LogTemp, Display,
-			   TEXT("Cubus terrain LOD upload: tiles=%d worker=%.2fms upload=%.2fms loaded=(lod1=%d lod2=%d lod3=%d) completed=(%d,%d,%d) "
-					"building=(%d,%d,%d) pending=(%d,%d,%d)"),
-			   UploadedThisTick, WorkerMillisecondsThisTick, UploadMilliseconds, Lod1Runtime.TileComponents.Num(),
-			   Lod2Runtime.TileComponents.Num(), Lod3Runtime.TileComponents.Num(), Lod1Runtime.CompletedBuilds.Num(),
-			   Lod2Runtime.CompletedBuilds.Num(), Lod3Runtime.CompletedBuilds.Num(), Lod1Runtime.ActiveBuilds.Num(),
-			   Lod2Runtime.ActiveBuilds.Num(), Lod3Runtime.ActiveBuilds.Num(), Lod1Runtime.PendingTiles.Num(),
-			   Lod2Runtime.PendingTiles.Num(), Lod3Runtime.PendingTiles.Num());
+			TEXT("Cubus terrain LOD upload: tiles=%d worker=%.2fms upload=%.2fms loaded=%d completed=%d building=%d pending=%d"),
+			UploadedThisTick, WorkerMillisecondsThisTick, UploadMilliseconds,
+			LoadedCount, CompletedCount, ActiveCount, PendingCount);
 	}
 }
 
@@ -705,9 +773,15 @@ void ACubusTerrainLodWorldActor::RemoveUnneededTiles(FCubusTerrainLodTierRuntime
 
 void ACubusTerrainLodWorldActor::ClearAllTiles()
 {
-	ClearTier(Lod1Runtime);
-	ClearTier(Lod2Runtime);
-	ClearTier(Lod3Runtime);
+	FCubusTerrainLodTierRuntime* Tiers[] =
+	{
+		&Lod1Runtime, &Lod2Runtime, &Lod3Runtime,
+		&Lod4Runtime, &Lod5Runtime, &Lod6Runtime
+	};
+	for (FCubusTerrainLodTierRuntime* Tier : Tiers)
+	{
+		ClearTier(*Tier);
+	}
 
 	LoadedLodTileCount	 = 0;
 	BuildingLodTileCount = 0;
