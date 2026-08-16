@@ -126,10 +126,6 @@ FCubusTerrainRasterTile FCubusTerrainRasterBuilder::BuildTile(
     Tile.StorageSampleCount = Tile.InteriorCellCount + 1 + Tile.HaloSamples * 2;
     Tile.HeightMeters.SetNumUninitialized(Tile.StorageSampleCount * Tile.StorageSampleCount);
 
-    FCubusTerrainFormSettings SourceSettings = Settings.StructuralSource;
-    SourceSettings.VoxelSizeCm = 100.0f;
-    SourceSettings.bUsePhysicalWorldScale = true;
-
     const FVector2D TileMinimum = Tile.GetWorldMinimumMeters();
     for (int32 StorageY = 0; StorageY < Tile.StorageSampleCount; ++StorageY)
     {
@@ -143,12 +139,12 @@ FCubusTerrainRasterTile FCubusTerrainRasterBuilder::BuildTile(
             const double SourceXmeters = WorldXmeters + Settings.DomainOffsetMeters.X;
             const double SourceYmeters = WorldYmeters + Settings.DomainOffsetMeters.Y;
 
-            const FCubusTerrainFormSample SourceSample = FCubusTerrainForm::Sample(
-                static_cast<float>(SourceXmeters),
-                static_cast<float>(SourceYmeters),
-                SourceSettings
+            const FCubusTerrainStructureSample StructureSample = FCubusTerrainStructure::Sample(
+                SourceXmeters,
+                SourceYmeters,
+                Settings.Structure
             );
-            Tile.HeightMeters[StorageY * Tile.StorageSampleCount + StorageX] = SourceSample.Height;
+            Tile.HeightMeters[StorageY * Tile.StorageSampleCount + StorageX] = StructureSample.HeightMeters;
         }
     }
 
