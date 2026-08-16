@@ -1,4 +1,4 @@
-name: Harden outer density clipmaps
+name: Optimize density surface window
 on:
   push:
     branches:
@@ -14,19 +14,16 @@ jobs:
         with:
           ref: agent/density-meshing
           fetch-depth: 0
-      - name: Normalize migration
-        run: python3 .github/agent/normalize_outer_clipmap_helper.py
-      - name: Apply outer clipmap hardening
-        run: python3 .github/agent/harden_density_outer_clipmaps.py
+      - name: Apply density surface optimization
+        run: python3 .github/agent/optimize_density_surface_window.py
       - name: Verify and commit source only
         run: |
           git diff --check
-          grep -n 'ScaleDownExact(PreviousBounds, 2)' Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
-          grep -n 'RetireStableTierWindows' Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
-          grep -n 'ResolvedTransitionSignatures' Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h
+          grep -n 'SurfaceSamplesPerAxis = 3' Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
+          grep -n 'bStreamingWindowChanged' Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
+          git add Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.h Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
           git diff --cached --check
-          git diff --cached --quiet || git commit -m 'Stabilize outer density clipmaps'
+          git diff --cached --quiet || git commit -m 'Optimize density surface streaming window'
           git push origin HEAD:agent/density-meshing
