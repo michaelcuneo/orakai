@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "CubusCore/Generation/CubusTerrainForm.h"
+#include "CubusCore/Generation/CubusTerrainStructure.h"
 
 /**
  * Settings for the pre-voxel terrain domain.
@@ -24,15 +24,8 @@ struct ORAKAI_API FCubusTerrainRasterSettings
     /** Deterministic seed-domain displacement expressed in metres, not voxels. */
     FVector2D DomainOffsetMeters = FVector2D::ZeroVector;
 
-    /**
-     * Structural source used to seed the high-resolution terrain raster.
-     *
-     * BuildTile() always evaluates this source with VoxelSizeCm=100 and
-     * bUsePhysicalWorldScale=true, so one source coordinate and one source
-     * height unit are exactly one metre. This is the important separation from
-     * the later 80 cm (or any other size) density lattice.
-     */
-    FCubusTerrainFormSettings StructuralSource;
+    /** Broad pre-drainage structural landscape sampled into the 1 m raster. */
+    FCubusTerrainStructureSettings Structure;
 };
 
 /** One deterministic high-resolution height tile in physical world metres. */
@@ -83,10 +76,9 @@ private:
 /**
  * Builds deterministic high-resolution terrain tiles before any voxelisation.
  *
- * Step 1 intentionally stops here: this class does not touch density meshing,
- * streaming, LODs, caves, rivers or materials. Future terrain operations can
- * mutate/copy raster tiles, and the density field can later voxelise the final
- * raster rather than inventing its own terrain directly.
+ * The raster now contains only broad structural elevation: connected mountain
+ * systems, massifs, passes, shoulders and basins. Drainage, erosion, cliffs and
+ * density-domain details are intentionally separate later stages.
  */
 class ORAKAI_API FCubusTerrainRasterBuilder
 {
