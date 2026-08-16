@@ -1,4 +1,4 @@
-name: Stabilize terrain streaming altitude
+name: Restore density LOD distance
 on:
   push:
     branches:
@@ -14,47 +14,14 @@ jobs:
         with:
           ref: agent/density-meshing
           fetch-depth: 0
-      - name: Anchor terrain streaming to the generated surface
-        shell: bash
+      - name: Apply distance restoration
+        run: python3 .github/agent/restore_density_lod_distance.py
+      - name: Verify and commit
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path('Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp')
-          s = p.read_text(encoding='utf-8')
-
-          include_anchor = '#include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"\n'
-          terrain_include = '#include "CubusCore/Generation/CubusTerrainForm.h"\n'
-          if terrain_include not in s:
-              if s.count(include_anchor) != 1:
-                  raise RuntimeError(f'expected one include anchor, found {s.count(include_anchor)}')
-              s = s.replace(include_anchor, include_anchor + terrain_include, 1)
-
-          old = '''\tconst FIntVector CentreCoordinate = WorldLocationToChunkCoordinate(TrackingLocation);\n'''
-          new = '''\t/*\n\t * Terrain ownership follows the pawn horizontally, but never follows the\n\t * pawn into the sky or down through the ground. The old XYZ-centred\n\t * streaming window treated altitude as world traversal and destroyed the\n\t * surface chunks underneath a flying pawn.\n\t *\n\t * Resolve a deterministic surface chunk from the same macro terrain form\n\t * used by generation. Sampling the centre of the current horizontal chunk\n\t * keeps the anchor stable while the pawn moves vertically or moves around\n\t * inside that chunk. X/Y travel still advances streaming normally.\n\t */\n\tconst FIntVector PawnCoordinate = WorldLocationToChunkCoordinate(TrackingLocation);\n\n\tFCubusTerrainFormSettings StreamingTerrainSettings;\n\tStreamingTerrainSettings.BaseHeight = static_cast<float>(TerrainBaseHeight);\n\tStreamingTerrainSettings.ContinentAmplitude = TerrainContinentAmplitude;\n\tStreamingTerrainSettings.ContinentFrequency = TerrainContinentFrequency;\n\tStreamingTerrainSettings.HillAmplitude = TerrainHillAmplitude;\n\tStreamingTerrainSettings.HillFrequency = TerrainHillFrequency;\n\tStreamingTerrainSettings.DetailAmplitude = TerrainDetailAmplitude;\n\tStreamingTerrainSettings.DetailFrequency = TerrainDetailFrequency;\n\tStreamingTerrainSettings.RidgeAmplitude = TerrainRidgeAmplitude;\n\tStreamingTerrainSettings.RidgeFrequency = TerrainRidgeFrequency;\n\tStreamingTerrainSettings.ValleyDepth = TerrainValleyDepth;\n\tStreamingTerrainSettings.ValleyFrequency = TerrainValleyFrequency;\n\tStreamingTerrainSettings.ValleyWidth = TerrainValleyWidth;\n\tStreamingTerrainSettings.ValleyFalloff = TerrainValleyFalloff;\n\tStreamingTerrainSettings.ValleyWarpAmplitude = TerrainValleyWarpAmplitude;\n\tStreamingTerrainSettings.ValleyWarpFrequency = TerrainValleyWarpFrequency;\n\tStreamingTerrainSettings.RegionFrequency = TerrainRegionFrequency;\n\tStreamingTerrainSettings.PlainsThreshold = TerrainPlainsThreshold;\n\tStreamingTerrainSettings.PlainsBlend = TerrainPlainsBlend;\n\tStreamingTerrainSettings.MountainThreshold = TerrainMountainThreshold;\n\tStreamingTerrainSettings.MountainBlend = TerrainMountainBlend;\n\n\tconst FCubusGenerationSeeds Seeds = GetGenerationSeeds();\n\tconst int32 TerrainOffsetX =\n\t\t(FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;\n\tconst int32 TerrainOffsetY =\n\t\t(FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;\n\n\tconst float HorizontalChunkCentreOffset = static_cast<float>(Cubus::ChunkSize) * 0.5f;\n\tconst float SurfaceSampleX =\n\t\tstatic_cast<float>(PawnCoordinate.X * Cubus::ChunkSize) + HorizontalChunkCentreOffset + static_cast<float>(TerrainOffsetX);\n\tconst float SurfaceSampleY =\n\t\tstatic_cast<float>(PawnCoordinate.Y * Cubus::ChunkSize) + HorizontalChunkCentreOffset + static_cast<float>(TerrainOffsetY);\n\n\tconst float TerrainSurfaceVoxelZ = bUseHeightTerrain\n\t\t? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, StreamingTerrainSettings).Height\n\t\t: static_cast<float>(TerrainSurfaceWorldZ);\n\tconst int32 TerrainChunkZ = FMath::FloorToInt(\n\t\tTerrainSurfaceVoxelZ / static_cast<float>(Cubus::ChunkSize));\n\n\tconst FIntVector CentreCoordinate(PawnCoordinate.X, PawnCoordinate.Y, TerrainChunkZ);\n'''
-
-          if old in s:
-              if s.count(old) != 1:
-                  raise RuntimeError(f'expected one old streaming centre line, found {s.count(old)}')
-              s = s.replace(old, new, 1)
-          elif 'const FIntVector CentreCoordinate(PawnCoordinate.X, PawnCoordinate.Y, TerrainChunkZ);' not in s:
-              raise RuntimeError('stable terrain streaming block not found and old block is absent')
-
-          p.write_text(s, encoding='utf-8')
-          PY
-
           git diff --check
-          grep -n 'const FIntVector CentreCoordinate(PawnCoordinate.X, PawnCoordinate.Y, TerrainChunkZ);' Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
-          grep -n 'CubusCore/Generation/CubusTerrainForm.h' Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
-          ! grep -q 'const FIntVector CentreCoordinate = WorldLocationToChunkCoordinate(TrackingLocation);' Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
-
-          if git diff --quiet; then
-            echo 'Stable terrain streaming patch already applied.'
-            exit 0
-          fi
-
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.cpp
-          git commit -m 'Anchor terrain streaming to surface height'
+          git add Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.h Source/Orakai/CubusCore/Actors/CubusTerrainLodWorldActor.cpp
+          git diff --cached --check
+          git diff --cached --quiet || git commit -m 'Restore density LOD world distance'
           git push origin HEAD:agent/density-meshing
