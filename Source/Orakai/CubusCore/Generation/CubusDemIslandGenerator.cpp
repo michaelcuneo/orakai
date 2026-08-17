@@ -14,6 +14,7 @@ namespace
 {
 constexpr uint32 DemMagic = 0x4d454443u;
 constexpr uint32 DemVersion = 1u;
+constexpr float QuiltWeightPower = 2.0f;
 
 struct FHeader
 {
@@ -316,12 +317,31 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 	}
 
 	float MeanExtentM = 0.0f;
-	for (const FMacroSource& Source : Sources) MeanExtentM += Source.ExtentM;
+	float MinimumSourceReliefM = TNumericLimits<float>::Max();
+	float MaximumSourceReliefM = 0.0f;
+	float MeanSourceReliefM = 0.0f;
+	for (const FMacroSource& Source : Sources)
+	{
+		MeanExtentM += Source.ExtentM;
+		MinimumSourceReliefM = FMath::Min(MinimumSourceReliefM, Source.Metadata.ReliefP90M);
+		MaximumSourceReliefM = FMath::Max(MaximumSourceReliefM, Source.Metadata.ReliefP90M);
+		MeanSourceReliefM += Source.Metadata.ReliefP90M;
+	}
 	MeanExtentM /= Sources.Num();
+	MeanSourceReliefM /= Sources.Num();
 	const float GridSpacingM = FMath::Clamp(MeanExtentM * 0.72f, 18000.0f, 42000.0f);
 	const int32 GridR = FMath::CeilToInt(Settings.WorldSizeMeters / GridSpacingM) + 3;
 	const double HalfWorld = Settings.WorldSizeMeters * 0.5;
 	const double GridOrigin = -HalfWorld - GridSpacingM;
+
+	UE_LOG(LogTemp, Display,
+		TEXT("Cubus macro DEM library: %d sources, mean extent %.1f km, P90 relief min/mean/max %.0f / %.0f / %.0f m, quilt spacing %.1f km"),
+		Sources.Num(), MeanExtentM / 1000.0f, MinimumSourceReliefM, MeanSourceReliefM, MaximumSourceReliefM, GridSpacingM / 1000.0f);
+	if (MaximumSourceReliefM < 800.0f)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Cubus macro DEM library contains no source patch above 800 m P90 relief; the source library itself is low-relief."));
+	}
 
 	TArray<FPlacement> Placements;
 	Placements.SetNum(GridR * GridR);
@@ -384,8 +404,8 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 		const int32 PlacementIndices[4] = {Y0 * GridR + X0, Y0 * GridR + X0 + 1, (Y0 + 1) * GridR + X0, (Y0 + 1) * GridR + X0 + 1};
 		const float BaseWeights[4] = {(1.0f - Fx) * (1.0f - Fy), Fx * (1.0f - Fy), (1.0f - Fx) * Fy, Fx * Fy};
 
-		float Relief = 0.0f;
-		float WeightSum = 0.0f;
+		float WeightedRelief = 0.0f;
+		float WeightSquaredSum = 0.0f;
 		float BestWeight = -1.0f;
 		int32 BestPlacement = PlacementIndices[0];
 		for (int32 Corner = 0; Corner < 4; ++Corner)
@@ -397,17 +417,26 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 			FVector2D SourceUv(Local.X / SampleExtentM + 0.5f, Local.Y / SampleExtentM + 0.5f);
 			SourceUv = TransformUv(SourceUv, Placement.Variant);
 			if (SourceUv.X < 0.0f || SourceUv.X > 1.0f || SourceUv.Y < 0.0f || SourceUv.Y > 1.0f) continue;
-			const float W = BaseWeights[Corner];
+
+			// Squaring the partition weights keeps transitions smooth but narrows the
+			// region in which unrelated landforms are mixed. Dividing by the RMS
+			// weight rather than the arithmetic sum preserves relief variance: four
+			// independent mean-centred DEMs no longer lose roughly half their height
+			// simply because they meet in the middle of a quilt cell.
+			const float W = FMath::Pow(FMath::Max(0.0f, BaseWeights[Corner]), QuiltWeightPower);
+			if (W <= KINDA_SMALL_NUMBER) continue;
 			const float Sample = (Source.Patch.SampleBilinear(SourceUv.X, SourceUv.Y) - Source.Patch.MeanElevationM) * Settings.ReliefScale;
-			Relief += Sample * W;
-			WeightSum += W;
+			WeightedRelief += Sample * W;
+			WeightSquaredSum += W * W;
 			if (W > BestWeight)
 			{
 				BestWeight = W;
 				BestPlacement = PlacementIndices[Corner];
 			}
 		}
-		if (WeightSum > 0.001f) Relief /= WeightSum;
+		const float Relief = WeightSquaredSum > KINDA_SMALL_NUMBER
+			? WeightedRelief / FMath::Sqrt(WeightSquaredSum)
+			: 0.0f;
 
 		const float Envelope = IslandEnvelope(WorldM.X, WorldM.Y, Settings);
 		const float LandHeight = Settings.BaseLandElevationM + Relief;
@@ -431,6 +460,13 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 	});
 
 	Measure(OutDem, OutStats);
+	if (OutStats)
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("Cubus raw 500 km DEM: elevation %.0f to %.0f m, mean land slope %.1f deg, steep land %.1f%%"),
+			OutStats->MinimumElevationM, OutStats->MaximumElevationM, OutStats->MeanLandSlopeDegrees,
+			OutStats->SteepLandFraction * 100.0f);
+	}
 	UE_LOG(LogTemp, Display, TEXT("Cubus 500 km DEM quilt: seed %d, %d macro sources, %d x %d placements, %.2f m/cell"),
 		Settings.Seed, Sources.Num(), GridR, GridR, OutDem.CellSizeMeters);
 	return true;
