@@ -31,6 +31,31 @@ namespace CubusTerrainRaster
             (UY * 2.0 - 1.0) * OffsetRadiusMeters
         );
     }
+
+    float SampleStructuralHeightWithSeedOffsetMeters(
+        const double WorldXmeters,
+        const double WorldYmeters,
+        const FCubusTerrainRasterSettings& Settings,
+        const FVector2D& SeedOffset
+    )
+    {
+        // Keep the same operation ordering as the original public sampler so
+        // caching SeedOffset cannot perturb deterministic terrain coordinates.
+        const double SourceXmeters = WorldXmeters + Settings.DomainOffsetMeters.X + SeedOffset.X;
+        const double SourceYmeters = WorldYmeters + Settings.DomainOffsetMeters.Y + SeedOffset.Y;
+        const FCubusTerrainStructureSample Structure = FCubusTerrainStructure::Sample(
+            SourceXmeters,
+            SourceYmeters,
+            Settings.Structure
+        );
+        const FCubusTerrainMorphologySample Morphology = FCubusTerrainMorphology::Sample(
+            SourceXmeters,
+            SourceYmeters,
+            Structure,
+            Settings.Structure
+        );
+        return Structure.HeightMeters + Morphology.HeightOffsetMeters;
+    }
 }
 
 bool FCubusTerrainRasterTile::IsValid() const
@@ -137,20 +162,12 @@ float FCubusTerrainRasterBuilder::SampleStructuralHeightMeters(
     using namespace CubusTerrainRaster;
 
     const FVector2D SeedOffset = SeedDomainOffsetMeters(Settings.Structure.Seed);
-    const double SourceXmeters = WorldXmeters + Settings.DomainOffsetMeters.X + SeedOffset.X;
-    const double SourceYmeters = WorldYmeters + Settings.DomainOffsetMeters.Y + SeedOffset.Y;
-    const FCubusTerrainStructureSample Structure = FCubusTerrainStructure::Sample(
-        SourceXmeters,
-        SourceYmeters,
-        Settings.Structure
+    return SampleStructuralHeightWithSeedOffsetMeters(
+        WorldXmeters,
+        WorldYmeters,
+        Settings,
+        SeedOffset
     );
-    const FCubusTerrainMorphologySample Morphology = FCubusTerrainMorphology::Sample(
-        SourceXmeters,
-        SourceYmeters,
-        Structure,
-        Settings.Structure
-    );
-    return Structure.HeightMeters + Morphology.HeightOffsetMeters;
 }
 
 FIntPoint FCubusTerrainRasterBuilder::WorldToTileCoordinate(
@@ -171,6 +188,8 @@ FCubusTerrainRasterTile FCubusTerrainRasterBuilder::BuildTile(
     const FCubusTerrainRasterSettings& InSettings
 )
 {
+    using namespace CubusTerrainRaster;
+
     FCubusTerrainRasterSettings Settings = InSettings;
     Settings.SampleSpacingMeters = FMath::Max(0.25f, Settings.SampleSpacingMeters);
     Settings.HaloSamples = FMath::Max(2, Settings.HaloSamples);
@@ -185,6 +204,8 @@ FCubusTerrainRasterTile FCubusTerrainRasterBuilder::BuildTile(
     Tile.HeightMeters.SetNumUninitialized(Tile.StorageSampleCount * Tile.StorageSampleCount);
 
     const FVector2D TileMinimum = Tile.GetWorldMinimumMeters();
+    const FVector2D SeedOffset = SeedDomainOffsetMeters(Settings.Structure.Seed);
+
     for (int32 StorageY = 0; StorageY < Tile.StorageSampleCount; ++StorageY)
     {
         const int32 GridY = StorageY - Tile.HaloSamples;
@@ -195,7 +216,12 @@ FCubusTerrainRasterTile FCubusTerrainRasterBuilder::BuildTile(
             const int32 GridX = StorageX - Tile.HaloSamples;
             const double WorldXmeters = TileMinimum.X + static_cast<double>(GridX) * Tile.SampleSpacingMeters;
             Tile.HeightMeters[StorageY * Tile.StorageSampleCount + StorageX] =
-                SampleStructuralHeightMeters(WorldXmeters, WorldYmeters, Settings);
+                SampleStructuralHeightWithSeedOffsetMeters(
+                    WorldXmeters,
+                    WorldYmeters,
+                    Settings,
+                    SeedOffset
+                );
         }
     }
 
