@@ -16,6 +16,52 @@
 #include "UObject/ConstructorHelpers.h"
 #include "Components/SceneCaptureComponent2D.h"
 
+namespace
+{
+bool RayTriangleIntersection(
+    const FVector& RayOrigin,
+    const FVector& RayDirection,
+    const FVector& A,
+    const FVector& B,
+    const FVector& C,
+    float& OutDistance)
+{
+    constexpr float Epsilon = 1.0e-6f;
+    const FVector Edge1 = B - A;
+    const FVector Edge2 = C - A;
+    const FVector P = FVector::CrossProduct(RayDirection, Edge2);
+    const float Determinant = FVector::DotProduct(Edge1, P);
+    if (FMath::Abs(Determinant) < Epsilon)
+    {
+        return false;
+    }
+
+    const float InverseDeterminant = 1.0f / Determinant;
+    const FVector T = RayOrigin - A;
+    const float U = FVector::DotProduct(T, P) * InverseDeterminant;
+    if (U < 0.0f || U > 1.0f)
+    {
+        return false;
+    }
+
+    const FVector Q = FVector::CrossProduct(T, Edge1);
+    const float V = FVector::DotProduct(RayDirection, Q) * InverseDeterminant;
+    if (V < 0.0f || U + V > 1.0f)
+    {
+        return false;
+    }
+
+    const float Distance = FVector::DotProduct(Edge2, Q) * InverseDeterminant;
+    if (Distance <= Epsilon)
+    {
+        return false;
+    }
+
+    OutDistance = Distance;
+    return true;
+}
+}
+
 ACubusWorldGenerationPreviewActor::ACubusWorldGenerationPreviewActor()
 {
     PrimaryActorTick.bCanEverTick = true;
@@ -29,11 +75,8 @@ ACubusWorldGenerationPreviewActor::ACubusWorldGenerationPreviewActor()
 
     PreviewMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("PreviewMesh"));
     PreviewMesh->SetupAttachment(MeshPivot);
-    PreviewMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    PreviewMesh->SetCollisionObjectType(ECC_WorldDynamic);
-    PreviewMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
-    PreviewMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-    PreviewMesh->bUseAsyncCooking = true;
+    PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    PreviewMesh->SetGenerateOverlapEvents(false);
     PreviewMesh->CastShadow = true;
 
     PreviewCapture = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("PreviewCapture"));
@@ -172,8 +215,8 @@ void ACubusWorldGenerationPreviewActor::ApplyOrbitTransform()
 
     if (IsValid(PreviewCapture))
     {
-        const float Distance = FMath::Max(PreviewHorizontalSize * 1.55f, 600.0f);
-        const FVector CameraLocation(Distance, 0.0f, Distance * 0.83f);
+        const float Distance = FMath::Max(PreviewHorizontalSize * PreviewCameraDistanceMultiplier, 900.0f);
+        const FVector CameraLocation(Distance, 0.0f, Distance * 0.72f);
         PreviewCapture->SetRelativeLocation(CameraLocation);
         PreviewCapture->SetRelativeRotation(UKismetMathLibrary::FindLookAtRotation(CameraLocation, FVector::ZeroVector));
     }
@@ -209,8 +252,9 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
     if (!bUseLoader && !FCubusGeneratedTerrainRuntime::GetPreviewBoundsMeters(RuntimeBounds))
     {
         PreviewMesh->ClearAllMeshSections();
+        CachedPickVertices.Reset();
+        CachedPickTriangles.Reset();
         bHasRenderableTerrain = false;
-        bPickingCollisionBuilt = false;
         return;
     }
 
@@ -229,10 +273,13 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         static_cast<double>(WorldSizeMeters.Y) * HorizontalScale);
 
     TArray<float> Heights;
-    Heights.Init(MAX_flt, Resolution * Resolution);
+    TArray<bool> HasHeight;
+    Heights.Init(0.0f, Resolution * Resolution);
+    HasHeight.Init(false, Resolution * Resolution);
 
     float MinHeight = MAX_flt;
     float MaxHeight = -MAX_flt;
+    int32 KnownSampleCount = 0;
     for (int32 Y = 0; Y < Resolution; ++Y)
     {
         const double V = static_cast<double>(Y) / static_cast<double>(Resolution - 1);
@@ -242,30 +289,28 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
             const double U = static_cast<double>(X) / static_cast<double>(Resolution - 1);
             const double WorldX = WorldMinimum.X + U * WorldSizeMeters.X;
             float HeightMeters = 0.0f;
-            const bool bHasHeight = bUseLoader
+            const bool bSampled = bUseLoader
                 ? TargetLoader->GetGeneratedHeightMeters(WorldX, WorldY, HeightMeters)
                 : FCubusGeneratedTerrainRuntime::TrySampleHeightMeters(FVector2D(WorldX, WorldY), HeightMeters);
-            if (!bHasHeight)
+            if (!bSampled)
             {
                 continue;
             }
 
-            Heights[Y * Resolution + X] = HeightMeters;
+            const int32 Index = Y * Resolution + X;
+            Heights[Index] = HeightMeters;
+            HasHeight[Index] = true;
+            ++KnownSampleCount;
             MinHeight = FMath::Min(MinHeight, HeightMeters);
             MaxHeight = FMath::Max(MaxHeight, HeightMeters);
         }
     }
 
-    if (MinHeight == MAX_flt)
-    {
-        PreviewMesh->ClearAllMeshSections();
-        bHasRenderableTerrain = false;
-        bPickingCollisionBuilt = false;
-        return;
-    }
-
-    const float HeightSpan = FMath::Max(1.0f, MaxHeight - MinHeight);
-    const float MidHeight = (MinHeight + MaxHeight) * 0.5f;
+    // The entire preview grid always exists. Before generation starts it is a
+    // flat terrain table; as DEM samples arrive, only those vertices deform.
+    const bool bHasKnownTerrain = KnownSampleCount > 0;
+    const float HeightSpan = bHasKnownTerrain ? FMath::Max(1.0f, MaxHeight - MinHeight) : 1.0f;
+    const float MidHeight = bHasKnownTerrain ? (MinHeight + MaxHeight) * 0.5f : 0.0f;
     const float VerticalScale = PreviewVerticalRelief / HeightSpan;
 
     TArray<FVector> Vertices;
@@ -274,13 +319,12 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
     TArray<FVector2D> UVs;
     TArray<FLinearColor> Colors;
     TArray<FProcMeshTangent> Tangents;
-    TArray<int32> VertexMap;
-    VertexMap.Init(INDEX_NONE, Resolution * Resolution);
 
     Vertices.Reserve(Resolution * Resolution);
     Normals.Reserve(Resolution * Resolution);
     UVs.Reserve(Resolution * Resolution);
     Colors.Reserve(Resolution * Resolution);
+    Triangles.Reserve((Resolution - 1) * (Resolution - 1) * 6);
 
     for (int32 Y = 0; Y < Resolution; ++Y)
     {
@@ -288,20 +332,18 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         for (int32 X = 0; X < Resolution; ++X)
         {
             const int32 SourceIndex = Y * Resolution + X;
-            const float Height = Heights[SourceIndex];
-            if (Height == MAX_flt)
-            {
-                continue;
-            }
-
             const float U = static_cast<float>(X) / static_cast<float>(Resolution - 1);
             const float LocalX = (U - 0.5f) * static_cast<float>(BuiltMeshDimensions.X);
             const float LocalY = (V - 0.5f) * static_cast<float>(BuiltMeshDimensions.Y);
-            const float LocalZ = (Height - MidHeight) * VerticalScale;
+            const float LocalZ = HasHeight[SourceIndex]
+                ? (Heights[SourceIndex] - MidHeight) * VerticalScale
+                : 0.0f;
 
-            VertexMap[SourceIndex] = Vertices.Add(FVector(LocalX, LocalY, LocalZ));
+            Vertices.Add(FVector(LocalX, LocalY, LocalZ));
             UVs.Add(FVector2D(U, 1.0f - V));
-            Colors.Add(HeightColor(FMath::Clamp((Height - MinHeight) / HeightSpan, 0.0f, 1.0f)));
+            Colors.Add(HasHeight[SourceIndex]
+                ? HeightColor(FMath::Clamp((Heights[SourceIndex] - MinHeight) / HeightSpan, 0.0f, 1.0f))
+                : FLinearColor(0.055f, 0.075f, 0.06f, 1.0f));
             Normals.Add(FVector::UpVector);
         }
     }
@@ -310,14 +352,10 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
     {
         for (int32 X = 0; X < Resolution - 1; ++X)
         {
-            const int32 I00 = VertexMap[Y * Resolution + X];
-            const int32 I10 = VertexMap[Y * Resolution + X + 1];
-            const int32 I01 = VertexMap[(Y + 1) * Resolution + X];
-            const int32 I11 = VertexMap[(Y + 1) * Resolution + X + 1];
-            if (I00 == INDEX_NONE || I10 == INDEX_NONE || I01 == INDEX_NONE || I11 == INDEX_NONE)
-            {
-                continue;
-            }
+            const int32 I00 = Y * Resolution + X;
+            const int32 I10 = I00 + 1;
+            const int32 I01 = (Y + 1) * Resolution + X;
+            const int32 I11 = I01 + 1;
 
             Triangles.Add(I00);
             Triangles.Add(I11);
@@ -326,14 +364,6 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
             Triangles.Add(I01);
             Triangles.Add(I11);
         }
-    }
-
-    if (Triangles.IsEmpty())
-    {
-        PreviewMesh->ClearAllMeshSections();
-        bHasRenderableTerrain = false;
-        bPickingCollisionBuilt = false;
-        return;
     }
 
     Normals.Init(FVector::ZeroVector, Vertices.Num());
@@ -352,14 +382,16 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         Normal = Normal.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
     }
 
-    PreviewMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
+    PreviewMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, Colors, Tangents, false);
+    PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     if (IsValid(PreviewMaterial))
     {
         PreviewMesh->SetMaterial(0, PreviewMaterial);
     }
 
+    CachedPickVertices = Vertices;
+    CachedPickTriangles = Triangles;
     bHasRenderableTerrain = true;
-    bPickingCollisionBuilt = true;
 }
 
 FLinearColor ACubusWorldGenerationPreviewActor::HeightColor(const float NormalizedHeight) const
@@ -417,7 +449,7 @@ bool ACubusWorldGenerationPreviewActor::SetGeneratedSpawnFromPreviewPosition(
 {
     OutPreviewUV = FVector2D::ZeroVector;
     OutWorldMeters = FVector2D::ZeroVector;
-    if (!bHasRenderableTerrain || !bPickingCollisionBuilt ||
+    if (!bHasRenderableTerrain || CachedPickVertices.IsEmpty() || CachedPickTriangles.IsEmpty() ||
         PreviewWidgetSize.X <= UE_SMALL_NUMBER || PreviewWidgetSize.Y <= UE_SMALL_NUMBER)
     {
         return false;
@@ -427,25 +459,55 @@ bool ACubusWorldGenerationPreviewActor::SetGeneratedSpawnFromPreviewPosition(
         FMath::Clamp(LocalPreviewPosition.X / PreviewWidgetSize.X, 0.0, 1.0),
         FMath::Clamp(LocalPreviewPosition.Y / PreviewWidgetSize.Y, 0.0, 1.0));
 
-    FVector RayOrigin;
-    FVector RayDirection;
-    if (!BuildCaptureRay(ScreenUV, RayOrigin, RayDirection))
+    FVector WorldRayOrigin;
+    FVector WorldRayDirection;
+    if (!BuildCaptureRay(ScreenUV, WorldRayOrigin, WorldRayDirection))
     {
         return false;
     }
 
-    FHitResult Hit;
-    FCollisionQueryParams Params(SCENE_QUERY_STAT(CubusGeneratedPreviewPick), true);
-    if (!PreviewMesh->LineTraceComponent(Hit, RayOrigin, RayOrigin + RayDirection * 100000.0f, Params))
+    const FTransform PivotTransform = MeshPivot->GetComponentTransform();
+    const FVector LocalRayOrigin = PivotTransform.InverseTransformPosition(WorldRayOrigin);
+    const FVector LocalRayDirection = PivotTransform.InverseTransformVectorNoScale(WorldRayDirection).GetSafeNormal();
+
+    float ClosestDistance = MAX_flt;
+    FVector ClosestHit = FVector::ZeroVector;
+    bool bHit = false;
+    for (int32 Index = 0; Index + 2 < CachedPickTriangles.Num(); Index += 3)
+    {
+        const int32 IA = CachedPickTriangles[Index];
+        const int32 IB = CachedPickTriangles[Index + 1];
+        const int32 IC = CachedPickTriangles[Index + 2];
+        if (!CachedPickVertices.IsValidIndex(IA) || !CachedPickVertices.IsValidIndex(IB) || !CachedPickVertices.IsValidIndex(IC))
+        {
+            continue;
+        }
+
+        float Distance = 0.0f;
+        if (RayTriangleIntersection(
+                LocalRayOrigin,
+                LocalRayDirection,
+                CachedPickVertices[IA],
+                CachedPickVertices[IB],
+                CachedPickVertices[IC],
+                Distance) &&
+            Distance < ClosestDistance)
+        {
+            ClosestDistance = Distance;
+            ClosestHit = LocalRayOrigin + LocalRayDirection * Distance;
+            bHit = true;
+        }
+    }
+
+    if (!bHit)
     {
         return false;
     }
 
-    const FVector LocalHit = MeshPivot->GetComponentTransform().InverseTransformPosition(Hit.ImpactPoint);
-    const double U = FMath::Clamp(LocalHit.X / FMath::Max(1.0, BuiltMeshDimensions.X) + 0.5, 0.0, 1.0);
-    const double VBottomUp = FMath::Clamp(LocalHit.Y / FMath::Max(1.0, BuiltMeshDimensions.Y) + 0.5, 0.0, 1.0);
-
+    const double U = FMath::Clamp(ClosestHit.X / FMath::Max(1.0, BuiltMeshDimensions.X) + 0.5, 0.0, 1.0);
+    const double VBottomUp = FMath::Clamp(ClosestHit.Y / FMath::Max(1.0, BuiltMeshDimensions.Y) + 0.5, 0.0, 1.0);
     OutPreviewUV = FVector2D(U, 1.0 - VBottomUp);
+
     if (IsValid(TargetLoader))
     {
         return TargetLoader->SetGeneratedSpawnFromPreviewUV(OutPreviewUV, OutWorldMeters);
@@ -455,6 +517,7 @@ bool ACubusWorldGenerationPreviewActor::SetGeneratedSpawnFromPreviewPosition(
     {
         return false;
     }
+
     FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(OutPreviewUV);
     return FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(OutWorldMeters);
 }
