@@ -1,7 +1,13 @@
 #include "CubusCore/Generation/CubusWorldGenerationLoaderActor.h"
 #include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
+#include "CubusCore/Generation/CubusGeneratedLoadingWorldActor.h"
+#include "CubusCore/Actors/CubusTerrainLodWorldActor.h"
+#include "Gameplay/WorldObjects/CubusSpawnStreamingPawn.h"
 
 #include "Engine/Texture2D.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "Rendering/Texture2DResource.h"
 
 ACubusWorldGenerationLoaderActor::ACubusWorldGenerationLoaderActor()
@@ -21,6 +27,14 @@ void ACubusWorldGenerationLoaderActor::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
     (void)DeltaSeconds;
+
+    if (Stage == ECubusGenerationLoaderStage::SupportChunks ||
+        Stage == ECubusGenerationLoaderStage::GameplayChunks ||
+        Stage == ECubusGenerationLoaderStage::TerrainLOD)
+    {
+        ProcessRuntimeTerrainLoading();
+        return;
+    }
 
     const int32 Budget = FMath::Clamp(WorkItemsPerTick, 1, 8);
     for (int32 Work = 0; Work < Budget; ++Work)
@@ -102,8 +116,14 @@ FText ACubusWorldGenerationLoaderActor::GetStageDisplayName() const
         return FText::FromString(TEXT("Building Floodplains and Alluvial Fans"));
     case ECubusGenerationLoaderStage::FineErosion:
         return FText::FromString(TEXT("Cutting Fine Gullies and Weathering"));
+    case ECubusGenerationLoaderStage::SupportChunks:
+        return FText::FromString(TEXT("Loading Support Chunks"));
+    case ECubusGenerationLoaderStage::GameplayChunks:
+        return FText::FromString(TEXT("Loading Gameplay Chunks"));
+    case ECubusGenerationLoaderStage::TerrainLOD:
+        return FText::FromString(TEXT("Loading Terrain LOD1-LOD6"));
     case ECubusGenerationLoaderStage::Complete:
-        return FText::FromString(TEXT("Terrain Generation Complete"));
+        return FText::FromString(TEXT("World Ready - Choose Spawn"));
     case ECubusGenerationLoaderStage::Failed:
         return FText::FromString(TEXT("Generation Failed"));
     default:
@@ -135,6 +155,31 @@ bool ACubusWorldGenerationLoaderActor::GetGeneratedHeightMeters(
 
 void ACubusWorldGenerationLoaderActor::ResetSession()
 {
+    if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0))
+    {
+        if (PlayerController->GetPawn() == RuntimeStreamingPawn)
+        {
+            PlayerController->UnPossess();
+        }
+    }
+
+    if (IsValid(RuntimeStreamingPawn))
+    {
+        RuntimeStreamingPawn->Destroy();
+    }
+    if (IsValid(RuntimeLodWorld))
+    {
+        RuntimeLodWorld->Destroy();
+    }
+    if (IsValid(RuntimeBlockWorld))
+    {
+        RuntimeBlockWorld->Destroy();
+    }
+
+    RuntimeStreamingPawn = nullptr;
+    RuntimeLodWorld = nullptr;
+    RuntimeBlockWorld = nullptr;
+
     Stage = ECubusGenerationLoaderStage::WaitingForSeed;
     StageProgress = 0.0f;
     OverallProgress = 0.0f;
@@ -255,6 +300,160 @@ void ACubusWorldGenerationLoaderActor::BeginStage(const ECubusGenerationLoaderSt
     OnProgressChanged.Broadcast(Stage, StageProgress);
 }
 
+void ACubusWorldGenerationLoaderActor::BeginRuntimeTerrainLoading()
+{
+    UWorld* World = GetWorld();
+    if (!IsValid(World))
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    RebuildTerrainPreview(false);
+    UploadPreview();
+    PublishPreviewSnapshotToRuntime();
+
+    // Centre remains the default proposal. The WBP may replace it when the
+    // player drags the marker, but it is deliberately not confirmed here.
+    FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(FVector2D(0.5, 0.5));
+
+    FVector2D CentreWorldMeters = FVector2D::ZeroVector;
+    FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(CentreWorldMeters);
+    float CentreHeightMeters = 0.0f;
+    if (!GetGeneratedHeightMeters(CentreWorldMeters.X, CentreWorldMeters.Y, CentreHeightMeters))
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    const FVector StreamingFocusLocation(
+        CentreWorldMeters.X * 100.0,
+        CentreWorldMeters.Y * 100.0,
+        static_cast<double>(CentreHeightMeters) * 100.0 + 500.0
+    );
+
+    FActorSpawnParameters StreamingPawnParams;
+    StreamingPawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    StreamingPawnParams.ObjectFlags |= RF_Transient;
+    RuntimeStreamingPawn = World->SpawnActor<ACubusSpawnStreamingPawn>(
+        ACubusSpawnStreamingPawn::StaticClass(),
+        StreamingFocusLocation,
+        FRotator::ZeroRotator,
+        StreamingPawnParams
+    );
+
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+    if (!IsValid(RuntimeStreamingPawn) || !IsValid(PlayerController))
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    if (APawn* ExistingPawn = PlayerController->GetPawn())
+    {
+        if (ExistingPawn != RuntimeStreamingPawn)
+        {
+            PlayerController->UnPossess();
+            ExistingPawn->Destroy();
+        }
+    }
+    PlayerController->Possess(RuntimeStreamingPawn);
+
+    // Spawn the actual gameplay BlockWorld in this SAME world. The generated
+    // preload subclass supplies the authored Cubus chunk/material/geology asset
+    // defaults normally provided by the gameplay map.
+    RuntimeBlockWorld = World->SpawnActorDeferred<ACubusGeneratedLoadingWorldActor>(
+        ACubusGeneratedLoadingWorldActor::StaticClass(),
+        FTransform::Identity,
+        this,
+        nullptr,
+        ESpawnActorCollisionHandlingMethod::AlwaysSpawn
+    );
+    if (!IsValid(RuntimeBlockWorld))
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+    RuntimeBlockWorld->AdoptGeneratedWorldSeed(WorldSeed);
+    RuntimeBlockWorld->FinishSpawning(FTransform::Identity);
+
+    FActorSpawnParameters LodParams;
+    LodParams.Owner = RuntimeBlockWorld;
+    LodParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    LodParams.ObjectFlags |= RF_Transient;
+    RuntimeLodWorld = World->SpawnActor<ACubusTerrainLodWorldActor>(
+        ACubusTerrainLodWorldActor::StaticClass(),
+        FVector::ZeroVector,
+        FRotator::ZeroRotator,
+        LodParams
+    );
+
+    if (!IsValid(RuntimeLodWorld))
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    UE_LOG(LogTemp, Display,
+        TEXT("Cubus DEM complete; beginning in-place support chunk pass at %.1fm, %.1fm"),
+        CentreWorldMeters.X,
+        CentreWorldMeters.Y);
+    BeginStage(ECubusGenerationLoaderStage::SupportChunks);
+}
+
+void ACubusWorldGenerationLoaderActor::UpdateRuntimeLoadingProgress(
+    const float InStageProgress,
+    const float StageIndex)
+{
+    StageProgress = FMath::Clamp(InStageProgress, 0.0f, 1.0f);
+    constexpr float TotalStageCount = 9.0f;
+    OverallProgress = FMath::Clamp((StageIndex + StageProgress) / TotalStageCount, 0.0f, 0.999f);
+    OnProgressChanged.Broadcast(Stage, StageProgress);
+}
+
+void ACubusWorldGenerationLoaderActor::ProcessRuntimeTerrainLoading()
+{
+    if (!IsValid(RuntimeBlockWorld) || !IsValid(RuntimeLodWorld))
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    switch (Stage)
+    {
+    case ECubusGenerationLoaderStage::SupportChunks:
+        UpdateRuntimeLoadingProgress(
+            RuntimeBlockWorld->IsInitialSpawnAreaReady() ? 1.0f : 0.0f,
+            6.0f);
+        if (RuntimeBlockWorld->IsInitialSpawnAreaReady())
+        {
+            UE_LOG(LogTemp, Display, TEXT("Cubus support chunk pass complete; expanding to full gameplay chunk radius"));
+            BeginStage(ECubusGenerationLoaderStage::GameplayChunks);
+        }
+        return;
+
+    case ECubusGenerationLoaderStage::GameplayChunks:
+        UpdateRuntimeLoadingProgress(RuntimeBlockWorld->GetWorldLoadingProgress(), 7.0f);
+        if (RuntimeBlockWorld->IsWorldLoadingComplete())
+        {
+            UE_LOG(LogTemp, Display, TEXT("Cubus full gameplay chunk pass complete; waiting for LOD1-LOD6 residency"));
+            BeginStage(ECubusGenerationLoaderStage::TerrainLOD);
+        }
+        return;
+
+    case ECubusGenerationLoaderStage::TerrainLOD:
+        UpdateRuntimeLoadingProgress(RuntimeLodWorld->GetPreSpawnVisualCoverageProgress(), 8.0f);
+        if (RuntimeLodWorld->IsPreSpawnVisualCoverageReady())
+        {
+            FinishCurrentPipeline();
+        }
+        return;
+
+    default:
+        return;
+    }
+}
+
 void ACubusWorldGenerationLoaderActor::FinishCurrentPipeline()
 {
     Stage = ECubusGenerationLoaderStage::Complete;
@@ -262,17 +461,21 @@ void ACubusWorldGenerationLoaderActor::FinishCurrentPipeline()
     OverallProgress = 1.0f;
     RebuildTerrainPreview(false);
     UploadPreview();
+    PublishPreviewSnapshotToRuntime();
 
     UE_LOG(
         LogTemp,
         Display,
-        TEXT("Cubus generated terrain ready for runtime density: seed=%d tiles=%d voxelSize=80cm"),
+        TEXT("Cubus generated world ready for spawn UI: seed=%d tiles=%d support+gameplay+LOD1-LOD6 resident"),
         WorldSeed,
         FCubusGeneratedTerrainRuntime::GetTileCount()
     );
 
     OnStageChanged.Broadcast(Stage);
     OnProgressChanged.Broadcast(Stage, 1.0f);
+
+    // This existing Blueprint event now has the semantics the WBP expects:
+    // marker/button unlock is only permitted after ALL terrain loading passes.
     OnGenerationFinished.Broadcast();
 }
 
@@ -450,7 +653,7 @@ void ACubusWorldGenerationLoaderActor::ProcessFineErosion()
     {
         RebuildTerrainPreview(false);
         UploadPreview();
-        FinishCurrentPipeline();
+        BeginRuntimeTerrainLoading();
         return;
     }
 
@@ -494,7 +697,7 @@ void ACubusWorldGenerationLoaderActor::SetWorkProgress(const int32 CompletedItem
         ? FMath::Clamp(static_cast<float>(CompletedItems) / static_cast<float>(TotalItems), 0.0f, 1.0f)
         : 1.0f;
 
-    constexpr float StageCount = 6.0f;
+    constexpr float TotalStageCount = 9.0f;
     float StageIndex = 0.0f;
     switch (Stage)
     {
@@ -520,7 +723,7 @@ void ACubusWorldGenerationLoaderActor::SetWorkProgress(const int32 CompletedItem
         break;
     }
 
-    OverallProgress = FMath::Clamp((StageIndex + StageProgress) / StageCount, 0.0f, 1.0f);
+    OverallProgress = FMath::Clamp((StageIndex + StageProgress) / TotalStageCount, 0.0f, 0.999f);
     OnProgressChanged.Broadcast(Stage, StageProgress);
 }
 
