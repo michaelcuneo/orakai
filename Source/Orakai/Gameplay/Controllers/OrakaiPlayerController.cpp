@@ -169,10 +169,8 @@ void AOrakaiPlayerController::InitializeWorldLoadingScreen()
 		return;
 	}
 
-	// The world-generation map already has WBP_WorldGenerationLoader, including
-	// its own progress display, marker and SPAWN button. Never construct the old
-	// native loading/spawn widget in that world, even if a BlockWorld is already
-	// placed there. The Loader will run the terrain preload underneath the WBP.
+	// Lvl_Generator already owns its DEM-generation WBP. The separate gameplay
+	// spawn/loading page is created only in Lvl_ThirdPerson.
 	for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(GetWorld()); Iterator; ++Iterator)
 	{
 		if (IsValid(*Iterator))
@@ -197,8 +195,9 @@ void AOrakaiPlayerController::InitializeWorldLoadingScreen()
 		return;
 	}
 	WorldLoadingWidget->AddToPlayerScreen(1000);
-	WorldLoadingWidget->SetLoadingState(LoadingBlockWorld->GetWorldLoadingProgress(), LoadingBlockWorld->GetWorldLoadingStatus());
-	WorldLoadingWidget->SetSpawnSelectionAvailable(false);
+	WorldLoadingWidget->SetLoadingState(0.0f, FText::FromString(TEXT("Choose a spawn location")));
+	WorldLoadingWidget->SetSpawnSelectionAvailable(bGeneratedWorld);
+	WorldLoadingWidget->SetSpawnReady(false);
 	SetIgnoreMoveInput(true);
 	SetIgnoreLookInput(true);
 }
@@ -213,15 +212,7 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 	const bool bGeneratedWorld = FCubusGeneratedTerrainRuntime::IsActive();
 	if (bGeneratedWorld)
 	{
-		if (!LoadingBlockWorld->IsWorldLoadingComplete())
-		{
-			WorldLoadingWidget->SetSpawnSelectionAvailable(false);
-			WorldLoadingWidget->SetSpawnPromotionActive(false);
-			WorldLoadingWidget->SetLoadingState(
-				LoadingBlockWorld->GetWorldLoadingProgress(),
-				FText::FromString(TEXT("Building DEM-derived gameplay chunks")));
-			return;
-		}
+		WorldLoadingWidget->SetSpawnSelectionAvailable(true);
 
 		ACubusTerrainLodWorldActor* LodWorld = nullptr;
 		for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(GetWorld()); Iterator; ++Iterator)
@@ -233,48 +224,93 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 			}
 		}
 
-		if (!FCubusGeneratedTerrainRuntime::HasConfirmedSpawn())
+		FVector2D ProposedWorldMeters;
+		float ProposedHeightMeters = 0.0f;
+		const bool bHasProposal =
+			FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(ProposedWorldMeters) &&
+			FCubusGeneratedTerrainRuntime::TrySampleHeightMeters(ProposedWorldMeters, ProposedHeightMeters);
+
+		bool bDensityReady = false;
+		bool bLodReady = false;
+		if (bHasProposal)
 		{
-			if (IsValid(LodWorld) && !LodWorld->IsPreSpawnVisualCoverageReady())
+			const FVector ProposedFocusLocation(
+				ProposedWorldMeters.X * 100.0,
+				ProposedWorldMeters.Y * 100.0,
+				static_cast<double>(ProposedHeightMeters) * 100.0 + 500.0);
+			bDensityReady = LoadingBlockWorld->IsWorldLoadingComplete() &&
+				LoadingBlockWorld->IsDensityStreamingCoverageReadyAtWorldLocation(ProposedFocusLocation);
+			bLodReady = IsValid(LodWorld) && LodWorld->IsPreSpawnVisualCoverageReady();
+		}
+
+		const bool bSelectedAreaReady = bHasProposal && bDensityReady && bLodReady;
+		WorldLoadingWidget->SetSpawnReady(bSelectedAreaReady);
+
+		if (FCubusGeneratedTerrainRuntime::HasConfirmedSpawn())
+		{
+			APawn* CurrentPawn = GetPawn();
+			if (!IsValid(CurrentPawn) || CurrentPawn->IsA<ACubusSpawnStreamingPawn>())
 			{
-				WorldLoadingWidget->SetSpawnSelectionAvailable(false);
-				WorldLoadingWidget->SetSpawnPromotionActive(false);
+				WorldLoadingWidget->SetSpawnPromotionActive(true);
 				WorldLoadingWidget->SetLoadingState(
-					LodWorld->GetPreSpawnVisualCoverageProgress(),
-					FText::FromString(TEXT("Building generated terrain LOD1-LOD6")));
+					1.0f,
+					FText::FromString(TEXT("Spawning into selected terrain")));
 				return;
 			}
-
-			WorldLoadingWidget->SetLoadingState(
-				1.0f,
-				FText::FromString(TEXT("Generated world ready - choose a spawn location")));
+		}
+		else
+		{
 			WorldLoadingWidget->SetSpawnPromotionActive(false);
-			WorldLoadingWidget->SetSpawnSelectionAvailable(true);
+		}
+
+		if (!bHasProposal)
+		{
+			WorldLoadingWidget->SetLoadingState(
+				0.0f,
+				FText::FromString(TEXT("Choose a spawn location")));
 			return;
 		}
 
-		APawn* CurrentPawn = GetPawn();
-		if (!IsValid(CurrentPawn) || CurrentPawn->IsA<ACubusSpawnStreamingPawn>())
+		if (!LoadingBlockWorld->IsInitialSpawnAreaReady())
 		{
-			WorldLoadingWidget->SetSpawnPromotionActive(true);
-			const float PromotionProgress = IsValid(LodWorld)
-				? LodWorld->GetPreSpawnVisualCoverageProgress()
+			WorldLoadingWidget->SetLoadingState(
+				FMath::Min(0.15f, LoadingBlockWorld->GetWorldLoadingProgress()),
+				FText::FromString(TEXT("Preparing support terrain at selected spawn")));
+			return;
+		}
+
+		if (!bDensityReady)
+		{
+			const float ChunkProgress = LoadingBlockWorld->IsWorldLoadingComplete()
+				? 0.75f
 				: LoadingBlockWorld->GetWorldLoadingProgress();
 			WorldLoadingWidget->SetLoadingState(
-				PromotionProgress,
-				FText::FromString(TEXT("Promoting selected terrain to gameplay detail")));
+				FMath::Clamp(ChunkProgress, 0.15f, 0.85f),
+				FText::FromString(TEXT("Building gameplay chunks for selected spawn")));
 			return;
 		}
 
-		WorldLoadingWidget->SetSpawnPromotionActive(true);
-	}
-	else
-	{
-		WorldLoadingWidget->SetLoadingState(LoadingBlockWorld->GetWorldLoadingProgress(), LoadingBlockWorld->GetWorldLoadingStatus());
-		if (!LoadingBlockWorld->IsWorldLoadingComplete())
+		if (!bLodReady)
 		{
+			const float LodProgress = IsValid(LodWorld)
+				? LodWorld->GetPreSpawnVisualCoverageProgress()
+				: 0.0f;
+			WorldLoadingWidget->SetLoadingState(
+				FMath::Clamp(0.85f + LodProgress * 0.15f, 0.85f, 0.99f),
+				FText::FromString(TEXT("Building terrain LOD1-LOD6 for selected spawn")));
 			return;
 		}
+
+		WorldLoadingWidget->SetLoadingState(
+			1.0f,
+			FText::FromString(TEXT("Selected spawn area ready")));
+		return;
+	}
+
+	WorldLoadingWidget->SetLoadingState(LoadingBlockWorld->GetWorldLoadingProgress(), LoadingBlockWorld->GetWorldLoadingStatus());
+	if (!LoadingBlockWorld->IsWorldLoadingComplete())
+	{
+		return;
 	}
 
 	constexpr float FadeDuration = 0.35f;
