@@ -392,7 +392,7 @@ void AOrakaiPlayerController::UpdateTerrainMaterialInspector()
 	const int32 MaterialId = ResolveRenderedTerrainMaterialId(Hit);
 	const FString MaterialName = MaterialId > 0 ? OrakaiTerrainInspector::ResolveMaterialName(MaterialId) : TEXT("Not a Cubus density triangle");
 	const FString Message = MaterialId > 0
-		? FString::Printf(TEXT("Terrain material: %s [ID %d"), *MaterialName, MaterialId)
+		? FString::Printf(TEXT("Terrain material: %s [ID %d]"), *MaterialName, MaterialId)
 		: FString::Printf(TEXT("Terrain material: %s | Actor: %s"), *MaterialName, *GetNameSafe(Hit.GetActor()));
 	GEngine->AddOnScreenDebugMessage(
 		OrakaiTerrainInspector::ScreenMessageKey, 0.0f,
