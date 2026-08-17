@@ -11,9 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-	// Bumped to 38: physical mountain relief reaches above the 1500 m snowline,
-	// with a 300 m climatic accumulation band instead of a raw voxel threshold.
-	static constexpr uint32 CurrentGenerationVersion = 38;
+	// Bumped to 39: runtime density can now consume the loader-authored physical
+	// DEM directly, so v38 density buffers/meshes must never be reused for a
+	// generated-world session with the same seed.
+	static constexpr uint32 CurrentGenerationVersion = 39;
 
 	int64 World		 = 1;
 	int32 Terrain	 = 0;
