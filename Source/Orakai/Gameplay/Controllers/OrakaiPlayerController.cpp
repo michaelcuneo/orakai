@@ -182,18 +182,28 @@ void AOrakaiPlayerController::InitializeWorldLoadingScreen()
 		LoadingBlockWorld = *Iterator;
 		break;
 	}
+
 	const bool bGeneratedWorld = FCubusGeneratedTerrainRuntime::IsActive();
-	if (!IsValid(LoadingBlockWorld) || (!bGeneratedWorld && LoadingBlockWorld->IsWorldLoadingComplete()))
+	if (!bGeneratedWorld && (!IsValid(LoadingBlockWorld) || LoadingBlockWorld->IsWorldLoadingComplete()))
 	{
 		return;
 	}
+
+	// A generated gameplay world must always show the spawn page immediately.
+	// Actor BeginPlay order is not guaranteed, so do not require BlockWorld to
+	// have been discoverable on this exact frame; UpdateWorldLoadingScreen will
+	// resolve it as soon as it exists.
 	WorldLoadingWidget = CreateWidget<UOrakaiWorldLoadingWidget>(this, UOrakaiWorldLoadingWidget::StaticClass());
 	if (!IsValid(WorldLoadingWidget))
 	{
 		return;
 	}
 	WorldLoadingWidget->AddToPlayerScreen(1000);
-	WorldLoadingWidget->SetLoadingState(0.0f, FText::FromString(TEXT("Choose a spawn location")));
+	WorldLoadingWidget->SetLoadingState(
+		0.0f,
+		bGeneratedWorld
+			? FText::FromString(TEXT("Choose a spawn location"))
+			: FText::FromString(TEXT("Preparing world")));
 	WorldLoadingWidget->SetSpawnSelectionAvailable(bGeneratedWorld);
 	WorldLoadingWidget->SetSpawnReady(false);
 	SetIgnoreMoveInput(true);
@@ -202,15 +212,39 @@ void AOrakaiPlayerController::InitializeWorldLoadingScreen()
 
 void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 {
-	if (!IsValid(WorldLoadingWidget) || !IsValid(LoadingBlockWorld))
+	if (!IsValid(WorldLoadingWidget))
 	{
 		return;
 	}
 
 	const bool bGeneratedWorld = FCubusGeneratedTerrainRuntime::IsActive();
+
+	if (!IsValid(LoadingBlockWorld) && IsValid(GetWorld()))
+	{
+		for (TActorIterator<ACubusBlockWorldActor> Iterator(GetWorld()); Iterator; ++Iterator)
+		{
+			if (IsValid(*Iterator))
+			{
+				LoadingBlockWorld = *Iterator;
+				break;
+			}
+		}
+	}
+
 	if (bGeneratedWorld)
 	{
 		WorldLoadingWidget->SetSpawnSelectionAvailable(true);
+
+		// Keep the spawn UI alive even if BlockWorld has not reached BeginPlay yet.
+		// The 3D DEM preview is independent of gameplay chunk construction.
+		if (!IsValid(LoadingBlockWorld))
+		{
+			WorldLoadingWidget->SetSpawnReady(false);
+			WorldLoadingWidget->SetLoadingState(
+				0.0f,
+				FText::FromString(TEXT("Waiting for gameplay terrain system")));
+			return;
+		}
 
 		ACubusTerrainLodWorldActor* LodWorld = nullptr;
 		for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(GetWorld()); Iterator; ++Iterator)
@@ -256,8 +290,6 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 				return;
 			}
 
-			// The GameMode has successfully replaced the hidden streaming pawn with
-			// the real OrakaiCharacter. Fade the spawn page away now.
 			WorldLoadingWidget->SetSpawnPromotionActive(true);
 			constexpr float GeneratedFadeDuration = 0.35f;
 			LoadingFadeElapsedSeconds += DeltaSeconds;
@@ -319,6 +351,11 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 		WorldLoadingWidget->SetLoadingState(
 			1.0f,
 			FText::FromString(TEXT("Selected spawn area ready")));
+		return;
+	}
+
+	if (!IsValid(LoadingBlockWorld))
+	{
 		return;
 	}
 
