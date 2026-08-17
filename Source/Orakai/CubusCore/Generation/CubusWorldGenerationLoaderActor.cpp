@@ -134,6 +134,18 @@ void ACubusWorldGenerationLoaderActor::BuildSettings()
     DrainageSettings.AnalysisCellSizeMeters = FMath::Max(2.0f, DrainageCellSizeMeters);
     DrainageSettings.StreamSourceAreaSquareKm = FMath::Max(0.001f, StreamSourceAreaSquareKm);
 
+    // For loader generation, align hydrology to the authored DEM instead of
+    // allowing an arbitrary region boundary through world XY zero. A 4 km map
+    // at the default 8 m analysis spacing fits in one 500 x 500 drainage domain.
+    const FBox2D Bounds = GetGenerationBoundsMeters();
+    const FVector2D Size = Bounds.GetSize();
+    const double LongestSideMeters = FMath::Max(Size.X, Size.Y);
+    const int32 RequiredCells = FMath::CeilToInt(
+        LongestSideMeters / static_cast<double>(DrainageSettings.AnalysisCellSizeMeters)
+    );
+    DrainageSettings.RegionCellCount = FMath::Clamp(RequiredCells, 32, 512);
+    DrainageSettings.RegionOriginMeters = Bounds.Min;
+
     CarvingSettings = FCubusTerrainCarvingSettings();
     CarvingSettings.Drainage = DrainageSettings;
 }
@@ -165,12 +177,12 @@ void ACubusWorldGenerationLoaderActor::BuildWorkQueues()
         static_cast<double>(DrainageSettings.AnalysisCellSizeMeters);
 
     const FIntPoint MinimumRegion(
-        FMath::FloorToInt(Bounds.Min.X / RegionSize),
-        FMath::FloorToInt(Bounds.Min.Y / RegionSize)
+        FMath::FloorToInt((Bounds.Min.X - DrainageSettings.RegionOriginMeters.X) / RegionSize),
+        FMath::FloorToInt((Bounds.Min.Y - DrainageSettings.RegionOriginMeters.Y) / RegionSize)
     );
     const FIntPoint MaximumRegion(
-        FMath::FloorToInt((Bounds.Max.X - UE_SMALL_NUMBER) / RegionSize),
-        FMath::FloorToInt((Bounds.Max.Y - UE_SMALL_NUMBER) / RegionSize)
+        FMath::FloorToInt((Bounds.Max.X - DrainageSettings.RegionOriginMeters.X - UE_SMALL_NUMBER) / RegionSize),
+        FMath::FloorToInt((Bounds.Max.Y - DrainageSettings.RegionOriginMeters.Y - UE_SMALL_NUMBER) / RegionSize)
     );
 
     for (int32 Y = MinimumRegion.Y; Y <= MaximumRegion.Y; ++Y)
@@ -205,6 +217,7 @@ void ACubusWorldGenerationLoaderActor::ProcessStructuralDEM()
 {
     if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
     {
+        RebuildTerrainPreview(false);
         UploadPreview();
         BeginStage(ECubusGenerationLoaderStage::Drainage);
         return;
@@ -220,6 +233,7 @@ void ACubusWorldGenerationLoaderActor::ProcessStructuralDEM()
 
     TerrainTiles.Add(TileCoordinate, Tile);
     PaintTileToPreview(Tile);
+    RebuildTerrainPreview(false);
     ++CurrentWorkIndex;
     SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
     UploadPreview();
@@ -239,7 +253,7 @@ void ACubusWorldGenerationLoaderActor::ProcessDrainage()
         static_cast<double>(FMath::Clamp(DrainageSettings.RegionCellCount, 32, 512)) *
         static_cast<double>(DrainageSettings.AnalysisCellSizeMeters);
 
-    const FVector2D Minimum(
+    const FVector2D Minimum = DrainageSettings.RegionOriginMeters + FVector2D(
         static_cast<double>(RegionCoordinate.X) * RegionSize,
         static_cast<double>(RegionCoordinate.Y) * RegionSize
     );
@@ -259,6 +273,7 @@ void ACubusWorldGenerationLoaderActor::ProcessTerrainCarving()
 {
     if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
     {
+        RebuildTerrainPreview(true);
         UploadPreview();
         FinishCurrentPipeline();
         return;
@@ -281,6 +296,7 @@ void ACubusWorldGenerationLoaderActor::ProcessTerrainCarving()
 
     *StructuralTile = MoveTemp(Carved);
     PaintTileToPreview(*StructuralTile);
+    RebuildTerrainPreview(true);
 
     ++CurrentWorkIndex;
     SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
@@ -329,24 +345,30 @@ void ACubusWorldGenerationLoaderActor::EnsurePreviewTexture()
         PreviewTexture->GetSizeX() == Resolution &&
         PreviewTexture->GetSizeY() == Resolution)
     {
+        if (PreviewHeightMeters.Num() != Resolution * Resolution)
+        {
+            PreviewHeightMeters.Init(MAX_flt, Resolution * Resolution);
+        }
         return;
     }
 
     PreviewTexture = UTexture2D::CreateTransient(Resolution, Resolution, PF_B8G8R8A8);
     if (PreviewTexture != nullptr)
     {
-        PreviewTexture->SRGB = false;
+        PreviewTexture->SRGB = true;
         PreviewTexture->Filter = TF_Bilinear;
         PreviewTexture->NeverStream = true;
         PreviewTexture->UpdateResource();
     }
 
+    PreviewHeightMeters.Init(MAX_flt, Resolution * Resolution);
     PreviewPixels.SetNumZeroed(Resolution * Resolution);
 }
 
 void ACubusWorldGenerationLoaderActor::ClearPreview()
 {
     EnsurePreviewTexture();
+    PreviewHeightMeters.Init(MAX_flt, PreviewPixels.Num());
     for (FColor& Pixel : PreviewPixels)
     {
         Pixel = FColor(8, 8, 8, 255);
@@ -388,9 +410,90 @@ void ACubusWorldGenerationLoaderActor::PaintTileToPreview(const FCubusTerrainRas
                 continue;
             }
 
-            const float Height = Tile.SampleHeightMeters(World.X, World.Y);
-            PreviewPixels[Y * Resolution + X] = HeightToPreviewColor(Height);
+            PreviewHeightMeters[Y * Resolution + X] = Tile.SampleHeightMeters(World.X, World.Y);
         }
+    }
+}
+
+void ACubusWorldGenerationLoaderActor::RebuildTerrainPreview(const bool bOverlayDrainage)
+{
+    const int32 Resolution = FMath::Clamp(PreviewTextureResolution, 64, 2048);
+    if (PreviewHeightMeters.Num() != Resolution * Resolution || PreviewPixels.Num() != Resolution * Resolution)
+    {
+        return;
+    }
+
+    float MinimumHeight = MAX_flt;
+    float MaximumHeight = -MAX_flt;
+    for (const float Height : PreviewHeightMeters)
+    {
+        if (Height == MAX_flt)
+        {
+            continue;
+        }
+        MinimumHeight = FMath::Min(MinimumHeight, Height);
+        MaximumHeight = FMath::Max(MaximumHeight, Height);
+    }
+
+    if (MinimumHeight == MAX_flt)
+    {
+        return;
+    }
+
+    // Always use the elevation range actually present in this generated map.
+    // A minimum span prevents tiny numerical variation becoming full contrast.
+    const float HeightSpan = FMath::Max(60.0f, MaximumHeight - MinimumHeight);
+    const FBox2D Bounds = GetGenerationBoundsMeters();
+    const FVector2D WorldSize = Bounds.GetSize();
+    const float PixelWorldX = static_cast<float>(WorldSize.X / FMath::Max(1, Resolution - 1));
+    const float PixelWorldY = static_cast<float>(WorldSize.Y / FMath::Max(1, Resolution - 1));
+    const FVector LightDirection = FVector(-0.48f, -0.36f, 0.80f).GetSafeNormal();
+
+    auto ReadHeight = [&](const int32 X, const int32 Y, const float Fallback)
+    {
+        const int32 SafeX = FMath::Clamp(X, 0, Resolution - 1);
+        const int32 SafeY = FMath::Clamp(Y, 0, Resolution - 1);
+        const float Height = PreviewHeightMeters[SafeY * Resolution + SafeX];
+        return Height == MAX_flt ? Fallback : Height;
+    };
+
+    for (int32 Y = 0; Y < Resolution; ++Y)
+    {
+        for (int32 X = 0; X < Resolution; ++X)
+        {
+            const int32 Index = Y * Resolution + X;
+            const float Height = PreviewHeightMeters[Index];
+            if (Height == MAX_flt)
+            {
+                PreviewPixels[Index] = FColor(8, 8, 8, 255);
+                continue;
+            }
+
+            float NormalizedHeight = FMath::Clamp((Height - MinimumHeight) / HeightSpan, 0.0f, 1.0f);
+            NormalizedHeight = NormalizedHeight * NormalizedHeight * (3.0f - 2.0f * NormalizedHeight);
+
+            float Hillshade = 1.0f;
+            if (bPreviewHillshade)
+            {
+                const float Left = ReadHeight(X - 1, Y, Height);
+                const float Right = ReadHeight(X + 1, Y, Height);
+                const float Up = ReadHeight(X, Y - 1, Height);
+                const float Down = ReadHeight(X, Y + 1, Height);
+                const float Dx = (Right - Left) / FMath::Max(1.0f, PixelWorldX * 2.0f);
+                const float Dy = (Down - Up) / FMath::Max(1.0f, PixelWorldY * 2.0f);
+                const FVector SurfaceNormal = FVector(-Dx, Dy, 1.0f).GetSafeNormal();
+                const float Lit = FMath::Clamp(FVector::DotProduct(SurfaceNormal, LightDirection), 0.0f, 1.0f);
+                const float RawShade = 0.32f + Lit * 0.88f;
+                Hillshade = FMath::Lerp(1.0f, RawShade, FMath::Clamp(PreviewHillshadeStrength, 0.0f, 1.0f));
+            }
+
+            PreviewPixels[Index] = HeightToPreviewColor(NormalizedHeight, Hillshade);
+        }
+    }
+
+    if (bOverlayDrainage)
+    {
+        DrawDrainageSegmentsToPreview(DrainageSegments);
     }
 }
 
@@ -416,13 +519,50 @@ void ACubusWorldGenerationLoaderActor::DrawDrainageSegmentsToPreview(
     }
 }
 
-FColor ACubusWorldGenerationLoaderActor::HeightToPreviewColor(const float HeightMeters) const
+FColor ACubusWorldGenerationLoaderActor::HeightToPreviewColor(
+    const float NormalizedHeight,
+    const float Hillshade
+) const
 {
-    const float MinHeight = FMath::Min(PreviewMinimumElevationMeters, PreviewMaximumElevationMeters - 1.0f);
-    const float MaxHeight = FMath::Max(PreviewMaximumElevationMeters, MinHeight + 1.0f);
-    const float T = FMath::Clamp((HeightMeters - MinHeight) / (MaxHeight - MinHeight), 0.0f, 1.0f);
-    const uint8 Value = static_cast<uint8>(FMath::RoundToInt(T * 255.0f));
-    return FColor(Value, Value, Value, 255);
+    const float T = FMath::Clamp(NormalizedHeight, 0.0f, 1.0f);
+
+    FLinearColor BaseColor;
+    if (T < 0.28f)
+    {
+        BaseColor = FMath::Lerp(
+            FLinearColor(0.055f, 0.12f, 0.07f),
+            FLinearColor(0.18f, 0.29f, 0.13f),
+            T / 0.28f
+        );
+    }
+    else if (T < 0.58f)
+    {
+        BaseColor = FMath::Lerp(
+            FLinearColor(0.18f, 0.29f, 0.13f),
+            FLinearColor(0.42f, 0.36f, 0.22f),
+            (T - 0.28f) / 0.30f
+        );
+    }
+    else if (T < 0.82f)
+    {
+        BaseColor = FMath::Lerp(
+            FLinearColor(0.42f, 0.36f, 0.22f),
+            FLinearColor(0.52f, 0.52f, 0.49f),
+            (T - 0.58f) / 0.24f
+        );
+    }
+    else
+    {
+        BaseColor = FMath::Lerp(
+            FLinearColor(0.52f, 0.52f, 0.49f),
+            FLinearColor(0.93f, 0.95f, 0.96f),
+            (T - 0.82f) / 0.18f
+        );
+    }
+
+    BaseColor *= FMath::Clamp(Hillshade, 0.18f, 1.25f);
+    BaseColor.A = 1.0f;
+    return BaseColor.ToFColorSRGB();
 }
 
 FIntPoint ACubusWorldGenerationLoaderActor::WorldToPreviewPixel(const FVector2D& WorldMeters) const
