@@ -6,21 +6,34 @@
 #include "GameFramework/GameModeBase.h"
 #include "OrakaiGameMode.generated.h"
 
+class APlayerController;
+class ACubusSpawnStreamingPawn;
+
 /**
- * Simple GameMode for a third person game.
+ * Third-person game mode with an explicit generated-world spawn lifecycle.
  *
- * Generated Cubus worlds prefer a designer-authored Cubus World Spawn Point
- * when one is present in the gameplay level. The block world subsequently
- * resolves the pawn vertically onto the streamed terrain surface.
+ * Ordinary authored levels retain the standard GameMode spawn path. When a
+ * generated DEM handoff is active, the controller enters the gameplay map
+ * without its character. A hidden streaming-focus pawn is created only after
+ * the player confirms a DEM position; the real character is created with
+ * RestartPlayerAtTransform after that location's density coverage is resident.
  */
 UCLASS(abstract)
 class AOrakaiGameMode : public AGameModeBase
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	AOrakaiGameMode();
+    AOrakaiGameMode();
+    virtual void Tick(float DeltaSeconds) override;
 
 protected:
-	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+    virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+
+private:
+    void TickGeneratedWorldSpawn();
+
+    TWeakObjectPtr<APlayerController> PendingGeneratedPlayer;
+    TWeakObjectPtr<ACubusSpawnStreamingPawn> SpawnStreamingPawn;
+    bool bGeneratedSpawnCompleted = false;
 };
