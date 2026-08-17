@@ -247,14 +247,16 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 
 void AOrakaiPlayerController::EnterWorldLoadingInputMode()
 {
-	if (!IsLocalPlayerController())
+	if (!IsLocalPlayerController() || !IsValid(WorldLoadingWidget))
 	{
 		return;
 	}
-	FInputModeGameAndUI LoadingInputMode;
-	LoadingInputMode.SetHideCursorDuringCapture(false);
+
+	FInputModeUIOnly LoadingInputMode;
+	LoadingInputMode.SetWidgetToFocus(WorldLoadingWidget->TakeWidget());
+	LoadingInputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(LoadingInputMode);
-	bShowMouseCursor = true;
+	SetShowMouseCursor(true);
 	bEnableClickEvents = true;
 	bEnableMouseOverEvents = true;
 }
@@ -267,7 +269,7 @@ void AOrakaiPlayerController::EnterGameplayInputMode()
 	}
 	FInputModeGameOnly GameInputMode;
 	SetInputMode(GameInputMode);
-	bShowMouseCursor = false;
+	SetShowMouseCursor(false);
 	bEnableClickEvents = false;
 	bEnableMouseOverEvents = false;
 }
