@@ -64,10 +64,10 @@ bool ResolveSectionAndFace(UProceduralMeshComponent* ProceduralMesh, const FHitR
 		if (RemainingFaceIndex < TriangleCount)
 		{
 			OutSection = Section;
-				OutFaceIndex = RemainingFaceIndex;
-				OutSectionIndex = SectionIndex;
-				return true;
-			}
+			OutFaceIndex = RemainingFaceIndex;
+			OutSectionIndex = SectionIndex;
+			return true;
+		}
 		RemainingFaceIndex -= TriangleCount;
 	}
 	return false;
@@ -168,6 +168,19 @@ void AOrakaiPlayerController::InitializeWorldLoadingScreen()
 	{
 		return;
 	}
+
+	// The world-generation map already has WBP_WorldGenerationLoader, including
+	// its own progress display, marker and SPAWN button. Never construct the old
+	// native loading/spawn widget in that world, even if a BlockWorld is already
+	// placed there. The Loader will run the terrain preload underneath the WBP.
+	for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(GetWorld()); Iterator; ++Iterator)
+	{
+		if (IsValid(*Iterator))
+		{
+			return;
+		}
+	}
+
 	for (TActorIterator<ACubusBlockWorldActor> Iterator(GetWorld()); Iterator; ++Iterator)
 	{
 		LoadingBlockWorld = *Iterator;
@@ -379,7 +392,7 @@ void AOrakaiPlayerController::UpdateTerrainMaterialInspector()
 	const int32 MaterialId = ResolveRenderedTerrainMaterialId(Hit);
 	const FString MaterialName = MaterialId > 0 ? OrakaiTerrainInspector::ResolveMaterialName(MaterialId) : TEXT("Not a Cubus density triangle");
 	const FString Message = MaterialId > 0
-		? FString::Printf(TEXT("Terrain material: %s [ID %d]"), *MaterialName, MaterialId)
+		? FString::Printf(TEXT("Terrain material: %s [ID %d"), *MaterialName, MaterialId)
 		: FString::Printf(TEXT("Terrain material: %s | Actor: %s"), *MaterialName, *GetNameSafe(Hit.GetActor()));
 	GEngine->AddOnScreenDebugMessage(
 		OrakaiTerrainInspector::ScreenMessageKey, 0.0f,
