@@ -1,15 +1,22 @@
 #include "CubusCore/Actors/CubusLandscapeEvolutionController.h"
 
-#include "ProceduralMeshComponent.h"
+#include "Engine/Engine.h"
 #include "Materials/MaterialInterface.h"
+#include "ProceduralMeshComponent.h"
 
 #if WITH_EDITOR
 #include "UObject/UnrealType.h"
 #endif
 
+namespace
+{
+constexpr uint64 LandscapeDiagnosticsMessageKey = 0xC0B05D01ull;
+}
+
 ACubusLandscapeEvolutionController::ACubusLandscapeEvolutionController()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
 	PreviewMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("PreviewMesh"));
 	SetRootComponent(PreviewMesh);
 	PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -29,7 +36,34 @@ void ACubusLandscapeEvolutionController::OnConstruction(const FTransform& Transf
 	}
 }
 
+void ACubusLandscapeEvolutionController::Tick(const float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (GEngine == nullptr)
+	{
+		return;
+	}
+
+	if (!bShowViewportDiagnostics)
+	{
+		GEngine->RemoveOnScreenDebugMessage(LandscapeDiagnosticsMessageKey);
+		return;
+	}
+
+	GEngine->AddOnScreenDebugMessage(
+		LandscapeDiagnosticsMessageKey,
+		0.2f,
+		FColor::Cyan,
+		BuildViewportDiagnosticsText());
+}
+
 #if WITH_EDITOR
+bool ACubusLandscapeEvolutionController::ShouldTickIfViewportsOnly() const
+{
+	return bShowViewportDiagnostics;
+}
+
 void ACubusLandscapeEvolutionController::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	const FName ChangedPropertyName = PropertyChangedEvent.Property != nullptr
@@ -196,6 +230,41 @@ bool ACubusLandscapeEvolutionController::HasGeneratedDem() const
 float ACubusLandscapeEvolutionController::SampleGlobalHeightMeters(const FVector2D WorldMeters) const
 {
 	return GlobalDem.SampleHeightBilinearM(WorldMeters);
+}
+
+FString ACubusLandscapeEvolutionController::BuildViewportDiagnosticsText() const
+{
+	const TCHAR* PreviewModeText = PreviewMode == ECubusLandscapePreviewMode::NativeDetail
+		? TEXT("Native Detail")
+		: TEXT("Full World Overview");
+
+	return FString::Printf(
+		TEXT("CUBUS LANDSCAPE\n")
+		TEXT("World: %.0f x %.0f km\n")
+		TEXT("Global DEM: %d x %d\n")
+		TEXT("Global cell: %.2f m\n")
+		TEXT("Preview: %s, %d x %d\n")
+		TEXT("Displayed cell: %.2f m\n")
+		TEXT("Window: %.2f km\n")
+		TEXT("Center: (%.0f, %.0f) m\n")
+		TEXT("Rivers: %d   Basins: %d\n")
+		TEXT("Max incision: %.2f m   Max |delta|: %.2f m"),
+		WorldSizeMeters / 1000.0,
+		WorldSizeMeters / 1000.0,
+		GlobalResolution,
+		GlobalResolution,
+		GlobalCellSizeM,
+		PreviewModeText,
+		PreviewResolution,
+		PreviewResolution,
+		PreviewDisplayedCellSizeM,
+		PreviewWindowSizeKm,
+		PreviewActualCenterWorldMeters.X,
+		PreviewActualCenterWorldMeters.Y,
+		GeneratedRiverCellCount,
+		GeneratedBasinCount,
+		MaximumStreamIncisionM,
+		MaximumAbsoluteElevationChangeM);
 }
 
 void ACubusLandscapeEvolutionController::UpdateDiagnostics(const CubusLandscapeEvolution::FGenerationStats& Stats)
