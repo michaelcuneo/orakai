@@ -48,6 +48,28 @@ void FCubusGeneratedTerrainRuntime::StoreTileIfActive(const FCubusTerrainRasterT
     State.Tiles.Add(Tile.GetTileCoordinate(), Tile);
 }
 
+void FCubusGeneratedTerrainRuntime::StoreGlobalDem(
+    const TSharedPtr<const CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe>& GlobalDem)
+{
+    if (!GlobalDem.IsValid() || !GlobalDem->IsValid())
+    {
+        return;
+    }
+
+    FWriteScopeLock Lock(StateLock);
+    if (!State.bActive)
+    {
+        return;
+    }
+    State.GlobalDem = GlobalDem;
+}
+
+bool FCubusGeneratedTerrainRuntime::HasGlobalDem()
+{
+    FReadScopeLock Lock(StateLock);
+    return State.bActive && State.GlobalDem.IsValid() && State.GlobalDem->IsValid();
+}
+
 void FCubusGeneratedTerrainRuntime::StorePreviewSnapshot(
     const int32 Resolution,
     const FBox2D& BoundsMeters,
@@ -192,7 +214,7 @@ void FCubusGeneratedTerrainRuntime::Reset()
 bool FCubusGeneratedTerrainRuntime::IsActive()
 {
     FReadScopeLock Lock(StateLock);
-    return State.bActive && !State.Tiles.IsEmpty();
+    return State.bActive && ((State.GlobalDem.IsValid() && State.GlobalDem->IsValid()) || !State.Tiles.IsEmpty());
 }
 
 int32 FCubusGeneratedTerrainRuntime::GetWorldSeed()
@@ -212,6 +234,17 @@ bool FCubusGeneratedTerrainRuntime::TrySampleHeightMetersLocked(
     float& OutHeightMeters
 )
 {
+    if (State.GlobalDem.IsValid() && State.GlobalDem->IsValid())
+    {
+        const double Half = State.GlobalDem->WorldSizeMeters * 0.5;
+        if (WorldMeters.X < -Half || WorldMeters.X > Half || WorldMeters.Y < -Half || WorldMeters.Y > Half)
+        {
+            return false;
+        }
+        OutHeightMeters = State.GlobalDem->SampleHeightBilinearM(WorldMeters);
+        return true;
+    }
+
     const FIntPoint TileCoordinate = FCubusTerrainRasterBuilder::WorldToTileCoordinate(
         WorldMeters.X,
         WorldMeters.Y,
@@ -234,7 +267,7 @@ bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
 )
 {
     FReadScopeLock Lock(StateLock);
-    if (!State.bActive || State.Tiles.IsEmpty())
+    if (!State.bActive || ((!State.GlobalDem.IsValid() || !State.GlobalDem->IsValid()) && State.Tiles.IsEmpty()))
     {
         return false;
     }
@@ -248,45 +281,28 @@ bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
     float HeightMeters = 0.0f;
     if (!TrySampleHeightMetersLocked(FVector2D(WorldMetersX, WorldMetersY), HeightMeters))
     {
-        OutSample = FCubusTerrainFormSample();
-        OutSample.Height = 0.0f;
-        OutSample.PlainsWeight = 1.0f;
-        OutSample.RollingWeight = 0.0f;
-        OutSample.MountainWeight = 0.0f;
-        return true;
+        return false;
     }
 
-    const FIntPoint TileCoordinate = FCubusTerrainRasterBuilder::WorldToTileCoordinate(
-        WorldMetersX,
-        WorldMetersY,
-        State.RasterSettings
-    );
-    const FCubusTerrainRasterTile* Tile = State.Tiles.Find(TileCoordinate);
-    if (Tile == nullptr || !Tile->IsValid())
-    {
-        OutSample = FCubusTerrainFormSample();
-        OutSample.Height = 0.0f;
-        OutSample.PlainsWeight = 1.0f;
-        OutSample.RollingWeight = 0.0f;
-        OutSample.MountainWeight = 0.0f;
-        return true;
-    }
+    const double ProbeMeters = State.GlobalDem.IsValid() && State.GlobalDem->IsValid()
+        ? FMath::Max(State.GlobalDem->CellSizeMeters, VoxelSizeMeters)
+        : FMath::Max(static_cast<double>(State.RasterSettings.SampleSpacingMeters), VoxelSizeMeters);
 
-    const float HeightVoxels = HeightMeters / static_cast<float>(VoxelSizeMeters);
-    OutSample = FCubusTerrainFormSample();
-    OutSample.Height = HeightVoxels;
+    float Left = HeightMeters;
+    float Right = HeightMeters;
+    float Down = HeightMeters;
+    float Up = HeightMeters;
+    TrySampleHeightMetersLocked(FVector2D(WorldMetersX - ProbeMeters, WorldMetersY), Left);
+    TrySampleHeightMetersLocked(FVector2D(WorldMetersX + ProbeMeters, WorldMetersY), Right);
+    TrySampleHeightMetersLocked(FVector2D(WorldMetersX, WorldMetersY - ProbeMeters), Down);
+    TrySampleHeightMetersLocked(FVector2D(WorldMetersX, WorldMetersY + ProbeMeters), Up);
 
-    const double ProbeMeters = FMath::Max(
-        static_cast<double>(State.RasterSettings.SampleSpacingMeters),
-        VoxelSizeMeters
-    );
-    const float Left = Tile->SampleHeightMeters(WorldMetersX - ProbeMeters, WorldMetersY);
-    const float Right = Tile->SampleHeightMeters(WorldMetersX + ProbeMeters, WorldMetersY);
-    const float Down = Tile->SampleHeightMeters(WorldMetersX, WorldMetersY - ProbeMeters);
-    const float Up = Tile->SampleHeightMeters(WorldMetersX, WorldMetersY + ProbeMeters);
     const float Dx = (Right - Left) / static_cast<float>(ProbeMeters * 2.0);
     const float Dy = (Up - Down) / static_cast<float>(ProbeMeters * 2.0);
     const float Slope = FMath::Sqrt(Dx * Dx + Dy * Dy);
+
+    OutSample = FCubusTerrainFormSample();
+    OutSample.Height = HeightMeters / static_cast<float>(VoxelSizeMeters);
 
     const float MountainWeight = FMath::Clamp((HeightMeters - 550.0f) / 1300.0f, 0.0f, 1.0f);
     const float PlainsWeight = FMath::Clamp(1.0f - Slope / 0.18f, 0.0f, 1.0f) * (1.0f - MountainWeight);
