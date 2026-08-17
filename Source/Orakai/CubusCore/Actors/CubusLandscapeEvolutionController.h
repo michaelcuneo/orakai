@@ -66,7 +66,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "2", ClampMax = "30"))
 	int32 PlateCount = 18;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "0.01", Units = "km^2"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "0.01"))
 	float RiverSourceAreaKm2 = 20.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "17", ClampMax = "513"))
