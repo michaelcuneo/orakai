@@ -34,7 +34,17 @@ struct ORAKAI_API FCubusTerrainCarvingSettings
     /** Area response curve. 1 gives linear area scaling; <1 broadens tributaries. */
     float AreaExponent = 0.38f;
 
-    /** Maximum number of nearby drainage segments considered per raster sample. */
+    /**
+     * Spatial-index cell width used while projecting river segments onto the
+     * 1 m DEM. This is a performance control only; it never caps or changes
+     * the set of segments allowed to influence a terrain sample.
+     */
+    float SegmentBucketSizeMeters = 96.0f;
+
+    /**
+     * Retained for source compatibility with older settings. No longer used as
+     * a correctness-affecting early-out; the spatial index replaces that cap.
+     */
     int32 MaxNearbySegments = 24;
 };
 
