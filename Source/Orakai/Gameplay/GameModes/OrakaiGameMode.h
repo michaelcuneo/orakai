@@ -18,7 +18,7 @@ class ACubusSpawnStreamingPawn;
  * the player confirms a DEM position; the real character is created with
  * RestartPlayerAtTransform after that location's density coverage is resident.
  */
-UCLASS(abstract)
+UCLASS()
 class AOrakaiGameMode : public AGameModeBase
 {
     GENERATED_BODY()
