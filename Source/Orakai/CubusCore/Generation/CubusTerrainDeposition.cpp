@@ -1,22 +1,10 @@
 #include "CubusCore/Generation/CubusTerrainDeposition.h"
 
-namespace CubusTerrainDeposition
-{
-    float HeightAt(const TArray<float>& Heights, const int32 Size, const int32 X, const int32 Y)
-    {
-        const int32 SafeX = FMath::Clamp(X, 0, Size - 1);
-        const int32 SafeY = FMath::Clamp(Y, 0, Size - 1);
-        return Heights[SafeY * Size + SafeX];
-    }
-}
-
 FCubusTerrainRasterTile FCubusTerrainDeposition::DepositTile(
     const FCubusTerrainRasterTile& ErodedTile,
     const FCubusTerrainDepositionSettings& InSettings
 )
 {
-    using namespace CubusTerrainDeposition;
-
     if (!ErodedTile.IsValid())
     {
         return ErodedTile;
@@ -36,28 +24,36 @@ FCubusTerrainRasterTile FCubusTerrainDeposition::DepositTile(
     const float MaxRiseAtSlope = FMath::Tan(FMath::DegreesToRadians(Settings.MaximumDepositionSlopeDegrees)) * CellSize;
 
     TArray<float> Current = Result.HeightMeters;
-    TArray<float> Next;
-    Next.SetNumUninitialized(Current.Num());
+
+    // Preserve the original halo in both buffers once. Each iteration expands
+    // the processed interior as Margin shrinks, so every potentially stale cell
+    // in the alternate buffer is overwritten before the next swap can expose it.
+    TArray<float> Next = Current;
 
     for (int32 Iteration = 0; Iteration < Settings.Iterations; ++Iteration)
     {
-        Next = Current;
         const int32 Margin = Settings.Iterations - Iteration;
+        const float* CurrentData = Current.GetData();
+        float* NextData = Next.GetData();
 
         for (int32 Y = Margin; Y < Size - Margin; ++Y)
         {
+            const int32 Row = Y * Size;
+            const int32 PreviousRow = Row - Size;
+            const int32 FollowingRow = Row + Size;
+
             for (int32 X = Margin; X < Size - Margin; ++X)
             {
-                const int32 Index = Y * Size + X;
-                const float Centre = Current[Index];
-                const float Left = HeightAt(Current, Size, X - 1, Y);
-                const float Right = HeightAt(Current, Size, X + 1, Y);
-                const float Up = HeightAt(Current, Size, X, Y - 1);
-                const float Down = HeightAt(Current, Size, X, Y + 1);
-                const float UL = HeightAt(Current, Size, X - 1, Y - 1);
-                const float UR = HeightAt(Current, Size, X + 1, Y - 1);
-                const float DL = HeightAt(Current, Size, X - 1, Y + 1);
-                const float DR = HeightAt(Current, Size, X + 1, Y + 1);
+                const int32 Index = Row + X;
+                const float Centre = CurrentData[Index];
+                const float Left = CurrentData[Index - 1];
+                const float Right = CurrentData[Index + 1];
+                const float Up = CurrentData[PreviousRow + X];
+                const float Down = CurrentData[FollowingRow + X];
+                const float UL = CurrentData[PreviousRow + X - 1];
+                const float UR = CurrentData[PreviousRow + X + 1];
+                const float DL = CurrentData[FollowingRow + X - 1];
+                const float DR = CurrentData[FollowingRow + X + 1];
 
                 const float Mean4 = (Left + Right + Up + Down) * 0.25f;
                 const float Mean8 = (Left + Right + Up + Down + UL + UR + DL + DR) * 0.125f;
@@ -65,7 +61,11 @@ FCubusTerrainRasterTile FCubusTerrainDeposition::DepositTile(
                 const float Dx = (Right - Left) * 0.5f;
                 const float Dy = (Down - Up) * 0.5f;
                 const float LocalRise = FMath::Sqrt(Dx * Dx + Dy * Dy);
-                const float SlopeAcceptance = 1.0f - FMath::Clamp(LocalRise / FMath::Max(0.001f, MaxRiseAtSlope), 0.0f, 1.0f);
+                const float SlopeAcceptance = 1.0f - FMath::Clamp(
+                    LocalRise / FMath::Max(0.001f, MaxRiseAtSlope),
+                    0.0f,
+                    1.0f
+                );
 
                 // Positive where the sample sits below its surrounding terrain.
                 const float Concavity = FMath::Max(0.0f, Mean8 - Centre);
@@ -92,7 +92,7 @@ FCubusTerrainRasterTile FCubusTerrainDeposition::DepositTile(
                 // Never erase the broad relief by allowing this local process to
                 // jump above its immediate four-neighbour envelope.
                 const float LocalCeiling = FMath::Max(FMath::Max(Left, Right), FMath::Max(Up, Down));
-                Next[Index] = FMath::Min(NewHeight, LocalCeiling);
+                NextData[Index] = FMath::Min(NewHeight, LocalCeiling);
             }
         }
 
