@@ -74,7 +74,9 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 
 	const double Start = FPlatformTime::Seconds();
 	const int32 N = InOutDem.NumCells();
+	const TArray<float> StartingElevation = InOutDem.ElevationM;
 	InOutDem.StreamIncisionM.Init(0.0f, N);
+	InOutDem.EvolutionDeltaM.Init(0.0f, N);
 	TArray<float> BeforeIncision;
 	TArray<float> Diffused;
 	BeforeIncision.SetNumUninitialized(N);
@@ -105,9 +107,6 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 
 		BeforeIncision = InOutDem.ElevationM;
 
-		// FastScape-style implicit stream-power update for n = 1. Receivers must
-		// already be solved. Processing low-to-high hydrological elevation means
-		// the downstream elevation in the equation is the current iteration's value.
 		TArray<int32> DownstreamFirst;
 		DownstreamFirst.SetNumUninitialized(N);
 		for (int32 I = 0; I < N; ++I)
@@ -137,13 +136,7 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 			}
 
 			const float DistanceM = FMath::Max(1.0f, ReceiverDistanceMeters(InOutDem, Cell, Receiver));
-
-			// DrainageAreaKm2 is deliberately stored in km^2 for hydrology/debugging,
-			// but the stream-power coefficient K is parameterized against SI area.
-			// Convert to m^2 here. With m=0.5, failing to do this weakens incision by
-			// exactly 1000x and makes a correctly-running evolution pass look inert.
 			const double AreaM2 = FMath::Max(1.0, static_cast<double>(InOutDem.DrainageAreaKm2[Cell]) * 1000000.0);
-
 			const EProvinceType Province = InOutDem.ProvinceId.IsValidIndex(Cell)
 				? static_cast<EProvinceType>(InOutDem.ProvinceId[Cell])
 				: EProvinceType::StablePlain;
@@ -162,9 +155,6 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 			++IncisionSamples;
 		}
 
-		// Hillslope transport. The timestep is clamped to the explicit diffusion
-		// stability limit for this grid. Nonlinear boosting approaches the local
-		// province's critical slope but is capped so cliffs do not explode numerically.
 		Diffused = InOutDem.ElevationM;
 		const double Dx = FMath::Max(1.0, InOutDem.CellSizeMeters);
 		const double Dx2 = Dx * Dx;
@@ -212,6 +202,21 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 		return false;
 	}
 
+	double TotalAbsoluteChange = 0.0;
+	float MaximumAbsoluteChange = 0.0f;
+	float MaximumLowering = 0.0f;
+	float MaximumRaising = 0.0f;
+	for (int32 Cell = 0; Cell < N; ++Cell)
+	{
+		const float Delta = InOutDem.ElevationM[Cell] - StartingElevation[Cell];
+		InOutDem.EvolutionDeltaM[Cell] = Delta;
+		const float Absolute = FMath::Abs(Delta);
+		MaximumAbsoluteChange = FMath::Max(MaximumAbsoluteChange, Absolute);
+		MaximumLowering = FMath::Max(MaximumLowering, -Delta);
+		MaximumRaising = FMath::Max(MaximumRaising, Delta);
+		TotalAbsoluteChange += Absolute;
+	}
+
 	if (OutStats)
 	{
 		OutStats->CellCount = N;
@@ -219,6 +224,10 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 		OutStats->EvolutionSeconds = FPlatformTime::Seconds() - Start;
 		OutStats->MaximumStreamIncisionM = MaximumIncision;
 		OutStats->MeanStreamIncisionM = IncisionSamples > 0 ? static_cast<float>(TotalIncision / static_cast<double>(IncisionSamples)) : 0.0f;
+		OutStats->MaximumAbsoluteElevationChangeM = MaximumAbsoluteChange;
+		OutStats->MeanAbsoluteElevationChangeM = N > 0 ? static_cast<float>(TotalAbsoluteChange / static_cast<double>(N)) : 0.0f;
+		OutStats->MaximumTerrainLoweringM = MaximumLowering;
+		OutStats->MaximumTerrainRaisingM = MaximumRaising;
 		OutStats->BasinCount = FinalHydrologyStats.BasinCount;
 		OutStats->RiverCellCount = FinalHydrologyStats.RiverCellCount;
 		OutStats->MaximumDrainageAreaKm2 = FinalHydrologyStats.MaximumDrainageAreaKm2;
