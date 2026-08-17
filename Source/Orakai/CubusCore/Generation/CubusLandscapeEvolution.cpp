@@ -9,7 +9,7 @@ namespace
 {
 constexpr int32 D8X[8] = {1, 1, 0, -1, -1, -1, 0, 1};
 constexpr int32 D8Y[8] = {0, 1, 1, 1, 0, -1, -1, -1};
-constexpr double SqrtTwo = 1.4142135623730950488;
+constexpr double LandscapeSqrtTwo = 1.4142135623730950488;
 
 float Hash01(uint32 V)
 {
@@ -48,10 +48,16 @@ float LongWaveField(const FVector2D& WorldMeters, const FSettings& Settings)
 	const double MidWavelength = 0.5 * (Settings.LongWaveMinM + Settings.LongWaveMaxM);
 	const double Scale = FMath::Max(1.0, MidWavelength);
 	const FVector2D P = WorldMeters / Scale;
-	return 0.65f * ValueNoise2D(P, Settings.Seed + 911) + 0.35f * ValueNoise2D(P * 0.47, Settings.Seed + 2719);
+	return 0.65f * ValueNoise2D(P, Settings.Seed + 911) +
+		0.35f * ValueNoise2D(P * 0.47, Settings.Seed + 2719);
 }
 
-EBoundaryType ClassifyBoundary(const FPlate& A, const FPlate& B, const FVector2D& FromAToB, float& OutNormal, float& OutTangent)
+EBoundaryType ClassifyBoundary(
+	const FPlate& A,
+	const FPlate& B,
+	const FVector2D& FromAToB,
+	float& OutNormal,
+	float& OutTangent)
 {
 	const FVector2D N = FromAToB.GetSafeNormal();
 	const FVector2D T(-N.Y, N.X);
@@ -79,6 +85,7 @@ float BoundaryContribution(const EBoundaryType Type, const float DistanceM, cons
 	const float Width = FMath::Max(1000.0f, Settings.BoundaryWidthM);
 	const float X = DistanceM / Width;
 	const float W = FMath::Exp(-X * X * 2.0f);
+
 	switch (Type)
 	{
 	case EBoundaryType::Convergent:
@@ -98,7 +105,10 @@ float EdgeOceanMask(const FVector2D& WorldMeters, const FSettings& Settings)
 	const double Dx = Half - FMath::Abs(WorldMeters.X);
 	const double Dy = Half - FMath::Abs(WorldMeters.Y);
 	const double EdgeDistance = FMath::Min(Dx, Dy);
-	return 1.0f - FMath::Clamp(static_cast<float>(EdgeDistance / FMath::Max(1.0f, Settings.CoastalMarginM)), 0.0f, 1.0f);
+	return 1.0f - FMath::Clamp(
+		static_cast<float>(EdgeDistance / FMath::Max(1.0f, Settings.CoastalMarginM)),
+		0.0f,
+		1.0f);
 }
 
 uint64 PairKey(const uint8 A, const uint8 B)
@@ -108,11 +118,18 @@ uint64 PairKey(const uint8 A, const uint8 B)
 	return (static_cast<uint64>(Lo) << 32) | static_cast<uint64>(Hi);
 }
 
+int32 SymmetricBoundarySeed(const FSettings& Settings, const int32 A, const int32 B)
+{
+	const int32 Lo = FMath::Min(A, B);
+	const int32 Hi = FMath::Max(A, B);
+	return Settings.Seed + Lo * 97 + Hi * 211;
+}
+
 double ReceiverDistanceMeters(const FGlobalDem& Dem, const int32 Cell, const int32 Receiver)
 {
 	const FIntPoint A = Dem.Coordinates(Cell);
 	const FIntPoint B = Dem.Coordinates(Receiver);
-	return Dem.CellSizeMeters * ((A.X != B.X && A.Y != B.Y) ? SqrtTwo : 1.0);
+	return Dem.CellSizeMeters * ((A.X != B.X && A.Y != B.Y) ? LandscapeSqrtTwo : 1.0);
 }
 }
 
@@ -160,6 +177,7 @@ float FGlobalDem::SampleHeightBilinearM(const FVector2D& WorldMeters) const
 	{
 		return 0.0f;
 	}
+
 	const double Half = WorldSizeMeters * 0.5;
 	const double U = FMath::Clamp((WorldMeters.X + Half) / WorldSizeMeters, 0.0, 1.0) * (Resolution - 1);
 	const double V = FMath::Clamp((WorldMeters.Y + Half) / WorldSizeMeters, 0.0, 1.0) * (Resolution - 1);
@@ -204,9 +222,14 @@ FProvinceParameters FGenerator::GetDefaultProvinceParameters(const EProvinceType
 	return Result;
 }
 
-bool FGenerator::GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem, FGenerationStats* OutStats, FString* OutError)
+bool FGenerator::GenerateSkeleton(
+	const FSettings& Settings,
+	FGlobalDem& OutDem,
+	FGenerationStats* OutStats,
+	FString* OutError)
 {
-	if (Settings.Resolution < 17 || Settings.PlateCount < 2 || Settings.PlateCount > 255 || Settings.WorldSizeMeters <= 0.0)
+	if (Settings.Resolution < 17 || Settings.PlateCount < 2 || Settings.PlateCount > 255 ||
+		Settings.WorldSizeMeters <= 0.0 || Settings.CrustBlendScaleM <= 0.0f)
 	{
 		if (OutError)
 		{
@@ -254,11 +277,11 @@ bool FGenerator::GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem,
 	const int32 R = Settings.Resolution;
 	const double Half = Settings.WorldSizeMeters * 0.5;
 	const double InvIntervals = 1.0 / static_cast<double>(R - 1);
+	const double CrustSigma01 = FMath::Max(1.0, static_cast<double>(Settings.CrustBlendScaleM)) /
+		Settings.WorldSizeMeters;
+	const double InvTwoCrustSigmaSq = 1.0 / (2.0 * CrustSigma01 * CrustSigma01);
 
-	// Every cell is independent here. At 4097^2 with ~18 plates this is roughly
-	// 302 million distance checks, so leaving this serial wastes most of the CPU.
-	// The plate array is immutable and every worker writes a unique cell.
-	ParallelFor(CellCount, [&OutDem, &Settings, R, Half, InvIntervals](const int32 Cell)
+	ParallelFor(CellCount, [&OutDem, &Settings, R, Half, InvIntervals, InvTwoCrustSigmaSq](const int32 Cell)
 	{
 		const int32 X = Cell % R;
 		const int32 Y = Cell / R;
@@ -273,9 +296,20 @@ bool FGenerator::GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem,
 		int32 Second = INDEX_NONE;
 		double ClosestD2 = TNumericLimits<double>::Max();
 		double SecondD2 = TNumericLimits<double>::Max();
+		double CrustWeightSum = 0.0;
+		double CrustElevationWeighted = 0.0;
+
 		for (int32 P = 0; P < OutDem.Plates.Num(); ++P)
 		{
-			const double D2 = FVector2D::DistSquared(P01, OutDem.Plates[P].Center01);
+			const FPlate& Candidate = OutDem.Plates[P];
+			const double D2 = FVector2D::DistSquared(P01, Candidate.Center01);
+
+			// Plate ownership remains categorical for geology/province identity, but
+			// crustal base elevation is explicitly continuous across every boundary.
+			const double Weight = FMath::Exp(-D2 * InvTwoCrustSigmaSq);
+			CrustWeightSum += Weight;
+			CrustElevationWeighted += Weight * static_cast<double>(Candidate.BaseElevationM);
+
 			if (D2 < ClosestD2)
 			{
 				SecondD2 = ClosestD2;
@@ -301,8 +335,15 @@ bool FGenerator::GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem,
 		const double ClosestD = FMath::Sqrt(ClosestD2) * Settings.WorldSizeMeters;
 		const double SecondD = FMath::Sqrt(SecondD2) * Settings.WorldSizeMeters;
 		float BoundaryDistanceM = static_cast<float>(0.5 * FMath::Abs(SecondD - ClosestD));
-		const float Warp = ValueNoise2D(WorldMeters / 35000.0, Settings.Seed + Closest * 97 + Second * 211);
-		BoundaryDistanceM = FMath::Max(0.0f, BoundaryDistanceM + Warp * Settings.BoundaryWarpAmplitudeM);
+
+		// The same physical plate pair must receive the same warp from either side
+		// of its ownership boundary. Ordering the IDs prevents a seam here.
+		const float Warp = ValueNoise2D(
+			WorldMeters / 35000.0,
+			SymmetricBoundarySeed(Settings, Closest, Second));
+		BoundaryDistanceM = FMath::Max(
+			0.0f,
+			BoundaryDistanceM + Warp * Settings.BoundaryWarpAmplitudeM);
 
 		float Uplift = BoundaryContribution(Type, BoundaryDistanceM, Settings);
 		if (Type == EBoundaryType::Convergent)
@@ -328,7 +369,10 @@ bool FGenerator::GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem,
 		}
 
 		const float WeakRelief = LongWaveField(WorldMeters, Settings) * Settings.LongWaveAmplitudeM;
-		float Elevation = Plate.BaseElevationM + Uplift + WeakRelief;
+		const float ContinuousBaseElevation = CrustWeightSum > SMALL_NUMBER
+			? static_cast<float>(CrustElevationWeighted / CrustWeightSum)
+			: 250.0f;
+		float Elevation = ContinuousBaseElevation + Uplift + WeakRelief;
 		Elevation = FMath::Lerp(Elevation, Settings.OceanFloorM, OceanMask * OceanMask);
 
 		OutDem.ElevationM[Cell] = Elevation;
@@ -346,9 +390,6 @@ bool FGenerator::GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem,
 		MaxElevation = FMath::Max(MaxElevation, Elevation);
 	}
 
-	// Boundary metadata is derived from actual ownership adjacency after the
-	// parallel raster pass. This removes the shared TMap write from the hot loop
-	// and makes the expensive cell evaluation embarrassingly parallel.
 	TMap<uint64, FPlateBoundary> BoundaryMap;
 	auto AddBoundaryPair = [&OutDem, &Settings, &BoundaryMap](const uint8 PlateAId, const uint8 PlateBId)
 	{
@@ -406,7 +447,11 @@ bool FGenerator::GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem,
 	return true;
 }
 
-bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem, FGenerationStats* OutStats, FString* OutError)
+bool FGenerator::SolveHydrology(
+	const FSettings& Settings,
+	FGlobalDem& InOutDem,
+	FGenerationStats* OutStats,
+	FString* OutError)
 {
 	if (!InOutDem.IsValid() || InOutDem.Resolution != Settings.Resolution)
 	{
@@ -420,7 +465,8 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 	const double Start = FPlatformTime::Seconds();
 	const int32 N = InOutDem.NumCells();
 	const int32 R = InOutDem.Resolution;
-	const float CellAreaKm2 = static_cast<float>((InOutDem.CellSizeMeters * InOutDem.CellSizeMeters) / 1000000.0);
+	const float CellAreaKm2 = static_cast<float>(
+		(InOutDem.CellSizeMeters * InOutDem.CellSizeMeters) / 1000000.0);
 
 	InOutDem.HydrologyElevationM = InOutDem.ElevationM;
 	InOutDem.Receiver.Init(INDEX_NONE, N);
@@ -452,8 +498,6 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 		Heap.HeapPush({InOutDem.HydrologyElevationM[Cell], Cell});
 	};
 
-	// Seed only the perimeter: O(R), rather than scanning the full R^2 grid just
-	// to discover the boundary cells.
 	for (int32 X = 0; X < R; ++X)
 	{
 		PushBoundary(X, 0);
@@ -478,20 +522,21 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 			{
 				continue;
 			}
+
 			const int32 Neighbor = InOutDem.Index(NX, NY);
 			if (Visited[Neighbor])
 			{
 				continue;
 			}
 			Visited[Neighbor] = true;
-			const float Raised = FMath::Max(InOutDem.HydrologyElevationM[Neighbor], Node.Elevation + Settings.PriorityFloodEpsilonM);
+			const float Raised = FMath::Max(
+				InOutDem.HydrologyElevationM[Neighbor],
+				Node.Elevation + Settings.PriorityFloodEpsilonM);
 			InOutDem.HydrologyElevationM[Neighbor] = Raised;
 			Heap.HeapPush({Raised, Neighbor});
 		}
 	}
 
-	// Receiver selection is independent per cell once Priority-Flood has produced
-	// the strictly drainable hydrological surface.
 	ParallelFor(N, [&InOutDem, R](const int32 Cell)
 	{
 		const int32 X = Cell % R;
@@ -516,9 +561,6 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 		InOutDem.Receiver[Cell] = Best;
 	});
 
-	// Build a source-to-outlet topological order with Kahn's algorithm. D8 limits
-	// the number of direct upstream neighbours to eight, so uint8 is sufficient.
-	// This replaces the former 16.8-million-element comparison sort at 4097^2.
 	TArray<uint8> UpstreamCount;
 	UpstreamCount.Init(0, N);
 	for (int32 Cell = 0; Cell < N; ++Cell)
@@ -562,7 +604,10 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 	{
 		if (OutError)
 		{
-			*OutError = FString::Printf(TEXT("Hydrology receiver graph is not acyclic: ordered %d of %d cells."), InOutDem.FlowOrder.Num(), N);
+			*OutError = FString::Printf(
+				TEXT("Hydrology receiver graph is not acyclic: ordered %d of %d cells."),
+				InOutDem.FlowOrder.Num(),
+				N);
 		}
 		return false;
 	}
@@ -580,10 +625,6 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 		}
 	}
 
-	// Reverse topological propagation is outlet-to-source. Each receiver is
-	// therefore already assigned when its upstream cell is visited, giving basin
-	// identity and distance-to-outlet in O(N). The old implementation walked the
-	// entire downstream path independently from every cell.
 	int32 BasinCounter = 0;
 	for (int32 OrderIndex = InOutDem.FlowOrder.Num() - 1; OrderIndex >= 0; --OrderIndex)
 	{
