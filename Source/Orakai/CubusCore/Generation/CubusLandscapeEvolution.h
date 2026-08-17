@@ -106,6 +106,10 @@ struct FGenerationStats
 	float MaximumDrainageAreaKm2 = 0.0f;
 	float MaximumStreamIncisionM = 0.0f;
 	float MeanStreamIncisionM = 0.0f;
+	float MaximumAbsoluteElevationChangeM = 0.0f;
+	float MeanAbsoluteElevationChangeM = 0.0f;
+	float MaximumTerrainLoweringM = 0.0f;
+	float MaximumTerrainRaisingM = 0.0f;
 };
 
 struct FGlobalDem
@@ -124,6 +128,10 @@ struct FGlobalDem
 	TArray<float> DrainageAreaKm2;
 	TArray<float> DistanceToOutletKm;
 	TArray<float> StreamIncisionM;
+	// Final elevation minus the elevation at the start of the most recent
+	// EvolveLandscape call. Negative values are net lowering; positive values
+	// are net raising from uplift/hillslope transport.
+	TArray<float> EvolutionDeltaM;
 	TArray<int32> Receiver;
 	TArray<int32> BasinId;
 	TArray<int32> FlowOrder;
