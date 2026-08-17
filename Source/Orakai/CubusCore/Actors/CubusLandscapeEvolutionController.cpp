@@ -33,6 +33,13 @@ CubusLandscapeEvolution::FSettings ACubusLandscapeEvolutionController::MakeSetti
 	Settings.WorldSizeMeters = WorldSizeMeters;
 	Settings.PlateCount = PlateCount;
 	Settings.RiverSourceAreaKm2 = RiverSourceAreaKm2;
+	Settings.EvolutionIterations = EvolutionIterations;
+	Settings.EvolutionStepYears = EvolutionStepYears;
+	Settings.StreamPowerK = StreamPowerK;
+	Settings.StreamPowerM = StreamPowerM;
+	Settings.BaseUpliftRateMPerYear = BaseUpliftRateMPerYear;
+	Settings.HillslopeDiffusivityM2PerYear = HillslopeDiffusivityM2PerYear;
+	Settings.HydrologyRefreshInterval = HydrologyRefreshInterval;
 	return Settings;
 }
 
@@ -62,6 +69,19 @@ void ACubusLandscapeEvolutionController::SolveGlobalHydrology()
 	RebuildPreview();
 }
 
+void ACubusLandscapeEvolutionController::EvolveLandscape()
+{
+	CubusLandscapeEvolution::FGenerationStats Stats;
+	FString Error;
+	if (!CubusLandscapeEvolution::FGenerator::EvolveLandscape(MakeSettings(), GlobalDem, &Stats, &Error))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cubus landscape evolution failed: %s"), *Error);
+		return;
+	}
+	UpdateDiagnostics(Stats);
+	RebuildPreview();
+}
+
 void ACubusLandscapeEvolutionController::GenerateAndSolve()
 {
 	CubusLandscapeEvolution::FGenerationStats Stats;
@@ -75,6 +95,30 @@ void ACubusLandscapeEvolutionController::GenerateAndSolve()
 	if (!CubusLandscapeEvolution::FGenerator::SolveHydrology(Settings, GlobalDem, &Stats, &Error))
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cubus landscape hydrology solve failed: %s"), *Error);
+		return;
+	}
+	UpdateDiagnostics(Stats);
+	RebuildPreview();
+}
+
+void ACubusLandscapeEvolutionController::GenerateSolveAndEvolve()
+{
+	CubusLandscapeEvolution::FGenerationStats Stats;
+	FString Error;
+	const CubusLandscapeEvolution::FSettings Settings = MakeSettings();
+	if (!CubusLandscapeEvolution::FGenerator::GenerateSkeleton(Settings, GlobalDem, &Stats, &Error))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cubus landscape skeleton generation failed: %s"), *Error);
+		return;
+	}
+	if (!CubusLandscapeEvolution::FGenerator::SolveHydrology(Settings, GlobalDem, &Stats, &Error))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cubus landscape hydrology solve failed: %s"), *Error);
+		return;
+	}
+	if (!CubusLandscapeEvolution::FGenerator::EvolveLandscape(Settings, GlobalDem, &Stats, &Error))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cubus landscape evolution failed: %s"), *Error);
 		return;
 	}
 	UpdateDiagnostics(Stats);
@@ -103,6 +147,11 @@ void ACubusLandscapeEvolutionController::UpdateDiagnostics(const CubusLandscapeE
 	{
 		GeneratedRiverCellCount = Stats.RiverCellCount;
 		GeneratedBasinCount = Stats.BasinCount;
+	}
+	if (Stats.EvolutionIterations > 0)
+	{
+		MaximumStreamIncisionM = Stats.MaximumStreamIncisionM;
+		MeanStreamIncisionM = Stats.MeanStreamIncisionM;
 	}
 }
 
@@ -156,6 +205,13 @@ FLinearColor ACubusLandscapeEvolutionController::DebugColorForCell(const int32 C
 		const float E = GlobalDem.ElevationM[Cell];
 		return E <= GlobalDem.OceanLevelM ? FLinearColor(0.03f, 0.08f, 0.18f) : FLinearColor(0.28f, 0.30f, 0.26f);
 	}
+	case ECubusLandscapeDebugView::StreamIncision:
+	{
+		const float Incision = GlobalDem.StreamIncisionM.IsValidIndex(Cell) ? GlobalDem.StreamIncisionM[Cell] : 0.0f;
+		const float Scale = FMath::Max(1.0f, MaximumStreamIncisionM);
+		const float T = FMath::Clamp(FMath::Sqrt(Incision / Scale), 0.0f, 1.0f);
+		return FLinearColor(T, 0.08f, 1.0f - T);
+	}
 	case ECubusLandscapeDebugView::Elevation:
 	default:
 	{
@@ -193,9 +249,6 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 	Tangents.Init(FProcMeshTangent(1.0f, 0.0f, 0.0f), VertexCount);
 	Triangles.Reserve((R - 1) * (R - 1) * 6);
 
-	// The DEM is stored in metres; Unreal geometry is centimetres. Apply that
-	// conversion uniformly before the optional preview down-scale. VerticalScale
-	// is only a relative exaggeration, not an independent unit conversion.
 	constexpr double CentimetersPerMeter = 100.0;
 	const double PreviewWorldScale = CentimetersPerMeter * PreviewHorizontalScale;
 	const double PreviewHeightScale = PreviewWorldScale * PreviewVerticalScale;
