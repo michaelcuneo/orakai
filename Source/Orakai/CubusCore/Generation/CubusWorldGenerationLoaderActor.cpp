@@ -21,6 +21,17 @@ void ACubusWorldGenerationLoaderActor::BeginPlay()
     ResetSession();
     EnsurePreviewTexture();
     ClearPreview();
+
+    // The generator screen always owns a live lightweight 3D DEM preview.
+    // Do not require the WBP to create the actor as a side effect of binding
+    // its Image; that made actor BeginPlay / widget construction order decide
+    // whether the preview existed at all. The WBP only needs to display this
+    // actor's render target.
+    if (ACubusWorldGenerationPreviewActor* Preview3D = GetOrCreateGeneratedTerrain3DPreview())
+    {
+        Preview3D->TargetLoader = this;
+        Preview3D->RefreshPreviewNow();
+    }
 }
 
 void ACubusWorldGenerationLoaderActor::Tick(float DeltaSeconds)
@@ -69,6 +80,15 @@ void ACubusWorldGenerationLoaderActor::StartGeneration(const int32 InWorldSeed)
     EnsurePreviewTexture();
     ClearPreview();
 
+    // Keep the same preview actor alive across regeneration attempts and reset
+    // its mesh immediately. Its own Tick watches loader stage/progress and will
+    // rebuild the heightfield as generated DEM tiles are authored.
+    if (ACubusWorldGenerationPreviewActor* Preview3D = GetOrCreateGeneratedTerrain3DPreview())
+    {
+        Preview3D->TargetLoader = this;
+        Preview3D->RefreshPreviewNow();
+    }
+
     if (TerrainTileQueue.IsEmpty())
     {
         FCubusGeneratedTerrainRuntime::Reset();
@@ -85,6 +105,12 @@ void ACubusWorldGenerationLoaderActor::CancelGeneration()
     ResetSession();
     EnsurePreviewTexture();
     ClearPreview();
+
+    if (ACubusWorldGenerationPreviewActor* Preview3D = GetOrCreateGeneratedTerrain3DPreview())
+    {
+        Preview3D->TargetLoader = this;
+        Preview3D->RefreshPreviewNow();
+    }
 }
 
 FText ACubusWorldGenerationLoaderActor::GetStageDisplayName() const
