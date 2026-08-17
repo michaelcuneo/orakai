@@ -28,14 +28,6 @@ namespace CubusWorldGenerationTravelRuntime
             return;
         }
 
-        // Generation completion is no longer permission to enter gameplay.
-        // The player must explicitly select and confirm a spawn location from
-        // the generated terrain preview first.
-        if (!FCubusGeneratedTerrainRuntime::HasConfirmedSpawn())
-        {
-            return;
-        }
-
         for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(World); Iterator; ++Iterator)
         {
             ACubusWorldGenerationLoaderActor* Loader = *Iterator;
@@ -47,11 +39,16 @@ namespace CubusWorldGenerationTravelRuntime
                 continue;
             }
 
+            // Persist the exact final DEM preview before OpenLevel. Gameplay
+            // enters with no pawn, builds DEM-derived voxel/LOD coverage, and
+            // uses this retained preview for the explicit spawn selection.
+            Loader->PublishPreviewSnapshotToRuntime();
+
             bTravelRequested = true;
             UE_LOG(
                 LogTemp,
                 Display,
-                TEXT("Cubus spawn confirmed; opening gameplay level '%s' for generated seed %d"),
+                TEXT("Cubus generation complete; opening generated gameplay level '%s' for seed %d before player spawn"),
                 *Loader->GameplayLevelName.ToString(),
                 FCubusGeneratedTerrainRuntime::GetWorldSeed()
             );
