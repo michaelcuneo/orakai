@@ -16,13 +16,36 @@ AOrakaiGameMode::AOrakaiGameMode()
     PrimaryActorTick.bStartWithTickEnabled = true;
 }
 
+void AOrakaiGameMode::StartPlay()
+{
+    if (FCubusGeneratedTerrainRuntime::IsActive())
+    {
+        if (UWorld* World = GetWorld())
+        {
+            const int64 GeneratedSeed = FCubusGeneratedTerrainRuntime::GetWorldSeed();
+            for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
+            {
+                if (IsValid(*Iterator))
+                {
+                    Iterator->AdoptGeneratedWorldSeed(GeneratedSeed);
+                    UE_LOG(
+                        LogTemp,
+                        Display,
+                        TEXT("Cubus gameplay adopting authoritative generated DEM seed %lld before actor BeginPlay"),
+                        GeneratedSeed
+                    );
+                }
+            }
+        }
+    }
+
+    Super::StartPlay();
+}
+
 void AOrakaiGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
 {
     if (FCubusGeneratedTerrainRuntime::IsActive())
     {
-        // Generated worlds deliberately enter gameplay without a character.
-        // The loading/spawn UI chooses the location first; the real default
-        // pawn is created only after the selected density coverage is resident.
         PendingGeneratedPlayer = NewPlayer;
         bGeneratedSpawnCompleted = false;
         return;
@@ -114,9 +137,6 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         return;
     }
 
-    // LOD1 is the seam immediately outside gameplay LOD0. If the level owns a
-    // terrain LOD actor, keep the loading screen until that transition window
-    // has also become resident around the selected location.
     for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(World); Iterator; ++Iterator)
     {
         if (IsValid(*Iterator) && !Iterator->IsInitialVisualCoverageReady())
@@ -137,8 +157,6 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     }
     else
     {
-        // The DEM sample is still authoritative if a material/collision setup
-        // intentionally does not block Visibility.
         FinalSpawnLocation.Z = static_cast<double>(SelectedHeightMeters) * 100.0 + 200.0;
     }
 
