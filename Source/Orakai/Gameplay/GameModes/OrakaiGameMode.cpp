@@ -164,6 +164,17 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         PreviousPawn->Destroy();
     }
 
+    // The generation screen held Game+UI input and the mouse cursor throughout
+    // terrain generation/loading/selection. SPAWN is the exact point where
+    // gameplay input is finally released.
+    FInputModeGameOnly GameplayInputMode;
+    PlayerController->SetInputMode(GameplayInputMode);
+    PlayerController->SetShowMouseCursor(false);
+    PlayerController->bEnableClickEvents = false;
+    PlayerController->bEnableMouseOverEvents = false;
+    PlayerController->ResetIgnoreMoveInput();
+    PlayerController->ResetIgnoreLookInput();
+
     SpawnStreamingPawn.Reset();
     bGeneratedSpawnCompleted = true;
     PendingGeneratedPlayer.Reset();
