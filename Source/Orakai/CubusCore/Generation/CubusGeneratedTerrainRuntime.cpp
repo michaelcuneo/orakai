@@ -85,6 +85,29 @@ bool FCubusGeneratedTerrainRuntime::GetPreviewSnapshot(
     return true;
 }
 
+bool FCubusGeneratedTerrainRuntime::GetPreviewBoundsMeters(FBox2D& OutBoundsMeters)
+{
+    FReadScopeLock Lock(StateLock);
+    if (!State.bActive || !State.PreviewBoundsMeters.bIsValid)
+    {
+        return false;
+    }
+    OutBoundsMeters = State.PreviewBoundsMeters;
+    return true;
+}
+
+bool FCubusGeneratedTerrainRuntime::TrySampleHeightMeters(
+    const FVector2D& WorldMeters,
+    float& OutHeightMeters)
+{
+    FReadScopeLock Lock(StateLock);
+    if (!State.bActive)
+    {
+        return false;
+    }
+    return TrySampleHeightMetersLocked(WorldMeters, OutHeightMeters);
+}
+
 void FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(const FVector2D& PreviewUV)
 {
     FWriteScopeLock Lock(StateLock);
@@ -225,10 +248,6 @@ bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
     float HeightMeters = 0.0f;
     if (!TrySampleHeightMetersLocked(FVector2D(WorldMetersX, WorldMetersY), HeightMeters))
     {
-        // An active generated world is authoritative. Coarse LOD tiles can
-        // extend beyond the finite generated DEM bounds, but those samples must
-        // never resurrect the legacy procedural terrain. Outside the generated
-        // domain we expose a neutral sea-level boundary instead.
         OutSample = FCubusTerrainFormSample();
         OutSample.Height = 0.0f;
         OutSample.PlainsWeight = 1.0f;
