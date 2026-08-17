@@ -2,7 +2,6 @@
 
 #include "CubusCore/Generation/CubusWorldGenerationLoaderActor.h"
 
-#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/Image.h"
@@ -12,6 +11,7 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
+#include "Styling/SlateBrush.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Components/SceneCaptureComponent2D.h"
 
@@ -136,7 +136,10 @@ bool ACubusWorldGenerationPreviewActor::ApplyPreviewToImage(UImage* TargetImage)
         return false;
     }
 
-    TargetImage->SetBrushFromTexture(PreviewRenderTarget, true);
+    FSlateBrush Brush;
+    Brush.SetResourceObject(PreviewRenderTarget);
+    Brush.ImageSize = FVector2D(PreviewRenderTarget->SizeX, PreviewRenderTarget->SizeY);
+    TargetImage->SetBrush(Brush);
     return true;
 }
 
@@ -314,7 +317,6 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         return;
     }
 
-    // Smooth normals from the actual preview triangles.
     Normals.Init(FVector::ZeroVector, Vertices.Num());
     for (int32 Index = 0; Index + 2 < Triangles.Num(); Index += 3)
     {
@@ -377,13 +379,12 @@ bool ACubusWorldGenerationPreviewActor::BuildCaptureRay(
         return false;
     }
 
-    const float Aspect = 1.0f;
     const float TanHalfFov = FMath::Tan(FMath::DegreesToRadians(PreviewCapture->FOVAngle * 0.5f));
     const float NdcX = static_cast<float>(PreviewUV.X * 2.0 - 1.0);
     const float NdcY = static_cast<float>(1.0 - PreviewUV.Y * 2.0);
 
     const FTransform CaptureTransform = PreviewCapture->GetComponentTransform();
-    const FVector LocalDirection(1.0f, NdcX * TanHalfFov * Aspect, NdcY * TanHalfFov);
+    const FVector LocalDirection(1.0f, NdcX * TanHalfFov, NdcY * TanHalfFov);
     OutOrigin = CaptureTransform.GetLocation();
     OutDirection = CaptureTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
     return true;
@@ -425,8 +426,6 @@ bool ACubusWorldGenerationPreviewActor::SetGeneratedSpawnFromPreviewPosition(
     const double U = FMath::Clamp(LocalHit.X / FMath::Max(1.0, BuiltMeshDimensions.X) + 0.5, 0.0, 1.0);
     const double VBottomUp = FMath::Clamp(LocalHit.Y / FMath::Max(1.0, BuiltMeshDimensions.Y) + 0.5, 0.0, 1.0);
 
-    // Existing loader spawn UV is top-left origin, while the preview mesh local
-    // Y coordinate increases from the generated world's minimum to maximum Y.
     OutPreviewUV = FVector2D(U, 1.0 - VBottomUp);
     return TargetLoader->SetGeneratedSpawnFromPreviewUV(OutPreviewUV, OutWorldMeters);
 }
