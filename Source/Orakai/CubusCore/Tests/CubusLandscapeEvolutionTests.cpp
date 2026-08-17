@@ -101,4 +101,56 @@ bool FCubusLandscapeEvolutionHydrologyTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCubusLandscapeEvolutionStreamPowerTest,
+	"Orakai.Cubus.LandscapeEvolution.StreamPowerEvolution",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCubusLandscapeEvolutionStreamPowerTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FSettings Settings;
+	Settings.Seed = 73291;
+	Settings.Resolution = 65;
+	Settings.WorldSizeMeters = 64000.0;
+	Settings.PlateCount = 10;
+	Settings.RiverSourceAreaKm2 = 4.0f;
+	Settings.EvolutionIterations = 4;
+	Settings.EvolutionStepYears = 10000.0f;
+	Settings.HydrologyRefreshInterval = 1;
+
+	FGlobalDem A;
+	FGlobalDem B;
+	FGenerationStats StatsA;
+	FGenerationStats StatsB;
+	FString Error;
+	if (!TestTrue(TEXT("Evolution skeleton A generates"), FGenerator::GenerateSkeleton(Settings, A, nullptr, &Error)) ||
+		!TestTrue(TEXT("Evolution skeleton B generates"), FGenerator::GenerateSkeleton(Settings, B, nullptr, &Error)))
+	{
+		return false;
+	}
+	if (!TestTrue(TEXT("Evolution A succeeds"), FGenerator::EvolveLandscape(Settings, A, &StatsA, &Error)) ||
+		!TestTrue(TEXT("Evolution B succeeds"), FGenerator::EvolveLandscape(Settings, B, &StatsB, &Error)))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Requested evolution iterations execute"), StatsA.EvolutionIterations, Settings.EvolutionIterations);
+	TestTrue(TEXT("Stream incision diagnostic exists"), A.StreamIncisionM.Num() == A.NumCells());
+	TestTrue(TEXT("At least some stream incision occurs"), StatsA.MaximumStreamIncisionM > 0.0f);
+	TestEqual(TEXT("Evolution remains deterministic"), A.ElevationM[A.Index(31, 31)], B.ElevationM[B.Index(31, 31)]);
+
+	for (int32 Cell = 0; Cell < A.NumCells(); Cell += 37)
+	{
+		const int32 Receiver = A.Receiver[Cell];
+		if (Receiver != INDEX_NONE)
+		{
+			TestTrue(TEXT("Final evolved drainage remains hydrologically downhill"),
+				A.HydrologyElevationM[Receiver] < A.HydrologyElevationM[Cell]);
+		}
+		TestTrue(TEXT("Incision cannot be negative"), A.StreamIncisionM[Cell] >= 0.0f);
+	}
+	return true;
+}
+
 #endif
