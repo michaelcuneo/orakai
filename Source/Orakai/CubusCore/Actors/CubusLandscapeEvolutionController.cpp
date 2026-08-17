@@ -35,39 +35,45 @@ void ACubusLandscapeEvolutionController::PostEditChangeProperty(FPropertyChanged
 	const FName ChangedPropertyName = PropertyChangedEvent.Property != nullptr
 		? PropertyChangedEvent.Property->GetFName()
 		: NAME_None;
+	const ECubusLandscapeEditorAction PendingAction =
+		ChangedPropertyName == GET_MEMBER_NAME_CHECKED(ACubusLandscapeEvolutionController, EditorAction)
+		? EditorAction
+		: ECubusLandscapeEditorAction::None;
 
-	if (ChangedPropertyName == GET_MEMBER_NAME_CHECKED(ACubusLandscapeEvolutionController, EditorAction))
+	if (PendingAction != ECubusLandscapeEditorAction::None)
 	{
-		const ECubusLandscapeEditorAction Action = EditorAction;
 		EditorAction = ECubusLandscapeEditorAction::None;
-
-		switch (Action)
-		{
-		case ECubusLandscapeEditorAction::GenerateWorldSkeleton:
-			GenerateWorldSkeleton();
-			break;
-		case ECubusLandscapeEditorAction::SolveGlobalHydrology:
-			SolveGlobalHydrology();
-			break;
-		case ECubusLandscapeEditorAction::EvolveLandscape:
-			EvolveLandscape();
-			break;
-		case ECubusLandscapeEditorAction::GenerateAndSolve:
-			GenerateAndSolve();
-			break;
-		case ECubusLandscapeEditorAction::GenerateSolveAndEvolve:
-			GenerateSolveAndEvolve();
-			break;
-		case ECubusLandscapeEditorAction::RebuildPreview:
-			RebuildPreview();
-			break;
-		case ECubusLandscapeEditorAction::None:
-		default:
-			break;
-		}
 	}
 
+	// Let Unreal finish its property edit/construction handling first. Executing
+	// generation before this call can cause the freshly rebuilt procedural mesh to
+	// be reconstructed immediately afterwards, making the action appear to do nothing.
 	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	switch (PendingAction)
+	{
+	case ECubusLandscapeEditorAction::GenerateWorldSkeleton:
+		GenerateWorldSkeleton();
+		break;
+	case ECubusLandscapeEditorAction::SolveGlobalHydrology:
+		SolveGlobalHydrology();
+		break;
+	case ECubusLandscapeEditorAction::EvolveLandscape:
+		EvolveLandscape();
+		break;
+	case ECubusLandscapeEditorAction::GenerateAndSolve:
+		GenerateAndSolve();
+		break;
+	case ECubusLandscapeEditorAction::GenerateSolveAndEvolve:
+		GenerateSolveAndEvolve();
+		break;
+	case ECubusLandscapeEditorAction::RebuildPreview:
+		RebuildPreview();
+		break;
+	case ECubusLandscapeEditorAction::None:
+	default:
+		break;
+	}
 }
 #endif
 
@@ -125,6 +131,13 @@ void ACubusLandscapeEvolutionController::EvolveLandscape()
 		return;
 	}
 	UpdateDiagnostics(Stats);
+	UE_LOG(LogTemp, Display,
+		TEXT("Cubus landscape evolved: max |delta| %.2f m, mean |delta| %.2f m, max lowering %.2f m, max raising %.2f m, max incision %.2f m"),
+		Stats.MaximumAbsoluteElevationChangeM,
+		Stats.MeanAbsoluteElevationChangeM,
+		Stats.MaximumTerrainLoweringM,
+		Stats.MaximumTerrainRaisingM,
+		Stats.MaximumStreamIncisionM);
 	RebuildPreview();
 }
 
@@ -168,6 +181,13 @@ void ACubusLandscapeEvolutionController::GenerateSolveAndEvolve()
 		return;
 	}
 	UpdateDiagnostics(Stats);
+	UE_LOG(LogTemp, Display,
+		TEXT("Cubus landscape generated + evolved: max |delta| %.2f m, mean |delta| %.2f m, max lowering %.2f m, max raising %.2f m, max incision %.2f m"),
+		Stats.MaximumAbsoluteElevationChangeM,
+		Stats.MeanAbsoluteElevationChangeM,
+		Stats.MaximumTerrainLoweringM,
+		Stats.MaximumTerrainRaisingM,
+		Stats.MaximumStreamIncisionM);
 	RebuildPreview();
 }
 
@@ -198,6 +218,10 @@ void ACubusLandscapeEvolutionController::UpdateDiagnostics(const CubusLandscapeE
 	{
 		MaximumStreamIncisionM = Stats.MaximumStreamIncisionM;
 		MeanStreamIncisionM = Stats.MeanStreamIncisionM;
+		MaximumAbsoluteElevationChangeM = Stats.MaximumAbsoluteElevationChangeM;
+		MeanAbsoluteElevationChangeM = Stats.MeanAbsoluteElevationChangeM;
+		MaximumTerrainLoweringM = Stats.MaximumTerrainLoweringM;
+		MaximumTerrainRaisingM = Stats.MaximumTerrainRaisingM;
 	}
 }
 
@@ -257,6 +281,21 @@ FLinearColor ACubusLandscapeEvolutionController::DebugColorForCell(const int32 C
 		const float Scale = FMath::Max(1.0f, MaximumStreamIncisionM);
 		const float T = FMath::Clamp(FMath::Sqrt(Incision / Scale), 0.0f, 1.0f);
 		return FLinearColor(T, 0.08f, 1.0f - T);
+	}
+	case ECubusLandscapeDebugView::EvolutionDelta:
+	{
+		const float Delta = GlobalDem.EvolutionDeltaM.IsValidIndex(Cell) ? GlobalDem.EvolutionDeltaM[Cell] : 0.0f;
+		const float Scale = FMath::Max(1.0f, MaximumAbsoluteElevationChangeM);
+		const float Strength = FMath::Clamp(FMath::Sqrt(FMath::Abs(Delta) / Scale), 0.0f, 1.0f);
+		if (Delta < 0.0f)
+		{
+			return FLinearColor(0.05f, 0.15f + 0.35f * (1.0f - Strength), 0.35f + 0.65f * Strength);
+		}
+		if (Delta > 0.0f)
+		{
+			return FLinearColor(0.35f + 0.65f * Strength, 0.12f, 0.05f);
+		}
+		return FLinearColor(0.08f, 0.08f, 0.08f);
 	}
 	case ECubusLandscapeDebugView::Elevation:
 	default:
