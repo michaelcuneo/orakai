@@ -81,8 +81,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation")
 	int32 Seed = 1337;
 
+	/** Full 500 km global DEM. 4097 samples produce 4096 intervals at ~122.07 m spacing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "17", ClampMax = "4097"))
-	int32 GlobalResolution = 513;
+	int32 GlobalResolution = 4097;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "10000.0", Units = "m"))
 	double WorldSizeMeters = 500000.0;
@@ -114,6 +115,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "1", ClampMax = "16"))
 	int32 HydrologyRefreshInterval = 2;
 
+	/** Display mesh only. It samples the full-resolution DEM and does not alter simulation resolution. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "17", ClampMax = "513"))
 	int32 PreviewResolution = 513;
 
@@ -134,6 +136,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
 	int32 GeneratedCellCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics", meta = (Units = "m"))
+	float GlobalCellSizeM = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
 	int32 GeneratedRiverCellCount = 0;
