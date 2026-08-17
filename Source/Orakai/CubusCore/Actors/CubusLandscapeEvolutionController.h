@@ -22,6 +22,13 @@ enum class ECubusLandscapeDebugView : uint8
 };
 
 UENUM(BlueprintType)
+enum class ECubusLandscapePreviewMode : uint8
+{
+	NativeDetail UMETA(DisplayName = "Native Detail (~122 m/vertex)"),
+	FullWorldOverview UMETA(DisplayName = "Full 500 km Overview")
+};
+
+UENUM(BlueprintType)
 enum class ECubusLandscapeEditorAction : uint8
 {
 	None UMETA(DisplayName = "-- Choose Action --"),
@@ -115,9 +122,21 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "1", ClampMax = "16"))
 	int32 HydrologyRefreshInterval = 2;
 
-	/** Display mesh only. It samples the full-resolution DEM and does not alter simulation resolution. */
+	/** Display mesh only; it never changes the simulation DEM resolution. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "17", ClampMax = "513"))
 	int32 PreviewResolution = 513;
+
+	/** Native Detail displays a contiguous DEM window at one preview vertex per DEM cell. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview")
+	ECubusLandscapePreviewMode PreviewMode = ECubusLandscapePreviewMode::NativeDetail;
+
+	/** In Native Detail mode, focus the window on the strongest erosion/elevation change after evolution. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview")
+	bool bAutoFocusErosion = true;
+
+	/** Manual world-space centre in metres, used when auto-focus is disabled. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (Units = "m"))
+	FVector2D PreviewCenterWorldMeters = FVector2D::ZeroVector;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.0001"))
 	float PreviewHorizontalScale = 0.01f;
@@ -139,6 +158,15 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics", meta = (Units = "m"))
 	float GlobalCellSizeM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics", meta = (Units = "m"))
+	float PreviewDisplayedCellSizeM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics", meta = (Units = "km"))
+	float PreviewWindowSizeKm = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics", meta = (Units = "m"))
+	FVector2D PreviewActualCenterWorldMeters = FVector2D::ZeroVector;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
 	int32 GeneratedRiverCellCount = 0;
