@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "CubusCore/Generation/CubusTerrainCarving.h"
+#include "CubusCore/Generation/CubusTerrainErosion.h"
 #include "CubusWorldGenerationLoaderActor.generated.h"
 
 class UTexture2D;
@@ -14,6 +15,7 @@ enum class ECubusGenerationLoaderStage : uint8
     StructuralDEM UMETA(DisplayName="Structural DEM"),
     Drainage UMETA(DisplayName="Drainage"),
     TerrainCarving UMETA(DisplayName="Terrain Carving"),
+    Erosion UMETA(DisplayName="Erosion and Weathering"),
     Complete UMETA(DisplayName="Current Pipeline Complete"),
     Failed UMETA(DisplayName="Failed")
 };
@@ -37,15 +39,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCubusGenerationFinished);
 /**
  * Blueprint-facing orchestrator for the world-generation loader level.
  *
- * This actor owns the current pre-voxel generation session. It creates real
- * 1 m structural DEM tiles, solves drainage region-by-region, then replaces
- * those structural tiles with their drainage-carved versions. A lightweight
- * top-down texture is updated from the same data so the loader can visualize
- * progress without rendering the full-resolution DEM as geometry.
- *
- * Density streaming, gameplay chunks and player spawning are intentionally not
- * touched here yet. Later erosion, morphology and voxel-cache stages can extend
- * this state machine without changing the loader-level Blueprint contract.
+ * The loader owns the current pre-voxel generation session and exposes the real
+ * generated DEM as a progressive top-down preview. Diagnostic overlays exist
+ * only while their corresponding stage is running; they never become part of
+ * the authored terrain.
  */
 UCLASS(BlueprintType, Blueprintable)
 class ORAKAI_API ACubusWorldGenerationLoaderActor : public AActor
@@ -110,11 +107,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview", meta=(ClampMin="64", ClampMax="2048"))
     int32 PreviewTextureResolution = 768;
 
-    /** Adds terrain-normal lighting to the DEM preview. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview")
     bool bPreviewHillshade = true;
 
-    /** Strength of slope lighting applied after adaptive elevation normalization. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview", meta=(ClampMin="0.0", ClampMax="1.0"))
     float PreviewHillshadeStrength = 0.72f;
 
@@ -131,6 +126,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Drainage", meta=(ClampMin="0.001"))
     float StreamSourceAreaSquareKm = 0.20f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Erosion", meta=(ClampMin="1", ClampMax="12"))
+    int32 ErosionIterations = 5;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Erosion", meta=(ClampMin="5.0", ClampMax="60.0"))
+    float ErosionTalusAngleDegrees = 33.0f;
+
 protected:
     virtual void BeginPlay() override;
 
@@ -144,6 +145,7 @@ private:
     void ProcessStructuralDEM();
     void ProcessDrainage();
     void ProcessTerrainCarving();
+    void ProcessErosion();
 
     FBox2D GetGenerationBoundsMeters() const;
     void SetWorkProgress(int32 CompletedItems, int32 TotalItems);
@@ -168,6 +170,7 @@ private:
     FCubusTerrainRasterSettings RasterSettings;
     FCubusTerrainDrainageSettings DrainageSettings;
     FCubusTerrainCarvingSettings CarvingSettings;
+    FCubusTerrainErosionSettings ErosionSettings;
 
     TArray<FIntPoint> TerrainTileQueue;
     TArray<FIntPoint> DrainageRegionQueue;
@@ -177,7 +180,6 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> PreviewTexture = nullptr;
 
-    /** Actual DEM heights represented by the preview pixels; NAN means not generated yet. */
     TArray<float> PreviewHeightMeters;
     TArray<FColor> PreviewPixels;
 };
