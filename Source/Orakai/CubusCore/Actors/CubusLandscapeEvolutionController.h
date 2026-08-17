@@ -20,6 +20,18 @@ enum class ECubusLandscapeDebugView : uint8
 	StreamIncision
 };
 
+UENUM(BlueprintType)
+enum class ECubusLandscapeEditorAction : uint8
+{
+	None UMETA(DisplayName = "-- Choose Action --"),
+	GenerateWorldSkeleton UMETA(DisplayName = "Generate World Skeleton"),
+	SolveGlobalHydrology UMETA(DisplayName = "Solve Global Hydrology"),
+	EvolveLandscape UMETA(DisplayName = "Evolve Current Landscape"),
+	GenerateAndSolve UMETA(DisplayName = "Generate + Solve"),
+	GenerateSolveAndEvolve UMETA(DisplayName = "Generate + Solve + Evolve"),
+	RebuildPreview UMETA(DisplayName = "Rebuild Preview")
+};
+
 /**
  * Isolated world-scale terrain-generation testbed controller intended for Lvl_Streaming.
  * It owns the coarse global DEM and debug preview only; it does not modify the legacy biome generator.
@@ -33,22 +45,26 @@ public:
 	ACubusLandscapeEvolutionController();
 	virtual void OnConstruction(const FTransform& Transform) override;
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Generate World Skeleton"))
 	void GenerateWorldSkeleton();
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Solve Global Hydrology"))
 	void SolveGlobalHydrology();
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Evolve Current Landscape"))
 	void EvolveLandscape();
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Generate + Solve"))
 	void GenerateAndSolve();
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Generate + Solve + Evolve"))
 	void GenerateSolveAndEvolve();
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Rebuild Preview"))
 	void RebuildPreview();
 
 	UFUNCTION(BlueprintPure, Category = "Cubus|Landscape Evolution")
@@ -60,6 +76,14 @@ public:
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Landscape Evolution")
 	TObjectPtr<UProceduralMeshComponent> PreviewMesh;
+
+	/**
+	 * Reliable editor fallback for Unreal versions/configurations that fail to surface native CallInEditor buttons.
+	 * Choose an action and it executes immediately, then resets to "Choose Action".
+	 */
+	UPROPERTY(EditAnywhere, Category = "Cubus|Landscape Evolution|Actions",
+		meta = (DisplayName = "RUN EDITOR ACTION", ToolTip = "Choose an action to execute immediately on this placed controller."))
+	ECubusLandscapeEditorAction EditorAction = ECubusLandscapeEditorAction::None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation")
 	int32 Seed = 1337;
