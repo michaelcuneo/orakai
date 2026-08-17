@@ -56,6 +56,23 @@ public:
 	ACubusWorldGenerationLoaderActor();
 	virtual void Tick(float DeltaSeconds) override;
 
+	/**
+	 * Production generation always hands off from Lvl_Generator to
+	 * Lvl_ThirdPerson as soon as the authoritative DEM is ready.  Force these
+	 * values after serialized level-instance properties are applied so an old
+	 * placed loader cannot silently retain the temporary "stay on generator"
+	 * setting that was introduced during DEM preview work.
+	 */
+	virtual void PostInitializeComponents() override
+	{
+		Super::PostInitializeComponents();
+		if (bUseProductionRealDemWorld)
+		{
+			bTravelToGameplayWhenComplete = true;
+			GameplayLevelName = TEXT("Lvl_ThirdPerson");
+		}
+	}
+
 	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation")
 	void StartGeneration(int32 InWorldSeed);
 
@@ -217,7 +234,7 @@ public:
 	FCubusGenerationFinished OnGenerationFinished;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
-	bool bTravelToGameplayWhenComplete = false;
+	bool bTravelToGameplayWhenComplete = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
 	FName GameplayLevelName = TEXT("Lvl_ThirdPerson");
@@ -246,7 +263,6 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (ClampMin = "0.05", ClampMax = "4.0"))
 	float ProductionReliefScale = 1.0f;
-
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (ClampMin = "0.0", Units = "m"))
 	float ProductionCoastWarpMeters = 12000.0f;
 
