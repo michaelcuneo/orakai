@@ -9,6 +9,12 @@ namespace
 {
 constexpr float QuiltWeightPower = 2.0f;
 
+enum class ELayerRole : uint8
+{
+	PrimarySurface,
+	ResidualDetail
+};
+
 struct FSource
 {
 	CubusDemIsland::FIndexedPatch Metadata;
@@ -26,6 +32,7 @@ struct FPlacement
 struct FLayer
 {
 	FString FolderPrefix;
+	ELayerRole Role = ELayerRole::ResidualDetail;
 	float Amplitude = 1.0f;
 	float MinimumExtentM = 0.0f;
 	float MaximumExtentM = TNumericLimits<float>::Max();
@@ -107,9 +114,7 @@ bool LoadLayer(
 	for (const FSource& Source : Layer.Sources) MeanExtentM += Source.ExtentM;
 	MeanExtentM /= static_cast<float>(Layer.Sources.Num());
 
-	// The spacing is intentionally smaller than the physical patch extent. Adjacent
-	// real source windows overlap enough to blend, but no source is enlarged.
-	Layer.GridSpacingM = FMath::Max(1000.0f, MeanExtentM * 0.56f);
+	Layer.GridSpacingM = FMath::Max(1000.0f, MeanExtentM * 0.62f);
 	Layer.GridResolution = FMath::CeilToInt(Settings.WorldSizeMeters / Layer.GridSpacingM) + 4;
 	const double HalfWorld = Settings.WorldSizeMeters * 0.5;
 	Layer.GridOriginM = -HalfWorld - Layer.GridSpacingM * 1.5;
@@ -120,21 +125,20 @@ bool LoadLayer(
 	{
 		for (int32 Gx = 0; Gx < Layer.GridResolution; ++Gx)
 		{
-			const FVector2D Center(
-				Layer.GridOriginM + Gx * Layer.GridSpacingM,
-				Layer.GridOriginM + Gy * Layer.GridSpacingM);
-			const float Radial01 = FMath::Clamp(static_cast<float>(Center.Size() / HalfWorld), 0.0f, 1.0f);
-			const float DesiredRelief01 = FMath::Clamp(1.08f - Radial01 * 0.72f + Random.FRandRange(-0.22f, 0.22f), 0.0f, 1.0f);
-
 			int32 BestSource = 0;
 			float BestScore = -TNumericLimits<float>::Max();
+
+			// Deliberately do NOT use distance from world centre here. The previous
+			// selector explicitly requested mountain sources in the centre and gentle
+			// sources near the edges, which created the obvious central mountain pile.
+			const float DesiredRelief01 = Random.FRandRange(0.08f, 0.98f);
 			for (int32 Candidate = 0; Candidate < Layer.Sources.Num(); ++Candidate)
 			{
 				const FSource& Source = Layer.Sources[Candidate];
 				const float ReliefScaleM = FMath::Max(350.0f, Layer.MinimumExtentM * 0.012f);
 				const float Relief01 = FMath::Clamp(Source.Metadata.ReliefP90M / ReliefScaleM, 0.0f, 1.0f);
 				const float ReliefMatch = 1.0f - FMath::Abs(Relief01 - DesiredRelief01);
-				const float Score = ReliefMatch * 0.60f + Source.Metadata.MacroSuitability * 0.30f + Random.FRandRange(0.0f, 0.10f);
+				const float Score = ReliefMatch * 0.48f + Source.Metadata.MacroSuitability * 0.32f + Random.FRandRange(0.0f, 0.20f);
 				if (Score > BestScore)
 				{
 					BestScore = Score;
@@ -145,7 +149,9 @@ bool LoadLayer(
 			FPlacement& Placement = Layer.Placements[Gy * Layer.GridResolution + Gx];
 			Placement.SourceIndex = BestSource;
 			Placement.Variant = Random.RandRange(0, 15);
-			Placement.CenterM = Center;
+			Placement.CenterM = FVector2D(
+				Layer.GridOriginM + Gx * Layer.GridSpacingM,
+				Layer.GridOriginM + Gy * Layer.GridSpacingM);
 		}
 	}
 
@@ -164,6 +170,26 @@ bool LoadLayer(
 		*Layer.FolderPrefix, Layer.Sources.Num(), MeanExtentM / 1000.0f, Layer.GridSpacingM / 1000.0f,
 		MinReliefM, MeanReliefM, MaxReliefM, Layer.Amplitude);
 	return true;
+}
+
+float SourceHeightForRole(const FSource& Source, const FVector2D& SourceUv, const ELayerRole Role)
+{
+	const float Raw = Source.Patch.SampleBilinear(SourceUv.X, SourceUv.Y);
+	if (Role == ELayerRole::PrimarySurface)
+	{
+		// The broadest tier is a real land surface. Reference it to a robust lowland
+		// percentile rather than the mean, so valleys remain valleys without turning
+		// half the source patch into negative residual that later gets flattened.
+		const float LowReference = Source.Metadata.ElevationP05M;
+		const float HighReference = FMath::Max(Source.Metadata.ElevationP95M, LowReference + 1.0f);
+		return FMath::Clamp(Raw, LowReference, HighReference) - LowReference;
+	}
+
+	// Smaller tiers are detail residuals only. Median centring is more robust than
+	// mean centring for mountainous DEMs, and P05/P95 clipping prevents one source
+	// summit or source-sheet artefact from dominating the whole synthesized world.
+	const float Clipped = FMath::Clamp(Raw, Source.Metadata.ElevationP05M, Source.Metadata.ElevationP95M);
+	return Clipped - Source.Metadata.MedianElevationM;
 }
 
 float SampleLayer(const FLayer& Layer, const FVector2D& WorldM, int32* OutDominantSource = nullptr)
@@ -185,8 +211,8 @@ float SampleLayer(const FLayer& Layer, const FVector2D& WorldM, int32* OutDomina
 		(1.0f - Fx) * Fy,
 		Fx * Fy};
 
-	float WeightedRelief = 0.0f;
-	float WeightSquaredSum = 0.0f;
+	float WeightedHeight = 0.0f;
+	float WeightSum = 0.0f;
 	float BestWeight = -1.0f;
 	int32 BestSource = 0;
 	for (int32 Corner = 0; Corner < 4; ++Corner)
@@ -200,9 +226,9 @@ float SampleLayer(const FLayer& Layer, const FVector2D& WorldM, int32* OutDomina
 
 		const float W = FMath::Pow(FMath::Max(0.0f, BaseWeights[Corner]), QuiltWeightPower);
 		if (W <= KINDA_SMALL_NUMBER) continue;
-		const float Sample = Source.Patch.SampleBilinear(SourceUv.X, SourceUv.Y) - Source.Patch.MeanElevationM;
-		WeightedRelief += Sample * W;
-		WeightSquaredSum += W * W;
+		const float Sample = SourceHeightForRole(Source, SourceUv, Layer.Role);
+		WeightedHeight += Sample * W;
+		WeightSum += W;
 		if (W > BestWeight)
 		{
 			BestWeight = W;
@@ -211,11 +237,9 @@ float SampleLayer(const FLayer& Layer, const FVector2D& WorldM, int32* OutDomina
 	}
 
 	if (OutDominantSource) *OutDominantSource = BestSource;
-	return WeightSquaredSum > KINDA_SMALL_NUMBER
-		? WeightedRelief / FMath::Sqrt(WeightSquaredSum)
-		: 0.0f;
+	return WeightSum > KINDA_SMALL_NUMBER ? WeightedHeight / WeightSum : 0.0f;
 }
-}
+} // namespace
 
 bool Compose(
 	const CubusDemIsland::FSettings& Settings,
@@ -232,21 +256,24 @@ bool Compose(
 
 	FLayer Macro128;
 	Macro128.FolderPrefix = TEXT("Macro128km/");
-	Macro128.Amplitude = 0.90f;
+	Macro128.Role = ELayerRole::PrimarySurface;
+	Macro128.Amplitude = 1.0f;
 	Macro128.MinimumExtentM = 100000.0f;
 	Macro128.MaximumExtentM = 160000.0f;
 	Macro128.SeedSalt = 0x128128;
 
 	FLayer Macro64;
 	Macro64.FolderPrefix = TEXT("Macro64km/");
-	Macro64.Amplitude = 0.42f;
+	Macro64.Role = ELayerRole::ResidualDetail;
+	Macro64.Amplitude = 0.20f;
 	Macro64.MinimumExtentM = 50000.0f;
 	Macro64.MaximumExtentM = 85000.0f;
 	Macro64.SeedSalt = 0x064064;
 
 	FLayer Macro32;
 	Macro32.FolderPrefix = TEXT("Macro32km/");
-	Macro32.Amplitude = 0.22f;
+	Macro32.Role = ELayerRole::ResidualDetail;
+	Macro32.Amplitude = 0.08f;
 	Macro32.MinimumExtentM = 24000.0f;
 	Macro32.MaximumExtentM = 43000.0f;
 	Macro32.SeedSalt = 0x032032;
@@ -274,19 +301,19 @@ bool Compose(
 		const FVector2D WorldM(-HalfWorld + U * Settings.WorldSizeMeters, -HalfWorld + V * Settings.WorldSizeMeters);
 
 		int32 Dominant128 = 0;
-		const float Relief128 = SampleLayer(Macro128, WorldM, &Dominant128);
-		const float Relief64 = SampleLayer(Macro64, WorldM);
-		const float Relief32 = SampleLayer(Macro32, WorldM);
+		const float Surface128 = SampleLayer(Macro128, WorldM, &Dominant128);
+		const float Residual64 = SampleLayer(Macro64, WorldM);
+		const float Residual32 = SampleLayer(Macro32, WorldM);
 		OutResult.ReliefM[Cell] = Settings.ReliefScale * (
-			Relief128 * Macro128.Amplitude +
-			Relief64 * Macro64.Amplitude +
-			Relief32 * Macro32.Amplitude);
+			Surface128 * Macro128.Amplitude +
+			Residual64 * Macro64.Amplitude +
+			Residual32 * Macro32.Amplitude);
 
 		OutResult.ProvinceId[Cell] = static_cast<uint8>(MapProvinceType(Macro128.Sources[Dominant128].Metadata));
 	});
 
 	UE_LOG(LogTemp, Display,
-		TEXT("Cubus multiscale DEM pyramid composed: %d x 128 km, %d x 64 km, %d x 32 km real source patches"),
+		TEXT("Cubus multiscale DEM pyramid composed: %d x 128 km broad surfaces, %d x 64 km residuals, %d x 32 km residuals"),
 		OutResult.Macro128SourceCount, OutResult.Macro64SourceCount, OutResult.Macro32SourceCount);
 	return true;
 }
