@@ -6,7 +6,7 @@ The source is intended by LINZ for cartographic visualisation rather than terrai
 analysis. Orakai therefore uses it only as macro geometric source material; the
 composed world is subsequently reconditioned by Orakai hydrology/erosion.
 
-Each accepted source COG contributes one or more ~32.8 km patches. They are
+Each accepted source COG contributes one or more ~16.4 km patches. They are
 block-averaged from 8 m to 128 m and written as ordinary CDEM files beneath:
 
     Content/Cubus/TerrainSources/DEM/Prepared/Macro
@@ -100,7 +100,7 @@ def prepare_macro_tile(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--patch-count", type=int, default=24)
-    parser.add_argument("--source-window-pixels", type=int, default=4096)
+    parser.add_argument("--source-window-pixels", type=int, default=2048)
     parser.add_argument("--target-cell-m", type=float, default=128.0)
     parser.add_argument("--patches-per-tile", type=int, default=2)
     parser.add_argument("--min-valid-fraction", type=float, default=0.98)
