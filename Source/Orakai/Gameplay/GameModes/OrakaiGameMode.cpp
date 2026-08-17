@@ -47,8 +47,6 @@ void AOrakaiGameMode::HandleStartingNewPlayer_Implementation(APlayerController* 
     UWorld* World = GetWorld();
     if (IsValid(World))
     {
-        // Lvl_Generator owns only the DEM pipeline and its WBP. Never create a
-        // gameplay character underneath that screen.
         for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(World); Iterator; ++Iterator)
         {
             if (IsValid(*Iterator))
@@ -60,9 +58,6 @@ void AOrakaiGameMode::HandleStartingNewPlayer_Implementation(APlayerController* 
         }
     }
 
-    // In Lvl_ThirdPerson a generated runtime means the spawn/loading page owns
-    // entry. Hold the real character while a transient streaming pawn builds the
-    // actual gameplay chunks around the currently proposed marker position.
     if (FCubusGeneratedTerrainRuntime::IsActive())
     {
         PendingGeneratedPlayer = NewPlayer;
@@ -94,12 +89,21 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         return;
     }
 
-    // The generator map never creates gameplay chunks or the real character.
     for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(World); Iterator; ++Iterator)
     {
         if (IsValid(*Iterator))
         {
             return;
+        }
+    }
+
+    ACubusBlockWorldActor* BlockWorld = nullptr;
+    for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
+    {
+        if (IsValid(*Iterator))
+        {
+            BlockWorld = *Iterator;
+            break;
         }
     }
 
@@ -144,14 +148,21 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         return;
     }
 
-    // Moving the marker retargets the same hidden focus pawn. BlockWorld then
-    // recomputes its real streaming window around the newly proposed location.
     if (!StreamingPawn->GetActorLocation().Equals(ProposedFocusLocation, 1.0))
     {
-        StreamingPawn->SetActorLocation(ProposedFocusLocation, false, nullptr, ETeleportType::TeleportPhysics);
+        // BlockWorld can deliberately hold its tracked pawn during the first
+        // support pass. The spawn marker is authoritative for this transient
+        // pawn, so release/update that hold whenever the player moves the marker.
+        if (IsValid(BlockWorld))
+        {
+            BlockWorld->ReleaseHeldPawnAtLocation(StreamingPawn, ProposedFocusLocation);
+        }
+        else
+        {
+            StreamingPawn->SetActorLocation(ProposedFocusLocation, false, nullptr, ETeleportType::TeleportPhysics);
+        }
     }
 
-    // Selection drives streaming; confirmation alone authorizes character spawn.
     if (!FCubusGeneratedTerrainRuntime::HasConfirmedSpawn())
     {
         return;
@@ -170,17 +181,6 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         ConfirmedWorldMeters.Y * 100.0,
         static_cast<double>(ConfirmedHeightMeters) * 100.0 + 500.0);
 
-    // The button should only become enabled after these gates, but keep the
-    // GameMode defensive so an accidental confirmation can never spawn early.
-    ACubusBlockWorldActor* BlockWorld = nullptr;
-    for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
-    {
-        if (IsValid(*Iterator))
-        {
-            BlockWorld = *Iterator;
-            break;
-        }
-    }
     if (!IsValid(BlockWorld) ||
         !BlockWorld->IsWorldLoadingComplete() ||
         !BlockWorld->IsDensityStreamingCoverageReadyAtWorldLocation(ConfirmedFocusLocation))
