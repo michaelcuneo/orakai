@@ -7,6 +7,7 @@
 #include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Gameplay/Characters/OrakaiCharacter.h"
 #include "Gameplay/Controllers/OrakaiPlayerController.h"
@@ -173,18 +174,51 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         FinalSpawnLocation.Z = static_cast<double>(SelectedHeightMeters) * 100.0 + 200.0;
     }
 
+    // Promote atomically. Never discard the hidden streaming pawn until the
+    // real gameplay character has definitely been created. The previous
+    // RestartPlayerAtTransform path destroyed the streaming pawn first, so a
+    // failed pawn spawn left the controller with nothing and the next tick
+    // simply recreated the invisible streaming pawn.
+    FActorSpawnParameters CharacterSpawnParameters;
+    CharacterSpawnParameters.Owner = PlayerController;
+    CharacterSpawnParameters.Instigator = StreamingPawn;
+    CharacterSpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+    APawn* GeneratedCharacter = World->SpawnActor<APawn>(
+        DefaultPawnClass,
+        FinalSpawnLocation,
+        FRotator::ZeroRotator,
+        CharacterSpawnParameters
+    );
+
+    if (!IsValid(GeneratedCharacter))
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("Cubus failed to create gameplay character at generated spawn %s; retaining streaming pawn and retrying"),
+            *FinalSpawnLocation.ToCompactString());
+        return;
+    }
+
     PlayerController->UnPossess();
+    PlayerController->Possess(GeneratedCharacter);
+
+    if (PlayerController->GetPawn() != GeneratedCharacter)
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("Cubus created gameplay character %s but possession failed; retaining streaming pawn"),
+            *GetNameSafe(GeneratedCharacter));
+        GeneratedCharacter->Destroy();
+        PlayerController->Possess(StreamingPawn);
+        return;
+    }
+
     StreamingPawn->Destroy();
     SpawnStreamingPawn.Reset();
 
-    RestartPlayerAtTransform(PlayerController, FTransform(FRotator::ZeroRotator, FinalSpawnLocation));
-
-    if (IsValid(PlayerController->GetPawn()))
-    {
-        bGeneratedSpawnCompleted = true;
-        PendingGeneratedPlayer.Reset();
-        UE_LOG(LogTemp, Display,
-            TEXT("Cubus generated player created only after selected terrain full-load pass became resident at %s"),
-            *FinalSpawnLocation.ToCompactString());
-    }
+    bGeneratedSpawnCompleted = true;
+    PendingGeneratedPlayer.Reset();
+    UE_LOG(LogTemp, Display,
+        TEXT("Cubus generated character %s created and possessed after selected terrain full-load pass at %s"),
+        *GetNameSafe(GeneratedCharacter),
+        *FinalSpawnLocation.ToCompactString());
 }
