@@ -36,13 +36,22 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview")
     TObjectPtr<ACubusWorldGenerationLoaderActor> TargetLoader = nullptr;
 
-    /** Grid resolution of the preview mesh, independent of the real DEM resolution. */
+    /**
+     * Grid resolution of the preview mesh, independent of the real DEM resolution.
+     * Keep this deliberately coarse: this is a live generation visualization, not
+     * gameplay terrain. 40x40 is enough to show mountain/valley evolution without
+     * making procedural-mesh rebuilds dominate the generator frame.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="32", ClampMax="256"))
-    int32 PreviewMeshResolution = 96;
+    int32 PreviewMeshResolution = 40;
 
-    /** Render target size used by the UMG image. */
+    /**
+     * Render target size used by the UMG image. The preview is intentionally
+     * lower resolution than the finished game viewport because every capture is
+     * performed while terrain generation is already consuming frame time.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="256", ClampMax="2048"))
-    int32 PreviewRenderResolution = 768;
+    int32 PreviewRenderResolution = 384;
 
     /** Maximum horizontal extent of the normalized preview model in Unreal units. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="100.0", ClampMax="5000.0"))
@@ -52,9 +61,13 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="25.0", ClampMax="1000.0"))
     float PreviewVerticalRelief = 260.0f;
 
-    /** Minimum delay between DEM resamples while the generator is changing. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0.02", ClampMax="1.0", Units="s"))
-    float PreviewRefreshInterval = 0.10f;
+    /**
+     * Minimum delay between DEM resamples while the generator is changing.
+     * Half-second updates still read as continuous progress to the player while
+     * avoiding the old 10 full mesh/collision/capture rebuilds per second.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0.02", ClampMax="2.0", Units="s"))
+    float PreviewRefreshInterval = 0.50f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview")
     float OrbitDegreesPerPixel = 0.22f;
