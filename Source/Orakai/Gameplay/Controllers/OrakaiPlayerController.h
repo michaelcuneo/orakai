@@ -12,7 +12,7 @@ class UUserWidget;
 class ACubusBlockWorldActor;
 struct FHitResult;
 
-UCLASS(abstract)
+UCLASS()
 class AOrakaiPlayerController : public APlayerController
 {
 	GENERATED_BODY()
