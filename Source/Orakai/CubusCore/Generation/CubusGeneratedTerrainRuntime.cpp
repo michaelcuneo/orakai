@@ -12,7 +12,6 @@ void FCubusGeneratedTerrainRuntime::Configure(
 )
 {
     FWriteScopeLock Lock(StateLock);
-
     State = FState();
     State.WorldSeed = WorldSeed;
     State.RasterSettings = RasterSettings;
@@ -22,7 +21,6 @@ void FCubusGeneratedTerrainRuntime::Configure(
         (FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize,
         (FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize
     );
-
     State.bActive = true;
 }
 
@@ -32,7 +30,6 @@ void FCubusGeneratedTerrainRuntime::StoreTile(const FCubusTerrainRasterTile& Til
     {
         return;
     }
-
     FWriteScopeLock Lock(StateLock);
     State.Tiles.Add(Tile.GetTileCoordinate(), Tile);
 }
@@ -43,13 +40,11 @@ void FCubusGeneratedTerrainRuntime::StoreTileIfActive(const FCubusTerrainRasterT
     {
         return;
     }
-
     FWriteScopeLock Lock(StateLock);
     if (!State.bActive)
     {
         return;
     }
-
     State.Tiles.Add(Tile.GetTileCoordinate(), Tile);
 }
 
@@ -63,13 +58,11 @@ void FCubusGeneratedTerrainRuntime::StorePreviewSnapshot(
     {
         return;
     }
-
     FWriteScopeLock Lock(StateLock);
     if (!State.bActive)
     {
         return;
     }
-
     State.PreviewResolution = Resolution;
     State.PreviewBoundsMeters = BoundsMeters;
     State.PreviewPixels = Pixels;
@@ -86,7 +79,6 @@ bool FCubusGeneratedTerrainRuntime::GetPreviewSnapshot(
     {
         return false;
     }
-
     OutResolution = State.PreviewResolution;
     OutBoundsMeters = State.PreviewBoundsMeters;
     OutPixels = State.PreviewPixels;
@@ -104,7 +96,6 @@ void FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(const FVector2
     const double U = FMath::Clamp(PreviewUV.X, 0.0, 1.0);
     const double V = FMath::Clamp(PreviewUV.Y, 0.0, 1.0);
     const FVector2D Size = State.PreviewBoundsMeters.GetSize();
-
     State.ProposedSpawnWorldMeters = FVector2D(
         State.PreviewBoundsMeters.Min.X + U * Size.X,
         State.PreviewBoundsMeters.Min.Y + (1.0 - V) * Size.Y
@@ -120,7 +111,6 @@ bool FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(FVector2D& OutWo
     {
         return false;
     }
-
     OutWorldMeters = State.ProposedSpawnWorldMeters;
     return true;
 }
@@ -138,7 +128,6 @@ bool FCubusGeneratedTerrainRuntime::ConfirmProposedSpawn()
     {
         return false;
     }
-
     State.ConfirmedSpawnWorldMeters = State.ProposedSpawnWorldMeters;
     State.bHasConfirmedSpawn = true;
     return true;
@@ -157,7 +146,6 @@ bool FCubusGeneratedTerrainRuntime::GetConfirmedSpawnWorldMeters(FVector2D& OutW
     {
         return false;
     }
-
     OutWorldMeters = State.ConfirmedSpawnWorldMeters;
     return true;
 }
@@ -169,7 +157,6 @@ bool FCubusGeneratedTerrainRuntime::TryGetConfirmedSpawnSurfaceHeightMeters(floa
     {
         return false;
     }
-
     return TrySampleHeightMetersLocked(State.ConfirmedSpawnWorldMeters, OutHeightMeters);
 }
 
@@ -212,7 +199,6 @@ bool FCubusGeneratedTerrainRuntime::TrySampleHeightMetersLocked(
     {
         return false;
     }
-
     OutHeightMeters = Tile->SampleHeightMeters(WorldMeters.X, WorldMeters.Y);
     return true;
 }
@@ -239,7 +225,16 @@ bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
     float HeightMeters = 0.0f;
     if (!TrySampleHeightMetersLocked(FVector2D(WorldMetersX, WorldMetersY), HeightMeters))
     {
-        return false;
+        // An active generated world is authoritative. Coarse LOD tiles can
+        // extend beyond the finite generated DEM bounds, but those samples must
+        // never resurrect the legacy procedural terrain. Outside the generated
+        // domain we expose a neutral sea-level boundary instead.
+        OutSample = FCubusTerrainFormSample();
+        OutSample.Height = 0.0f;
+        OutSample.PlainsWeight = 1.0f;
+        OutSample.RollingWeight = 0.0f;
+        OutSample.MountainWeight = 0.0f;
+        return true;
     }
 
     const FIntPoint TileCoordinate = FCubusTerrainRasterBuilder::WorldToTileCoordinate(
@@ -250,11 +245,15 @@ bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
     const FCubusTerrainRasterTile* Tile = State.Tiles.Find(TileCoordinate);
     if (Tile == nullptr || !Tile->IsValid())
     {
-        return false;
+        OutSample = FCubusTerrainFormSample();
+        OutSample.Height = 0.0f;
+        OutSample.PlainsWeight = 1.0f;
+        OutSample.RollingWeight = 0.0f;
+        OutSample.MountainWeight = 0.0f;
+        return true;
     }
 
     const float HeightVoxels = HeightMeters / static_cast<float>(VoxelSizeMeters);
-
     OutSample = FCubusTerrainFormSample();
     OutSample.Height = HeightVoxels;
 
@@ -262,7 +261,6 @@ bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
         static_cast<double>(State.RasterSettings.SampleSpacingMeters),
         VoxelSizeMeters
     );
-
     const float Left = Tile->SampleHeightMeters(WorldMetersX - ProbeMeters, WorldMetersY);
     const float Right = Tile->SampleHeightMeters(WorldMetersX + ProbeMeters, WorldMetersY);
     const float Down = Tile->SampleHeightMeters(WorldMetersX, WorldMetersY - ProbeMeters);
@@ -285,6 +283,5 @@ bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
     OutSample.MassifWeight = MountainWeight;
     OutSample.Escarpment = FMath::Clamp((Slope - 0.60f) / 1.20f, 0.0f, 1.0f);
     OutSample.SurfaceRoughness = FMath::Clamp(Slope / 1.35f, 0.0f, 1.0f);
-
     return true;
 }
