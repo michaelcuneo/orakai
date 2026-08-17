@@ -25,6 +25,7 @@ import json
 import pathlib
 from dataclasses import dataclass
 
+import analyze_dem_library as analyzer
 import prepare_linz_coastal as prep
 
 
@@ -165,7 +166,6 @@ def prepare_source(
     print(f"COLLECTION: {spec.collection_url}")
     print("=" * 78)
 
-    # Reuse the tested STAC/COG selection logic from prepare_linz_coastal.py.
     prep.COLLECTION_URL = spec.collection_url
 
     output_dir = prepared_root / spec.folder
@@ -273,6 +273,11 @@ def main() -> int:
         type=pathlib.Path,
         default=pathlib.Path("Saved/DemSourceCache"),
     )
+    parser.add_argument(
+        "--skip-analysis",
+        action="store_true",
+        help="Prepare CDEM files without rebuilding library_index.json",
+    )
     args = parser.parse_args()
 
     selected = expand_source_tokens(args.source)
@@ -318,6 +323,12 @@ def main() -> int:
     )
     print(f"Manifest: {manifest_path}")
     print(f"Attribution: {ATTRIBUTION}")
+
+    if not args.skip_analysis:
+        print()
+        print("Building searchable terrain index...")
+        analyzer.analyse_library(args.prepared_root)
+
     return 0 if library_manifest["prepared_patch_count"] > 0 else 1
 
 
