@@ -80,6 +80,9 @@ struct FSettings
 	// implicit downstream update rather than a tiny explicit timestep.
 	int32 EvolutionIterations = 12;
 	float EvolutionStepYears = 25000.0f;
+
+	// K is applied with drainage area expressed in square metres. Hydrology keeps
+	// its public/debug accumulation in km^2, and the erosion solver converts it.
 	float StreamPowerK = 5.0e-7f;
 	float StreamPowerM = 0.5f;
 	float BaseUpliftRateMPerYear = 0.00015f;
