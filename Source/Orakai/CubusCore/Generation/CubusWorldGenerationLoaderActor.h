@@ -11,6 +11,9 @@
 #include "CubusCore/Generation/CubusWorldGenerationPreviewActor.h"
 #include "CubusWorldGenerationLoaderActor.generated.h"
 
+class ACubusBlockWorldActor;
+class ACubusTerrainLodWorldActor;
+class ACubusSpawnStreamingPawn;
 class UTexture2D;
 
 UENUM(BlueprintType)
@@ -23,7 +26,10 @@ enum class ECubusGenerationLoaderStage : uint8
     Erosion UMETA(DisplayName="Coarse Erosion"),
     Deposition UMETA(DisplayName="Alluvial Deposition"),
     FineErosion UMETA(DisplayName="Fine Erosion"),
-    Complete UMETA(DisplayName="Current Pipeline Complete"),
+    SupportChunks UMETA(DisplayName="Support Chunk Pass"),
+    GameplayChunks UMETA(DisplayName="Gameplay Chunk Loading"),
+    TerrainLOD UMETA(DisplayName="Terrain LOD Loading"),
+    Complete UMETA(DisplayName="Ready for Spawn Selection"),
     Failed UMETA(DisplayName="Failed")
 };
 
@@ -46,10 +52,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCubusGenerationFinished);
 /**
  * Blueprint-facing orchestrator for the world-generation loader level.
  *
- * The loader owns the current pre-voxel generation session and exposes the real
- * generated DEM as a progressive top-down preview. Diagnostic overlays exist
- * only while their corresponding stage is running; they never become part of
- * the authored terrain.
+ * The existing WBP owns the loading UI, the spawn marker and the SPAWN button.
+ * This actor owns only the authoritative generation/loading state exposed to
+ * that Blueprint. Generation is not considered complete until the generated
+ * DEM has also completed the support-chunk pass, full gameplay chunk pass and
+ * LOD1-LOD6 visual pass in this same world.
  */
 UCLASS(BlueprintType, Blueprintable)
 class ORAKAI_API ACubusWorldGenerationLoaderActor : public AActor
@@ -82,13 +89,20 @@ public:
     UFUNCTION(BlueprintPure, Category="Cubus|Generation")
     FText GetStageDisplayName() const;
 
+    /** True only after DEM generation + support chunks + gameplay chunks + LOD1-LOD6 are resident. */
+    UFUNCTION(BlueprintPure, Category="Cubus|Generation|Spawn", meta=(DisplayName="Is Generated Spawn Selection Ready"))
+    bool IsGeneratedSpawnSelectionReady() const
+    {
+        return Stage == ECubusGenerationLoaderStage::Complete;
+    }
+
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Preview")
     UTexture2D* GetPreviewTexture() const { return PreviewTexture; }
 
     /**
      * Existing WBP integration point for the interactive 3D preview.
      * If a preview actor was placed in the generation level it is reused;
-     * otherwise the loader creates one. The WBP never needs another UI system.
+     * otherwise the loader creates one. The WBP remains the UI owner.
      */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|3D Preview",
         meta=(DisplayName="Get Or Create Generated Terrain 3D Preview"))
@@ -130,7 +144,7 @@ public:
         return GeneratedTerrainPreviewActor;
     }
 
-    /** Preserve the final DEM preview across OpenLevel for the runtime spawn picker. */
+    /** Preserve the final DEM preview for the Blueprint spawn picker. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Preview", meta=(DisplayName="Publish Generated DEM Preview"))
     void PublishPreviewSnapshotToRuntime()
     {
@@ -143,8 +157,8 @@ public:
 
     /**
      * Set the proposed spawn from a normalized point on the DEM preview.
-     * PreviewUV.X and PreviewUV.Y are expected in the 0..1 range where
-     * (0,0) is the top-left of the preview image and (1,1) is bottom-right.
+     * This is intentionally locked until all generated terrain loading passes
+     * are complete, so the existing WBP cannot unlock its spawn workflow early.
      */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Set Generated Spawn From Preview UV"))
     bool SetGeneratedSpawnFromPreviewUV(FVector2D PreviewUV, FVector2D& OutWorldMeters)
@@ -188,10 +202,12 @@ public:
         return FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(OutWorldMeters);
     }
 
+    /** The existing WBP SPAWN button calls this after the loading passes have finished. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Confirm Generated Spawn"))
     bool ConfirmGeneratedSpawn(FVector2D& OutWorldMeters)
     {
-        if (!FCubusGeneratedTerrainRuntime::ConfirmProposedSpawn())
+        if (Stage != ECubusGenerationLoaderStage::Complete ||
+            !FCubusGeneratedTerrainRuntime::ConfirmProposedSpawn())
         {
             OutWorldMeters = FVector2D::ZeroVector;
             return false;
@@ -219,34 +235,16 @@ public:
     }
 
     /**
-     * The only intended transition from the generation picker into gameplay.
-     * Generation completion alone never travels. The player must have explicitly
-     * confirmed a proposed DEM spawn first. The gameplay GameMode then keeps the
-     * controller on its hidden streaming focus pawn through the full chunk-load
-     * pass before the real character is created.
+     * Compatibility node retained so an existing Blueprint does not break if it
+     * already contains it. It no longer opens another level. Confirm Generated
+     * Spawn is the action that authorizes the GameMode to create the player in
+     * this current world.
      */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Enter Generated World"))
     bool EnterGeneratedWorld()
     {
-        if (Stage != ECubusGenerationLoaderStage::Complete)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Cubus refused generated-world travel: generation is not complete."));
-            return false;
-        }
-        if (!FCubusGeneratedTerrainRuntime::HasConfirmedSpawn())
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Cubus refused generated-world travel: no spawn point has been confirmed."));
-            return false;
-        }
-        if (!IsValid(GetWorld()) || GameplayLevelName.IsNone())
-        {
-            UE_LOG(LogTemp, Error, TEXT("Cubus refused generated-world travel: gameplay level is invalid."));
-            return false;
-        }
-
-        PublishPreviewSnapshotToRuntime();
-        UGameplayStatics::OpenLevel(this, GameplayLevelName);
-        return true;
+        return Stage == ECubusGenerationLoaderStage::Complete &&
+            FCubusGeneratedTerrainRuntime::HasConfirmedSpawn();
     }
 
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Diagnostics")
@@ -264,15 +262,20 @@ public:
     UPROPERTY(BlueprintAssignable, Category="Cubus|Generation|Events")
     FCubusGenerationProgressChanged OnProgressChanged;
 
+    /**
+     * Existing Blueprint completion event. It now means the COMPLETE flow:
+     * DEM generated, support chunk ready, full gameplay chunks ready and
+     * LOD1-LOD6 ready. This is the event that should unlock the marker/button.
+     */
     UPROPERTY(BlueprintAssignable, Category="Cubus|Generation|Events")
     FCubusGenerationFinished OnGenerationFinished;
 
-    /** Legacy setting retained for placed actors. Generation completion no longer auto-travels. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation")
+    /** Retained only for old placed-actor serialization. There is no automatic level travel. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(DeprecatedProperty, DeprecationMessage="Generated worlds now load and spawn in the current world."))
     bool bTravelToGameplayWhenComplete = false;
 
-    /** Gameplay map opened only by Enter Generated World after spawn confirmation. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation")
+    /** Retained only for old placed-actor serialization. No generated-world flow opens this level. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(DeprecatedProperty, DeprecationMessage="Generated worlds now load and spawn in the current world."))
     FName GameplayLevelName = TEXT("Lvl_ThirdPerson");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(ClampMin="0.5", UIMin="1.0"))
@@ -322,6 +325,9 @@ private:
     void BuildSettings();
     void BuildWorkQueues();
     void BeginStage(ECubusGenerationLoaderStage NewStage);
+    void BeginRuntimeTerrainLoading();
+    void ProcessRuntimeTerrainLoading();
+    void UpdateRuntimeLoadingProgress(float InStageProgress, float StageIndex);
     void FinishCurrentPipeline();
 
     void ProcessStructuralDEM();
@@ -368,6 +374,15 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<ACubusWorldGenerationPreviewActor> GeneratedTerrainPreviewActor = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<ACubusBlockWorldActor> RuntimeBlockWorld = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<ACubusTerrainLodWorldActor> RuntimeLodWorld = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<ACubusSpawnStreamingPawn> RuntimeStreamingPawn = nullptr;
 
     TArray<float> PreviewHeightMeters;
     TArray<FColor> PreviewPixels;
