@@ -1,16 +1,19 @@
 #include "CubusCore/Generation/CubusLandscapeEvolution.h"
 
+#include "Async/ParallelFor.h"
 #include "HAL/PlatformTime.h"
 
 namespace CubusLandscapeEvolution
 {
 namespace
 {
+constexpr double SqrtTwo = 1.4142135623730950488;
+
 float ReceiverDistanceMeters(const FGlobalDem& Dem, const int32 Cell, const int32 Receiver)
 {
 	const FIntPoint A = Dem.Coordinates(Cell);
 	const FIntPoint B = Dem.Coordinates(Receiver);
-	return static_cast<float>(Dem.CellSizeMeters * ((A.X != B.X && A.Y != B.Y) ? UE_SQRT_2 : 1.0));
+	return static_cast<float>(Dem.CellSizeMeters * ((A.X != B.X && A.Y != B.Y) ? SqrtTwo : 1.0));
 }
 
 float ProvinceAgeMultiplier(const FGlobalDem& Dem, const int32 Cell)
@@ -74,12 +77,11 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 
 	const double Start = FPlatformTime::Seconds();
 	const int32 N = InOutDem.NumCells();
+	const int32 R = InOutDem.Resolution;
 	const TArray<float> StartingElevation = InOutDem.ElevationM;
 	InOutDem.StreamIncisionM.Init(0.0f, N);
 	InOutDem.EvolutionDeltaM.Init(0.0f, N);
-	TArray<float> BeforeIncision;
 	TArray<float> Diffused;
-	BeforeIncision.SetNumUninitialized(N);
 	Diffused.SetNumUninitialized(N);
 
 	double TotalIncision = 0.0;
@@ -105,28 +107,29 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 			}
 		}
 
-		BeforeIncision = InOutDem.ElevationM;
-
-		TArray<int32> DownstreamFirst;
-		DownstreamFirst.SetNumUninitialized(N);
-		for (int32 I = 0; I < N; ++I)
+		if (InOutDem.FlowOrder.Num() != N)
 		{
-			DownstreamFirst[I] = I;
+			if (OutError)
+			{
+				*OutError = TEXT("Hydrology flow order is missing or incomplete before landscape evolution.");
+			}
+			return false;
 		}
-		DownstreamFirst.Sort([&InOutDem](const int32 A, const int32 B)
-		{
-			return InOutDem.HydrologyElevationM[A] < InOutDem.HydrologyElevationM[B];
-		});
 
-		for (const int32 Cell : DownstreamFirst)
+		// FlowOrder is source-to-outlet. Iterating it backwards is therefore
+		// downstream-to-upstream, exactly the dependency order required by the
+		// n=1 implicit stream-power solve. No N log N elevation sort is necessary.
+		for (int32 OrderIndex = N - 1; OrderIndex >= 0; --OrderIndex)
 		{
-			const FIntPoint Coordinates = InOutDem.Coordinates(Cell);
-			if (InOutDem.IsBoundaryCell(Coordinates.X, Coordinates.Y) || InOutDem.ElevationM[Cell] <= Settings.OceanLevelM)
+			const int32 Cell = InOutDem.FlowOrder[OrderIndex];
+			const int32 X = Cell % R;
+			const int32 Y = Cell / R;
+			if (X == 0 || Y == 0 || X == R - 1 || Y == R - 1 || InOutDem.ElevationM[Cell] <= Settings.OceanLevelM)
 			{
 				continue;
 			}
 
-			const int32 Receiver = InOutDem.Receiver.IsValidIndex(Cell) ? InOutDem.Receiver[Cell] : INDEX_NONE;
+			const int32 Receiver = InOutDem.Receiver[Cell];
 			const float UpliftRate = NormalizedUpliftRate(Settings, InOutDem, Cell);
 			const float TectonicElevation = InOutDem.ElevationM[Cell] + UpliftRate * Settings.EvolutionStepYears;
 			if (Receiver == INDEX_NONE)
@@ -158,11 +161,15 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 		Diffused = InOutDem.ElevationM;
 		const double Dx = FMath::Max(1.0, InOutDem.CellSizeMeters);
 		const double Dx2 = Dx * Dx;
-		for (int32 Y = 1; Y < InOutDem.Resolution - 1; ++Y)
+
+		// Hillslope transport reads the old elevation buffer and writes independent
+		// cells in Diffused, so rows can be processed safely in parallel.
+		ParallelFor(FMath::Max(0, R - 2), [&InOutDem, &Settings, &Diffused, R, Dx, Dx2](const int32 Row)
 		{
-			for (int32 X = 1; X < InOutDem.Resolution - 1; ++X)
+			const int32 Y = Row + 1;
+			for (int32 X = 1; X < R - 1; ++X)
 			{
-				const int32 Cell = InOutDem.Index(X, Y);
+				const int32 Cell = Y * R + X;
 				if (InOutDem.ElevationM[Cell] <= Settings.OceanLevelM)
 				{
 					continue;
@@ -170,12 +177,12 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 				const EProvinceType Province = InOutDem.ProvinceId.IsValidIndex(Cell)
 					? static_cast<EProvinceType>(InOutDem.ProvinceId[Cell])
 					: EProvinceType::StablePlain;
-				const FProvinceParameters ProvinceParameters = GetDefaultProvinceParameters(Province);
+				const FProvinceParameters ProvinceParameters = FGenerator::GetDefaultProvinceParameters(Province);
 				const float Center = InOutDem.ElevationM[Cell];
-				const float Ex = InOutDem.ElevationM[InOutDem.Index(X + 1, Y)];
-				const float Wx = InOutDem.ElevationM[InOutDem.Index(X - 1, Y)];
-				const float Ny = InOutDem.ElevationM[InOutDem.Index(X, Y + 1)];
-				const float Sy = InOutDem.ElevationM[InOutDem.Index(X, Y - 1)];
+				const float Ex = InOutDem.ElevationM[Cell + 1];
+				const float Wx = InOutDem.ElevationM[Cell - 1];
+				const float Ny = InOutDem.ElevationM[Cell + R];
+				const float Sy = InOutDem.ElevationM[Cell - R];
 				const float GradX = static_cast<float>((Ex - Wx) / (2.0 * Dx));
 				const float GradY = static_cast<float>((Ny - Sy) / (2.0 * Dx));
 				const float Slope = FMath::Sqrt(GradX * GradX + GradY * GradY);
@@ -191,7 +198,8 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 				const double Laplacian = (Ex + Wx + Ny + Sy - 4.0 * Center) / Dx2;
 				Diffused[Cell] = Center + static_cast<float>(D * Dt * Laplacian);
 			}
-		}
+		});
+
 		InOutDem.ElevationM = MoveTemp(Diffused);
 		Diffused.SetNumUninitialized(N);
 	}
