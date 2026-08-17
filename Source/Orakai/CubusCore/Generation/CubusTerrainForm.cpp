@@ -1,4 +1,5 @@
 #include "CubusCore/Generation/CubusTerrainForm.h"
+#include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
 #include "CubusCore/Generation/CubusWorldScale.h"
 
 FCubusTerrainFormSample FCubusTerrainForm::Sample(
@@ -7,6 +8,17 @@ FCubusTerrainFormSample FCubusTerrainForm::Sample(
     const FCubusTerrainFormSettings& InSettings
 )
 {
+    FCubusTerrainFormSample GeneratedSample;
+    if (FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
+        WorldX,
+        WorldY,
+        InSettings.VoxelSizeCm,
+        GeneratedSample
+    ))
+    {
+        return GeneratedSample;
+    }
+
     FCubusTerrainFormSettings Settings = InSettings;
     Settings.ContinentAmplitude = FMath::Max(0.0f, Settings.ContinentAmplitude);
     Settings.ContinentFrequency = FMath::Max(0.000001f, Settings.ContinentFrequency);
