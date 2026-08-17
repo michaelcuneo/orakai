@@ -8,7 +8,7 @@
  *
  * The raster is authored in physical metres and deliberately has no knowledge
  * of the final density voxel size. The default source is a 1 m DEM-like grid
- * split into 512 m tiles with a two-sample interpolation halo.
+ * split into 512 m tiles with a retained interpolation/processing halo.
  */
 struct ORAKAI_API FCubusTerrainRasterSettings
 {
@@ -18,7 +18,7 @@ struct ORAKAI_API FCubusTerrainRasterSettings
     /** Requested interior tile width. Resolved to an integer number of cells. */
     float TileSizeMeters = 512.0f;
 
-    /** Samples retained outside each tile edge for seamless cubic reconstruction. */
+    /** Samples retained outside each tile edge for seamless reconstruction/passes. */
     int32 HaloSamples = 2;
 
     /** Deterministic seed-domain displacement expressed in metres, not voxels. */
@@ -53,7 +53,7 @@ public:
     float GetHeightSampleMeters(int32 GridX, int32 GridY) const;
 
     /**
-     * Seamless bounded bicubic reconstruction of the authored 1 m terrain.
+     * Seamless bounded bicubic reconstruction of the authored terrain.
      * The query is in physical metres and may lie anywhere inside this tile.
      */
     float SampleHeightMeters(double WorldXmeters, double WorldYmeters) const;
@@ -61,6 +61,7 @@ public:
 private:
     friend class FCubusTerrainRasterBuilder;
     friend class FCubusTerrainCarving;
+    friend class FCubusTerrainErosion;
 
     static float CubicInterpolate(float P0, float P1, float P2, float P3, float Alpha);
     int32 StorageIndex(int32 GridX, int32 GridY) const;
@@ -76,10 +77,6 @@ private:
 
 /**
  * Builds deterministic high-resolution terrain tiles before any voxelisation.
- *
- * The raster now contains only broad structural elevation: connected mountain
- * systems, massifs, passes, shoulders and basins. Drainage, erosion, cliffs and
- * density-domain details are intentionally separate later stages.
  */
 class ORAKAI_API FCubusTerrainRasterBuilder
 {
@@ -89,20 +86,12 @@ public:
         const FCubusTerrainRasterSettings& Settings
     );
 
-    /**
-     * Authoritative continuous source beneath the 1 m raster.
-     *
-     * Large pre-voxel analysis passes such as drainage use this rather than
-     * materialising every intervening 1 m tile. BuildTile() uses the exact same
-     * function, so analysis and authored raster heights cannot drift apart.
-     */
     static float SampleStructuralHeightMeters(
         double WorldXmeters,
         double WorldYmeters,
         const FCubusTerrainRasterSettings& Settings
     );
 
-    /** Resolve the unique tile containing a physical XY point. */
     static FIntPoint WorldToTileCoordinate(
         double WorldXmeters,
         double WorldYmeters,
