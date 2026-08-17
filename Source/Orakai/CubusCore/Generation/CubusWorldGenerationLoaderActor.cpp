@@ -1,4 +1,5 @@
 #include "CubusCore/Generation/CubusWorldGenerationLoaderActor.h"
+#include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
 
 #include "Engine/Texture2D.h"
 #include "Rendering/Texture2DResource.h"
@@ -55,12 +56,19 @@ void ACubusWorldGenerationLoaderActor::StartGeneration(const int32 InWorldSeed)
     ResetSession();
     WorldSeed = InWorldSeed;
     BuildSettings();
+
+    // The generated DEM is the macro-height authority consumed later by the
+    // canonical 80 cm density world. Configure a fresh handoff before any tile
+    // is authored so same-seed regenerations cannot retain stale tile data.
+    FCubusGeneratedTerrainRuntime::Configure(WorldSeed, RasterSettings);
+
     BuildWorkQueues();
     EnsurePreviewTexture();
     ClearPreview();
 
     if (TerrainTileQueue.IsEmpty())
     {
+        FCubusGeneratedTerrainRuntime::Reset();
         BeginStage(ECubusGenerationLoaderStage::Failed);
         return;
     }
@@ -70,6 +78,7 @@ void ACubusWorldGenerationLoaderActor::StartGeneration(const int32 InWorldSeed)
 
 void ACubusWorldGenerationLoaderActor::CancelGeneration()
 {
+    FCubusGeneratedTerrainRuntime::Reset();
     ResetSession();
     EnsurePreviewTexture();
     ClearPreview();
@@ -253,6 +262,15 @@ void ACubusWorldGenerationLoaderActor::FinishCurrentPipeline()
     OverallProgress = 1.0f;
     RebuildTerrainPreview(false);
     UploadPreview();
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("Cubus generated terrain ready for runtime density: seed=%d tiles=%d voxelSize=80cm"),
+        WorldSeed,
+        FCubusGeneratedTerrainRuntime::GetTileCount()
+    );
+
     OnStageChanged.Broadcast(Stage);
     OnProgressChanged.Broadcast(Stage, 1.0f);
     OnGenerationFinished.Broadcast();
@@ -277,6 +295,7 @@ void ACubusWorldGenerationLoaderActor::ProcessStructuralDEM()
     }
 
     TerrainTiles.Add(TileCoordinate, Tile);
+    FCubusGeneratedTerrainRuntime::StoreTile(Tile);
     PaintTileToPreview(Tile);
     RebuildTerrainPreview(false);
     ++CurrentWorkIndex;
@@ -341,6 +360,7 @@ void ACubusWorldGenerationLoaderActor::ProcessTerrainCarving()
     }
 
     *StructuralTile = MoveTemp(Carved);
+    FCubusGeneratedTerrainRuntime::StoreTileIfActive(*StructuralTile);
     PaintTileToPreview(*StructuralTile);
     RebuildTerrainPreview(false);
 
@@ -375,6 +395,7 @@ void ACubusWorldGenerationLoaderActor::ProcessErosion()
     }
 
     *Tile = MoveTemp(Eroded);
+    FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
     PaintTileToPreview(*Tile);
     RebuildTerrainPreview(false);
 
@@ -401,7 +422,12 @@ void ACubusWorldGenerationLoaderActor::ProcessDeposition()
         return;
     }
 
-    FCubusTerrainRasterTile Deposited = FCubusTerrainDeposition::DepositTile(*Tile, DepositionSettings);
+    FCubusTerrainRasterTile Deposited = FCubusTerrainDeposition::DepositTile(
+        *Tile,
+        DepositionSettings,
+        CarvingSettings,
+        DrainageSegments
+    );
     if (!Deposited.IsValid())
     {
         BeginStage(ECubusGenerationLoaderStage::Failed);
@@ -409,6 +435,7 @@ void ACubusWorldGenerationLoaderActor::ProcessDeposition()
     }
 
     *Tile = MoveTemp(Deposited);
+    FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
     PaintTileToPreview(*Tile);
     RebuildTerrainPreview(false);
 
@@ -443,6 +470,7 @@ void ACubusWorldGenerationLoaderActor::ProcessFineErosion()
     }
 
     *Tile = MoveTemp(Refined);
+    FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
     PaintTileToPreview(*Tile);
     RebuildTerrainPreview(false);
 
