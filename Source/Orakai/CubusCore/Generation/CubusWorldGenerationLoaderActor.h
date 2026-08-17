@@ -84,7 +84,7 @@ public:
 
     /** Preserve the final DEM preview across OpenLevel for the runtime spawn picker. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Preview", meta=(DisplayName="Publish Generated DEM Preview"))
-    void PublishPreviewSnapshotToRuntime() const
+    void PublishPreviewSnapshotToRuntime()
     {
         FCubusGeneratedTerrainRuntime::StorePreviewSnapshot(
             FMath::Clamp(PreviewTextureResolution, 64, 2048),
@@ -99,7 +99,7 @@ public:
      * (0,0) is the top-left of the preview image and (1,1) is bottom-right.
      */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Set Generated Spawn From Preview UV"))
-    bool SetGeneratedSpawnFromPreviewUV(FVector2D PreviewUV, FVector2D& OutWorldMeters) const
+    bool SetGeneratedSpawnFromPreviewUV(FVector2D PreviewUV, FVector2D& OutWorldMeters)
     {
         if (Stage != ECubusGenerationLoaderStage::Complete)
         {
@@ -118,7 +118,7 @@ public:
         FVector2D PreviewSize,
         FVector2D& OutPreviewUV,
         FVector2D& OutWorldMeters
-    ) const
+    )
     {
         if (PreviewSize.X <= UE_SMALL_NUMBER || PreviewSize.Y <= UE_SMALL_NUMBER)
         {
@@ -141,7 +141,7 @@ public:
     }
 
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Confirm Generated Spawn"))
-    bool ConfirmGeneratedSpawn(FVector2D& OutWorldMeters) const
+    bool ConfirmGeneratedSpawn(FVector2D& OutWorldMeters)
     {
         if (!FCubusGeneratedTerrainRuntime::ConfirmProposedSpawn())
         {
@@ -261,7 +261,7 @@ private:
     void RebuildTerrainPreview(bool bOverlayDrainage);
     void DrawDrainageSegmentsToPreview(const TArray<FCubusTerrainDrainageSegment>& Segments);
     FColor HeightToPreviewColor(float NormalizedHeight, float Hillshade) const;
-    FIntPoint WorldToPreviewPixel(const FVector2D& WorldMeters) const;
+    FIntPoint WorldToPreviewPixel(int32 PixelX, int32 PixelY) const;
     FVector2D PreviewPixelToWorld(int32 PixelX, int32 PixelY) const;
     void DrawPreviewLine(FIntPoint Start, FIntPoint End, const FColor& Color, int32 RadiusPixels);
 
