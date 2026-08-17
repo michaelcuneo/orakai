@@ -3,6 +3,10 @@
 #include "ProceduralMeshComponent.h"
 #include "Materials/MaterialInterface.h"
 
+#if WITH_EDITOR
+#include "UObject/UnrealType.h"
+#endif
+
 ACubusLandscapeEvolutionController::ACubusLandscapeEvolutionController()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -24,6 +28,48 @@ void ACubusLandscapeEvolutionController::OnConstruction(const FTransform& Transf
 		RebuildPreview();
 	}
 }
+
+#if WITH_EDITOR
+void ACubusLandscapeEvolutionController::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	const FName ChangedPropertyName = PropertyChangedEvent.Property != nullptr
+		? PropertyChangedEvent.Property->GetFName()
+		: NAME_None;
+
+	if (ChangedPropertyName == GET_MEMBER_NAME_CHECKED(ACubusLandscapeEvolutionController, EditorAction))
+	{
+		const ECubusLandscapeEditorAction Action = EditorAction;
+		EditorAction = ECubusLandscapeEditorAction::None;
+
+		switch (Action)
+		{
+		case ECubusLandscapeEditorAction::GenerateWorldSkeleton:
+			GenerateWorldSkeleton();
+			break;
+		case ECubusLandscapeEditorAction::SolveGlobalHydrology:
+			SolveGlobalHydrology();
+			break;
+		case ECubusLandscapeEditorAction::EvolveLandscape:
+			EvolveLandscape();
+			break;
+		case ECubusLandscapeEditorAction::GenerateAndSolve:
+			GenerateAndSolve();
+			break;
+		case ECubusLandscapeEditorAction::GenerateSolveAndEvolve:
+			GenerateSolveAndEvolve();
+			break;
+		case ECubusLandscapeEditorAction::RebuildPreview:
+			RebuildPreview();
+			break;
+		case ECubusLandscapeEditorAction::None:
+		default:
+			break;
+		}
+	}
+
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+}
+#endif
 
 CubusLandscapeEvolution::FSettings ACubusLandscapeEvolutionController::MakeSettings() const
 {
