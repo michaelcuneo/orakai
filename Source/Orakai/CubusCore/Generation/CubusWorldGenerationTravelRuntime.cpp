@@ -1,4 +1,5 @@
 #include "CubusCore/Generation/CubusWorldGenerationLoaderActor.h"
+#include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
 
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -27,6 +28,14 @@ namespace CubusWorldGenerationTravelRuntime
             return;
         }
 
+        // Generation completion is no longer permission to enter gameplay.
+        // The player must explicitly select and confirm a spawn location from
+        // the generated terrain preview first.
+        if (!FCubusGeneratedTerrainRuntime::HasConfirmedSpawn())
+        {
+            return;
+        }
+
         for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(World); Iterator; ++Iterator)
         {
             ACubusWorldGenerationLoaderActor* Loader = *Iterator;
@@ -42,9 +51,9 @@ namespace CubusWorldGenerationTravelRuntime
             UE_LOG(
                 LogTemp,
                 Display,
-                TEXT("Cubus generation complete; opening gameplay level '%s' for seed %d"),
+                TEXT("Cubus spawn confirmed; opening gameplay level '%s' for generated seed %d"),
                 *Loader->GameplayLevelName.ToString(),
-                Loader->GetWorldSeed()
+                FCubusGeneratedTerrainRuntime::GetWorldSeed()
             );
             UGameplayStatics::OpenLevel(World, Loader->GameplayLevelName);
             return;
