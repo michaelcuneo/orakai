@@ -26,7 +26,7 @@ enum class EOrakaiDensityTool : uint8
 	Restore = 5
 };
 
-UCLASS(abstract)
+UCLASS()
 class AOrakaiCharacter : public ACharacter
 {
 	GENERATED_BODY()
