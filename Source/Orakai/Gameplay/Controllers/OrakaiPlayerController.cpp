@@ -7,6 +7,7 @@
 #include "CubusCore/Actors/CubusTerrainLodWorldActor.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
+#include "CubusCore/Generation/CubusWorldGenerationLoaderActor.h"
 #include "CubusCore/Meshing/CubusDensityMesher.h"
 #include "CubusCore/UI/OrakaiWorldLoadingWidget.h"
 #include "DrawDebugHelpers.h"
@@ -62,12 +63,12 @@ bool ResolveSectionAndFace(UProceduralMeshComponent* ProceduralMesh, const FHitR
 		if (RemainingFaceIndex < TriangleCount)
 		{
 			OutSection = Section;
-			OutFaceIndex = RemainingFaceIndex;
-			OutSectionIndex = SectionIndex;
-			return true;
+				OutFaceIndex = RemainingFaceIndex;
+				OutSectionIndex = SectionIndex;
+				return true;
+			}
+			RemainingFaceIndex -= TriangleCount;
 		}
-		RemainingFaceIndex -= TriangleCount;
-	}
 	return false;
 }
 
@@ -119,12 +120,34 @@ void AOrakaiPlayerController::BeginPlay()
 	if (IsValid(WorldLoadingWidget))
 	{
 		EnterWorldLoadingInputMode();
+		return;
 	}
-	else
+
+	// The generation level is a UI-driven staging screen. Do not force the
+	// controller back into GameOnly here, because that immediately hides the
+	// cursor after WBP_WorldGenerationLoader enables it.
+	if (IsLocalPlayerController() && IsValid(GetWorld()))
 	{
-		EnterGameplayInputMode();
-		CreateMobileControlsIfNeeded();
+		for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(GetWorld()); Iterator; ++Iterator)
+		{
+			if (!IsValid(*Iterator))
+			{
+				continue;
+			}
+
+			FInputModeGameAndUI GenerationInputMode;
+			GenerationInputMode.SetHideCursorDuringCapture(false);
+			GenerationInputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			SetInputMode(GenerationInputMode);
+			SetShowMouseCursor(true);
+			bEnableClickEvents = true;
+			bEnableMouseOverEvents = true;
+			return;
+		}
 	}
+
+	EnterGameplayInputMode();
+	CreateMobileControlsIfNeeded();
 }
 
 void AOrakaiPlayerController::InitializeWorldLoadingScreen()
