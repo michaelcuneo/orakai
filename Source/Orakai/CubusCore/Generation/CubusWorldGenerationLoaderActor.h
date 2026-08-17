@@ -99,6 +99,13 @@ public:
     UPROPERTY(BlueprintAssignable, Category="Cubus|Generation|Events")
     FCubusGenerationFinished OnGenerationFinished;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation")
+    bool bTravelToGameplayWhenComplete = true;
+
+    /** Gameplay map opened once the generated DEM has been published to runtime density. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(EditCondition="bTravelToGameplayWhenComplete"))
+    FName GameplayLevelName = TEXT("Lvl_ThirdPerson");
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(ClampMin="0.5", UIMin="1.0"))
     FVector2D GenerationSizeKm = FVector2D(4.0, 4.0);
 
