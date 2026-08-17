@@ -57,15 +57,12 @@ FCubusTerrainRasterTile FCubusTerrainErosion::ErodeTile(
                 const float Up = HeightAt(Current, Size, X, Y - 1);
                 const float Down = HeightAt(Current, Size, X, Y + 1);
 
-                const float MinimumNeighbour = FMath::Min4(Left, Right, Up, Down);
-                const float MaximumNeighbour = FMath::Max4(Left, Right, Up, Down);
+                const float MinimumNeighbour = FMath::Min(FMath::Min(Left, Right), FMath::Min(Up, Down));
+                const float MaximumNeighbour = FMath::Max(FMath::Max(Left, Right), FMath::Max(Up, Down));
                 const float MeanNeighbour = (Left + Right + Up + Down) * 0.25f;
 
                 float NewHeight = Centre;
 
-                // Thermal weathering: only material above the local talus limit
-                // is relaxed. This softens impossible spikes without flattening
-                // coherent ridges or broad mountain faces.
                 const float ExcessTalus = Centre - MinimumNeighbour - TalusRise;
                 if (ExcessTalus > 0.0f)
                 {
@@ -77,9 +74,6 @@ FCubusTerrainRasterTile FCubusTerrainErosion::ErodeTile(
                     FMath::Max(FMath::Abs(Centre - Up), FMath::Abs(Centre - Down))
                 );
 
-                // Concavity is a useful local proxy for rills: places below the
-                // surrounding mean and still sitting on a real slope are where
-                // runoff preferentially deepens small gullies.
                 const float Concavity = FMath::Max(0.0f, MeanNeighbour - Centre);
                 if (LocalSlope > MinimumIncisionRise && Concavity > 0.0f)
                 {
@@ -90,8 +84,6 @@ FCubusTerrainRasterTile FCubusTerrainErosion::ErodeTile(
                     NewHeight -= Incision;
                 }
 
-                // Very small diffusion on rough/convex terrain removes grid-scale
-                // chatter while retaining sharp drainage lines and escarpments.
                 if (Centre > MeanNeighbour || MaximumNeighbour - MinimumNeighbour > TalusRise * 0.5f)
                 {
                     NewHeight = FMath::Lerp(NewHeight, MeanNeighbour, Settings.HillslopeDiffusion);
