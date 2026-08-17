@@ -38,6 +38,12 @@ void ACubusWorldGenerationLoaderActor::Tick(float DeltaSeconds)
         case ECubusGenerationLoaderStage::Erosion:
             ProcessErosion();
             break;
+        case ECubusGenerationLoaderStage::Deposition:
+            ProcessDeposition();
+            break;
+        case ECubusGenerationLoaderStage::FineErosion:
+            ProcessFineErosion();
+            break;
         default:
             return;
         }
@@ -82,7 +88,11 @@ FText ACubusWorldGenerationLoaderActor::GetStageDisplayName() const
     case ECubusGenerationLoaderStage::TerrainCarving:
         return FText::FromString(TEXT("Carving Valleys and Rivers"));
     case ECubusGenerationLoaderStage::Erosion:
-        return FText::FromString(TEXT("Eroding Slopes and Gullies"));
+        return FText::FromString(TEXT("Coarse Hillslope Erosion"));
+    case ECubusGenerationLoaderStage::Deposition:
+        return FText::FromString(TEXT("Building Floodplains and Alluvial Fans"));
+    case ECubusGenerationLoaderStage::FineErosion:
+        return FText::FromString(TEXT("Cutting Fine Gullies and Weathering"));
     case ECubusGenerationLoaderStage::Complete:
         return FText::FromString(TEXT("Terrain Generation Complete"));
     case ECubusGenerationLoaderStage::Failed:
@@ -131,14 +141,37 @@ void ACubusWorldGenerationLoaderActor::BuildSettings()
     ErosionSettings = FCubusTerrainErosionSettings();
     ErosionSettings.Iterations = FMath::Clamp(ErosionIterations, 1, 12);
     ErosionSettings.TalusAngleDegrees = FMath::Clamp(ErosionTalusAngleDegrees, 5.0f, 60.0f);
+    ErosionSettings.ThermalTransport = 0.23f;
+    ErosionSettings.ConcavityIncision = 0.20f;
+    ErosionSettings.MaxIncisionPerIterationMeters = 0.55f;
+    ErosionSettings.MinimumIncisionSlopeDegrees = 2.5f;
+    ErosionSettings.HillslopeDiffusion = 0.045f;
+
+    DepositionSettings = FCubusTerrainDepositionSettings();
+    DepositionSettings.Iterations = FMath::Clamp(DepositionIterations, 1, 8);
+
+    FineErosionSettings = FCubusTerrainErosionSettings();
+    FineErosionSettings.Iterations = FMath::Clamp(FineErosionIterations, 1, 8);
+    FineErosionSettings.TalusAngleDegrees = 36.0f;
+    FineErosionSettings.ThermalTransport = 0.11f;
+    FineErosionSettings.ConcavityIncision = 0.42f;
+    FineErosionSettings.MaxIncisionPerIterationMeters = 0.38f;
+    FineErosionSettings.MinimumIncisionSlopeDegrees = 1.4f;
+    FineErosionSettings.HillslopeDiffusion = 0.018f;
 
     RasterSettings = FCubusTerrainRasterSettings();
     RasterSettings.SampleSpacingMeters = FMath::Max(0.25f, DEMSampleSpacingMeters);
     RasterSettings.TileSizeMeters = FMath::Max(64.0f, DEMTileSizeMeters);
-    // Bicubic interpolation needs two samples. Repeated erosion needs one fresh
-    // neighbour layer per pass; retaining extra halo keeps tile-edge results
-    // identical because both tiles evaluate the same world-space neighbourhood.
-    RasterSettings.HaloSamples = FMath::Max(2, ErosionSettings.Iterations + 2);
+
+    // Every stencil iteration can move information one sample. The retained
+    // world-space halo covers the entire refinement chain, not just one pass,
+    // so a shared 512 m tile boundary sees the same neighbourhood on both sides.
+    RasterSettings.HaloSamples = FMath::Max(
+        2,
+        ErosionSettings.Iterations +
+        DepositionSettings.Iterations +
+        FineErosionSettings.Iterations + 3
+    );
     RasterSettings.Structure.Seed = WorldSeed;
 
     DrainageSettings = FCubusTerrainDrainageSettings();
@@ -157,6 +190,7 @@ void ACubusWorldGenerationLoaderActor::BuildSettings()
 
     CarvingSettings = FCubusTerrainCarvingSettings();
     CarvingSettings.Drainage = DrainageSettings;
+    CarvingSettings.SegmentBucketSizeMeters = 96.0f;
 }
 
 void ACubusWorldGenerationLoaderActor::BuildWorkQueues()
@@ -254,8 +288,6 @@ void ACubusWorldGenerationLoaderActor::ProcessDrainage()
 {
     if (!DrainageRegionQueue.IsValidIndex(CurrentWorkIndex))
     {
-        // The blue stream graph is a diagnostic for this stage only. Restore the
-        // DEM before carving so guide lines never survive into later previews.
         RebuildTerrainPreview(false);
         UploadPreview();
         BeginStage(ECubusGenerationLoaderStage::TerrainCarving);
@@ -323,27 +355,95 @@ void ACubusWorldGenerationLoaderActor::ProcessErosion()
     {
         RebuildTerrainPreview(false);
         UploadPreview();
-        FinishCurrentPipeline();
+        BeginStage(ECubusGenerationLoaderStage::Deposition);
         return;
     }
 
     const FIntPoint TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
-    FCubusTerrainRasterTile* CarvedTile = TerrainTiles.Find(TileCoordinate);
-    if (CarvedTile == nullptr || !CarvedTile->IsValid())
+    FCubusTerrainRasterTile* Tile = TerrainTiles.Find(TileCoordinate);
+    if (Tile == nullptr || !Tile->IsValid())
     {
         BeginStage(ECubusGenerationLoaderStage::Failed);
         return;
     }
 
-    FCubusTerrainRasterTile Eroded = FCubusTerrainErosion::ErodeTile(*CarvedTile, ErosionSettings);
+    FCubusTerrainRasterTile Eroded = FCubusTerrainErosion::ErodeTile(*Tile, ErosionSettings);
     if (!Eroded.IsValid())
     {
         BeginStage(ECubusGenerationLoaderStage::Failed);
         return;
     }
 
-    *CarvedTile = MoveTemp(Eroded);
-    PaintTileToPreview(*CarvedTile);
+    *Tile = MoveTemp(Eroded);
+    PaintTileToPreview(*Tile);
+    RebuildTerrainPreview(false);
+
+    ++CurrentWorkIndex;
+    SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
+    UploadPreview();
+}
+
+void ACubusWorldGenerationLoaderActor::ProcessDeposition()
+{
+    if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
+    {
+        RebuildTerrainPreview(false);
+        UploadPreview();
+        BeginStage(ECubusGenerationLoaderStage::FineErosion);
+        return;
+    }
+
+    const FIntPoint TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
+    FCubusTerrainRasterTile* Tile = TerrainTiles.Find(TileCoordinate);
+    if (Tile == nullptr || !Tile->IsValid())
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    FCubusTerrainRasterTile Deposited = FCubusTerrainDeposition::DepositTile(*Tile, DepositionSettings);
+    if (!Deposited.IsValid())
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    *Tile = MoveTemp(Deposited);
+    PaintTileToPreview(*Tile);
+    RebuildTerrainPreview(false);
+
+    ++CurrentWorkIndex;
+    SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
+    UploadPreview();
+}
+
+void ACubusWorldGenerationLoaderActor::ProcessFineErosion()
+{
+    if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
+    {
+        RebuildTerrainPreview(false);
+        UploadPreview();
+        FinishCurrentPipeline();
+        return;
+    }
+
+    const FIntPoint TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
+    FCubusTerrainRasterTile* Tile = TerrainTiles.Find(TileCoordinate);
+    if (Tile == nullptr || !Tile->IsValid())
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    FCubusTerrainRasterTile Refined = FCubusTerrainErosion::ErodeTile(*Tile, FineErosionSettings);
+    if (!Refined.IsValid())
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    *Tile = MoveTemp(Refined);
+    PaintTileToPreview(*Tile);
     RebuildTerrainPreview(false);
 
     ++CurrentWorkIndex;
@@ -366,7 +466,7 @@ void ACubusWorldGenerationLoaderActor::SetWorkProgress(const int32 CompletedItem
         ? FMath::Clamp(static_cast<float>(CompletedItems) / static_cast<float>(TotalItems), 0.0f, 1.0f)
         : 1.0f;
 
-    constexpr float StageCount = 4.0f;
+    constexpr float StageCount = 6.0f;
     float StageIndex = 0.0f;
     switch (Stage)
     {
@@ -381,6 +481,12 @@ void ACubusWorldGenerationLoaderActor::SetWorkProgress(const int32 CompletedItem
         break;
     case ECubusGenerationLoaderStage::Erosion:
         StageIndex = 3.0f;
+        break;
+    case ECubusGenerationLoaderStage::Deposition:
+        StageIndex = 4.0f;
+        break;
+    case ECubusGenerationLoaderStage::FineErosion:
+        StageIndex = 5.0f;
         break;
     default:
         break;
