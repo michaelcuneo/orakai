@@ -62,6 +62,11 @@ struct FSettings
 	float OceanFloorM = -650.0f;
 	float CoastalMarginM = 45000.0f;
 
+	// Plate ownership is categorical, but crustal base elevation is a continuous
+	// field. This scale controls how broadly neighbouring plate base elevations
+	// blend together; it must never become a hard Voronoi height step.
+	float CrustBlendScaleM = 75000.0f;
+
 	float BoundaryWidthM = 28000.0f;
 	float BoundaryWarpAmplitudeM = 12000.0f;
 	float ConvergentUpliftM = 3200.0f;
