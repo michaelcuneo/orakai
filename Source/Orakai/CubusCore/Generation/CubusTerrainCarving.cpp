@@ -105,6 +105,16 @@ namespace CubusTerrainCarving
         for (int32 SegmentIndex = 0; SegmentIndex < Segments.Num(); ++SegmentIndex)
         {
             const FCubusTerrainDrainageSegment& Segment = Segments[SegmentIndex];
+
+            // Priority-filled depressions are lake/basin candidates. The routed
+            // receiver still crosses them so catchment topology remains intact,
+            // but carving that synthetic route would cut a trench through the
+            // lake floor and destroy the basin we deliberately preserved.
+            if (Segment.bLakeTraversal)
+            {
+                continue;
+            }
+
             const float Radius = ValleyWidthForSegment(Segment, Settings);
             const FVector2D Minimum(
                 FMath::Min(Segment.StartMeters.X, Segment.EndMeters.X) - Radius,
@@ -160,6 +170,11 @@ namespace CubusTerrainCarving
             }
 
             const FCubusTerrainDrainageSegment& Segment = Segments[Index];
+            if (Segment.bLakeTraversal)
+            {
+                continue;
+            }
+
             const float Strength = MatureStrength(Segment, Settings);
             const float ValleyWidth = FMath::Lerp(
                 Settings.HeadwaterValleyHalfWidthMeters,
