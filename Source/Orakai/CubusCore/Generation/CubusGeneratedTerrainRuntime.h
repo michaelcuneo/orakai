@@ -2,15 +2,17 @@
 
 #include "CoreMinimal.h"
 
+#include "CubusCore/Generation/CubusLandscapeEvolution.h"
 #include "CubusCore/Generation/CubusTerrainRaster.h"
 #include "CubusCore/Generation/CubusTerrainForm.h"
 
 /**
- * Process-local handoff from the loader DEM pipeline to the runtime density world.
+ * Process-local handoff from the generation page to the runtime density world.
  *
  * The generated DEM is authoritative for the runtime voxel world. The loader
- * publishes the finished raster tiles and preview snapshot here, then gameplay
- * consumes those same tiles while building density chunks at the required LOD.
+ * can publish either legacy raster tiles or the production 500 km global DEM.
+ * Gameplay samples the exact same immutable surface while building density
+ * chunks at whatever local voxel LOD is required.
  */
 class ORAKAI_API FCubusGeneratedTerrainRuntime
 {
@@ -22,6 +24,10 @@ public:
 
     static void StoreTile(const FCubusTerrainRasterTile& Tile);
     static void StoreTileIfActive(const FCubusTerrainRasterTile& Tile);
+
+    /** Publish the exact production global DEM used by the generation preview. */
+    static void StoreGlobalDem(const TSharedPtr<const CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe>& GlobalDem);
+    static bool HasGlobalDem();
 
     static void StorePreviewSnapshot(
         int32 Resolution,
@@ -66,6 +72,7 @@ private:
         FIntPoint TerrainDomainOffsetVoxels = FIntPoint::ZeroValue;
         FCubusTerrainRasterSettings RasterSettings;
         TMap<FIntPoint, FCubusTerrainRasterTile> Tiles;
+        TSharedPtr<const CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe> GlobalDem;
 
         int32 PreviewResolution = 0;
         FBox2D PreviewBoundsMeters;
