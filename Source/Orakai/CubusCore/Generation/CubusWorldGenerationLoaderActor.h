@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Async/Future.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -36,6 +37,15 @@ enum class ECubusGenerationLoaderStage : uint8
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCubusGenerationStageChanged, ECubusGenerationLoaderStage, NewStage);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCubusGenerationProgressChanged, ECubusGenerationLoaderStage, Stage, float, StageProgress);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCubusGenerationFinished);
+
+/** Plain worker-thread result. It deliberately owns no UObjects. */
+struct FCubusProductionDemBuildResult
+{
+	uint64 SessionSerial = 0;
+	TSharedPtr<CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe> Dem;
+	CubusLandscapeEvolution::FGenerationStats Stats;
+	FString Error;
+};
 
 UCLASS(BlueprintType, Blueprintable)
 class ORAKAI_API ACubusWorldGenerationLoaderActor : public AActor
@@ -192,6 +202,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation|Diagnostics")
 	bool GetGeneratedHeightMeters(double WorldXmeters, double WorldYmeters, float& OutHeightMeters) const;
 
+	/** The exact footprint used by both the 2D and 3D generation previews. */
+	FBox2D GetGenerationPreviewBoundsMeters() const { return GetGenerationBoundsMeters(); }
+
 	bool GetLivePreviewHeightField(int32 Resolution, TArray<float>& OutHeights, TArray<uint8>& OutValid) const;
 
 	UPROPERTY(BlueprintAssignable, Category = "Cubus|Generation|Events")
@@ -299,7 +312,8 @@ private:
 	void ProcessErosion();
 	void ProcessDeposition();
 	void ProcessFineErosion();
-	bool BuildProductionGlobalDem();
+	void StartProductionGlobalDemBuild();
+	void PollProductionGlobalDemBuild();
 	void RebuildPreviewFromGlobalDem();
 
 	FBox2D GetGenerationBoundsMeters() const;
@@ -330,6 +344,12 @@ private:
 	FCubusTerrainErosionSettings FineErosionSettings;
 
 	TSharedPtr<CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe> GeneratedGlobalDem;
+	TFuture<FCubusProductionDemBuildResult> ProductionDemFuture;
+	uint64 GenerationSessionSerial = 0;
+	uint64 ProductionDemBuildSessionSerial = 0;
+	bool bProductionDemBuildInFlight = false;
+	bool bDiscardProductionDemBuildResult = false;
+
 	TArray<FIntPoint> TerrainTileQueue;
 	TArray<FIntPoint> DrainageRegionQueue;
 	TMap<FIntPoint, FCubusTerrainRasterTile> TerrainTiles;
