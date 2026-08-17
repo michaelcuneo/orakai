@@ -1,4 +1,5 @@
 #include "CubusCore/Generation/CubusDemIslandGenerator.h"
+#include "CubusCore/Generation/CubusDemPyramid.h"
 
 #include "Async/ParallelFor.h"
 #include "Dom/JsonObject.h"
@@ -14,7 +15,6 @@ namespace
 {
 constexpr uint32 DemMagic = 0x4d454443u;
 constexpr uint32 DemVersion = 1u;
-constexpr float QuiltWeightPower = 2.0f;
 
 struct FHeader
 {
@@ -26,20 +26,6 @@ struct FHeader
 	float MinimumElevationM = 0.0f;
 	float MaximumElevationM = 0.0f;
 	float MeanElevationM = 0.0f;
-};
-
-struct FMacroSource
-{
-	FIndexedPatch Metadata;
-	FPatch Patch;
-	float ExtentM = 0.0f;
-};
-
-struct FPlacement
-{
-	int32 SourceIndex = 0;
-	int32 Variant = 0;
-	FVector2D CenterM = FVector2D::ZeroVector;
 };
 
 struct FCoastFeature
@@ -120,21 +106,6 @@ FVector2D Rotate2D(const FVector2D& V, const float AngleRad)
 	return FVector2D(V.X * C - V.Y * S, V.X * S + V.Y * C);
 }
 
-FVector2D TransformUv(FVector2D UV, const int32 Variant)
-{
-	UV -= FVector2D(0.5, 0.5);
-	if ((Variant & 1) != 0) UV.X = -UV.X;
-	if ((Variant & 2) != 0) UV.Y = -UV.Y;
-	switch ((Variant >> 2) & 3)
-	{
-	case 1: UV = FVector2D(-UV.Y, UV.X); break;
-	case 2: UV = FVector2D(-UV.X, -UV.Y); break;
-	case 3: UV = FVector2D(UV.Y, -UV.X); break;
-	default: break;
-	}
-	return UV + FVector2D(0.5, 0.5);
-}
-
 double SuperellipseRadiusM(const float AngleRad, const FCoastShape& Shape)
 {
 	const double C = FMath::Abs(FMath::Cos(AngleRad));
@@ -206,15 +177,11 @@ FCoastShape BuildCoastShape(const FSettings& Settings)
 			Feature.RadiusM = RadiusM;
 			if (bAddsLand)
 			{
-				// Start well inside the parent landmass so the lobe is guaranteed to be
-				// connected; bend the outer end along the coast to avoid radial starbursts.
 				Feature.A = Shore - Radial * RadiusM * 1.7f;
 				Feature.B = Shore + Radial * LengthM + Tangent * BendM;
 			}
 			else
 			{
-				// Water features always begin outside the parent coast, so every cut is
-				// connected to the ocean rather than accidentally creating an inland lake.
 				Feature.A = Shore + Radial * RadiusM * 1.8f;
 				Feature.B = Shore - Radial * LengthM + Tangent * BendM;
 			}
@@ -232,7 +199,6 @@ FCoastShape BuildCoastShape(const FSettings& Settings)
 	AddDistributedFeatures(Shape.InletCount, false,
 		42000.0f * Scale, 90000.0f * Scale, 4500.0f * Scale, 10500.0f * Scale,
 		Random.FRandRange(0.0f, 2.0f * PI), 0.55f);
-
 	return Shape;
 }
 
@@ -252,35 +218,17 @@ float CoastSignedDistanceM(const FVector2D& WorldM, const FSettings& Settings, c
 		1.0 / P);
 	float DistanceM = static_cast<float>((1.0 - Super) * FMath::Min(Shape.AxisXM, Shape.AxisYM));
 
-	// Broad and medium coastline undulation prevents untouched portions of the
-	// parent landmass from reverting to a mathematically perfect superellipse.
 	DistanceM += Fbm(WorldM.X / 85000.0, WorldM.Y / 85000.0, Settings.Seed ^ 0x7f4a7c15) * 15000.0f;
 	DistanceM += Fbm(WorldM.X / 31000.0, WorldM.Y / 31000.0, Settings.Seed ^ 0x1ce4e5b9) * 4500.0f;
 
 	for (const FCoastFeature& Feature : Shape.Features)
 	{
 		const float FeatureInsideM = SignedCapsuleInsideM(Warped, Feature);
-		if (Feature.bAddsLand)
-		{
-			// SDF union: positive inside either the parent landmass or peninsula.
-			DistanceM = FMath::Max(DistanceM, FeatureInsideM);
-		}
-		else
-		{
-			// SDF subtraction: positive inside the water capsule must become ocean.
-			DistanceM = FMath::Min(DistanceM, -FeatureInsideM);
-		}
+		DistanceM = Feature.bAddsLand
+			? FMath::Max(DistanceM, FeatureInsideM)
+			: FMath::Min(DistanceM, -FeatureInsideM);
 	}
 	return DistanceM;
-}
-
-CubusLandscapeEvolution::EProvinceType MapProvinceType(const FIndexedPatch& Entry)
-{
-	if (Entry.TerrainClass.Contains(TEXT("mountain"))) return CubusLandscapeEvolution::EProvinceType::FoldMountainBelt;
-	if (Entry.TerrainClass.Contains(TEXT("coast"))) return CubusLandscapeEvolution::EProvinceType::CoastalShelf;
-	if (Entry.TerrainClass.Contains(TEXT("plain")) || Entry.TerrainClass.Contains(TEXT("lowland"))) return CubusLandscapeEvolution::EProvinceType::SedimentaryBasin;
-	if (Entry.TerrainClass.Contains(TEXT("rugged")) || Entry.TerrainClass.Contains(TEXT("dissected"))) return CubusLandscapeEvolution::EProvinceType::UpliftedPlateau;
-	return CubusLandscapeEvolution::EProvinceType::StablePlain;
 }
 
 float ReadNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* Name, const float DefaultValue)
@@ -309,7 +257,7 @@ void Measure(const CubusLandscapeEvolution::FGlobalDem& Dem, CubusLandscapeEvolu
 	}
 	CubusLandscapeEvolution::FGenerator::MeasureQuality(Dem, *Stats);
 }
-}
+} // namespace
 
 bool FPatch::IsValid() const
 {
@@ -366,6 +314,7 @@ bool FGenerator::LoadPatch(const FString& Path, FPatch& OutPatch, FString* OutEr
 		if (OutError) *OutError = FString::Printf(TEXT("DEM patch header is truncated: %s"), *Path);
 		return false;
 	}
+
 	FHeader Header;
 	FMemory::Memcpy(&Header, Bytes.GetData(), sizeof(FHeader));
 	if (Header.Magic != DemMagic || Header.Version != DemVersion || Header.Width < 2 || Header.Height < 2 || Header.CellSizeM <= 0.0f)
@@ -380,6 +329,7 @@ bool FGenerator::LoadPatch(const FString& Path, FPatch& OutPatch, FString* OutEr
 		if (OutError) *OutError = FString::Printf(TEXT("DEM patch has wrong byte count: %s"), *Path);
 		return false;
 	}
+
 	OutPatch.SourcePath = Path;
 	OutPatch.Width = Header.Width;
 	OutPatch.Height = Header.Height;
@@ -409,6 +359,7 @@ bool FGenerator::LoadIndex(const FSettings& Settings, TArray<FIndexedPatch>& Out
 		if (OutError) *OutError = FString::Printf(TEXT("Could not parse DEM terrain index: %s"), *IndexPath);
 		return false;
 	}
+
 	const TArray<TSharedPtr<FJsonValue>>* Patches = nullptr;
 	if (!Root->TryGetArrayField(TEXT("patches"), Patches) || Patches == nullptr)
 	{
@@ -432,7 +383,12 @@ bool FGenerator::LoadIndex(const FSettings& Settings, TArray<FIndexedPatch>& Out
 		Entry.LocalSuitability = ReadNumber(Object, TEXT("local_suitability"), 0.0f);
 		if (!Entry.RelativePath.IsEmpty()) OutEntries.Add(MoveTemp(Entry));
 	}
-	return !OutEntries.IsEmpty();
+	if (OutEntries.IsEmpty())
+	{
+		if (OutError) *OutError = TEXT("DEM terrain index contains no usable patches.");
+		return false;
+	}
+	return true;
 }
 
 bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FGlobalDem& OutDem,
@@ -447,80 +403,25 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 	TArray<FIndexedPatch> IndexEntries;
 	if (!LoadIndex(Settings, IndexEntries, OutError)) return false;
 
-	TArray<FMacroSource> Sources;
-	const FString SourceRoot = ResolveSourceDirectory(Settings);
-	for (const FIndexedPatch& Entry : IndexEntries)
+	CubusDemPyramid::FResult Pyramid;
+	if (!CubusDemPyramid::Compose(Settings, IndexEntries, Pyramid, OutError)) return false;
+
+	OutDem.Reset();
+	OutDem.Resolution = Settings.Resolution;
+	OutDem.WorldSizeMeters = Settings.WorldSizeMeters;
+	OutDem.CellSizeMeters = Settings.WorldSizeMeters / static_cast<double>(Settings.Resolution - 1);
+	OutDem.OceanLevelM = Settings.OceanLevelM;
+	const int32 CellCount = OutDem.NumCells();
+	if (!Pyramid.IsValid(CellCount))
 	{
-		if (!Entry.RelativePath.StartsWith(TEXT("Macro/")) && Entry.SourceKey != TEXT("macro_nz_8m")) continue;
-		FMacroSource Source;
-		Source.Metadata = Entry;
-		if (!LoadPatch(FPaths::Combine(SourceRoot, Entry.RelativePath), Source.Patch, OutError)) return false;
-		Source.ExtentM = FMath::Min((Source.Patch.Width - 1) * Source.Patch.CellSizeM, (Source.Patch.Height - 1) * Source.Patch.CellSizeM);
-		if (Source.ExtentM > 10000.0f) Sources.Add(MoveTemp(Source));
-	}
-	if (Sources.IsEmpty())
-	{
-		if (OutError) *OutError = TEXT("No macro DEM patches found. Run Tools/DemLibrary/prepare_macro_dem_library.py first.");
+		if (OutError) *OutError = TEXT("Multiscale DEM pyramid returned the wrong number of global cells.");
 		return false;
 	}
-
-	float MeanExtentM = 0.0f;
-	float MinimumSourceReliefM = TNumericLimits<float>::Max();
-	float MaximumSourceReliefM = 0.0f;
-	float MeanSourceReliefM = 0.0f;
-	for (const FMacroSource& Source : Sources)
-	{
-		MeanExtentM += Source.ExtentM;
-		MinimumSourceReliefM = FMath::Min(MinimumSourceReliefM, Source.Metadata.ReliefP90M);
-		MaximumSourceReliefM = FMath::Max(MaximumSourceReliefM, Source.Metadata.ReliefP90M);
-		MeanSourceReliefM += Source.Metadata.ReliefP90M;
-	}
-	MeanExtentM /= Sources.Num();
-	MeanSourceReliefM /= Sources.Num();
-	const float GridSpacingM = FMath::Clamp(MeanExtentM * 0.72f, 18000.0f, 42000.0f);
-	const int32 GridR = FMath::CeilToInt(Settings.WorldSizeMeters / GridSpacingM) + 3;
-	const double HalfWorld = Settings.WorldSizeMeters * 0.5;
-	const double GridOrigin = -HalfWorld - GridSpacingM;
-
-	UE_LOG(LogTemp, Display,
-		TEXT("Cubus macro DEM library: %d sources, mean extent %.1f km, P90 relief min/mean/max %.0f / %.0f / %.0f m, quilt spacing %.1f km"),
-		Sources.Num(), MeanExtentM / 1000.0f, MinimumSourceReliefM, MeanSourceReliefM, MaximumSourceReliefM, GridSpacingM / 1000.0f);
-	if (MaximumSourceReliefM < 800.0f)
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("Cubus macro DEM library contains no source patch above 800 m P90 relief; the source library itself is low-relief."));
-	}
-
-	TArray<FPlacement> Placements;
-	Placements.SetNum(GridR * GridR);
-	FRandomStream Random(Settings.Seed);
-	for (int32 Gy = 0; Gy < GridR; ++Gy)
-	{
-		for (int32 Gx = 0; Gx < GridR; ++Gx)
-		{
-			const FVector2D Center(GridOrigin + Gx * GridSpacingM, GridOrigin + Gy * GridSpacingM);
-			const float Radial01 = FMath::Clamp(static_cast<float>(Center.Size() / HalfWorld), 0.0f, 1.0f);
-			const float DesiredRelief01 = FMath::Clamp(1.15f - Radial01 + Random.FRandRange(-0.20f, 0.20f), 0.0f, 1.0f);
-			int32 BestSource = 0;
-			float BestScore = -TNumericLimits<float>::Max();
-			for (int32 Candidate = 0; Candidate < Sources.Num(); ++Candidate)
-			{
-				const FMacroSource& Source = Sources[Candidate];
-				const float Relief01 = FMath::Clamp(Source.Metadata.ReliefP90M / 1800.0f, 0.0f, 1.0f);
-				const float ReliefMatch = 1.0f - FMath::Abs(Relief01 - DesiredRelief01);
-				const float Score = ReliefMatch * 0.55f + Source.Metadata.MacroSuitability * 0.35f + Random.FRandRange(0.0f, 0.10f);
-				if (Score > BestScore)
-				{
-					BestScore = Score;
-					BestSource = Candidate;
-				}
-			}
-			FPlacement& Placement = Placements[Gy * GridR + Gx];
-			Placement.SourceIndex = BestSource;
-			Placement.Variant = Random.RandRange(0, 15);
-			Placement.CenterM = Center;
-		}
-	}
+	OutDem.ElevationM.SetNumUninitialized(CellCount);
+	OutDem.UpliftM.Init(0.0f, CellCount);
+	OutDem.PlateId.Init(0, CellCount);
+	OutDem.ProvinceId.Init(static_cast<uint8>(CubusLandscapeEvolution::EProvinceType::StablePlain), CellCount);
+	OutDem.BoundaryType.Init(static_cast<uint8>(CubusLandscapeEvolution::EBoundaryType::Stable), CellCount);
 
 	const FCoastShape CoastShape = BuildCoastShape(Settings);
 	const float CoastTransitionM = FMath::Clamp(Settings.CoastBandM, 3500.0f, static_cast<float>(Settings.WorldSizeMeters * 0.03));
@@ -530,80 +431,28 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 		FMath::RadiansToDegrees(CoastShape.RotationRad), CoastShape.PeninsulaCount, CoastShape.BayCount,
 		CoastShape.InletCount, CoastTransitionM / 1000.0f);
 
-	OutDem.Reset();
-	OutDem.Resolution = Settings.Resolution;
-	OutDem.WorldSizeMeters = Settings.WorldSizeMeters;
-	OutDem.CellSizeMeters = Settings.WorldSizeMeters / static_cast<double>(Settings.Resolution - 1);
-	OutDem.OceanLevelM = Settings.OceanLevelM;
-	OutDem.ElevationM.SetNumUninitialized(OutDem.NumCells());
-	OutDem.UpliftM.Init(0.0f, OutDem.NumCells());
-	OutDem.PlateId.Init(0, OutDem.NumCells());
-	OutDem.ProvinceId.Init(static_cast<uint8>(CubusLandscapeEvolution::EProvinceType::StablePlain), OutDem.NumCells());
-	OutDem.BoundaryType.Init(static_cast<uint8>(CubusLandscapeEvolution::EBoundaryType::Stable), OutDem.NumCells());
-
 	const int32 R = OutDem.Resolution;
-	ParallelFor(OutDem.NumCells(), [&OutDem, &Settings, &Sources, &Placements, &CoastShape, R, GridR, GridSpacingM, GridOrigin, CoastTransitionM](const int32 Cell)
+	const double HalfWorld = Settings.WorldSizeMeters * 0.5;
+	ParallelFor(CellCount, [&OutDem, &Settings, &Pyramid, &CoastShape, R, HalfWorld, CoastTransitionM](const int32 Cell)
 	{
 		const int32 X = Cell % R;
 		const int32 Y = Cell / R;
-		const double UWorld = static_cast<double>(X) / static_cast<double>(R - 1);
-		const double VWorld = static_cast<double>(Y) / static_cast<double>(R - 1);
-		const double Half = Settings.WorldSizeMeters * 0.5;
-		const FVector2D WorldM(-Half + UWorld * Settings.WorldSizeMeters, -Half + VWorld * Settings.WorldSizeMeters);
-
-		const double Gx = (WorldM.X - GridOrigin) / GridSpacingM;
-		const double Gy = (WorldM.Y - GridOrigin) / GridSpacingM;
-		const int32 X0 = FMath::Clamp(FMath::FloorToInt(Gx), 0, GridR - 2);
-		const int32 Y0 = FMath::Clamp(FMath::FloorToInt(Gy), 0, GridR - 2);
-		const float Fx = Smooth01(static_cast<float>(Gx - X0));
-		const float Fy = Smooth01(static_cast<float>(Gy - Y0));
-		const int32 PlacementIndices[4] = {Y0 * GridR + X0, Y0 * GridR + X0 + 1, (Y0 + 1) * GridR + X0, (Y0 + 1) * GridR + X0 + 1};
-		const float BaseWeights[4] = {(1.0f - Fx) * (1.0f - Fy), Fx * (1.0f - Fy), (1.0f - Fx) * Fy, Fx * Fy};
-
-		float WeightedRelief = 0.0f;
-		float WeightSquaredSum = 0.0f;
-		float BestWeight = -1.0f;
-		int32 BestPlacement = PlacementIndices[0];
-		for (int32 Corner = 0; Corner < 4; ++Corner)
-		{
-			const FPlacement& Placement = Placements[PlacementIndices[Corner]];
-			const FMacroSource& Source = Sources[Placement.SourceIndex];
-			const float SampleExtentM = FMath::Max(Source.ExtentM, GridSpacingM * 1.35f);
-			const FVector2D Local = WorldM - Placement.CenterM;
-			FVector2D SourceUv(Local.X / SampleExtentM + 0.5f, Local.Y / SampleExtentM + 0.5f);
-			SourceUv = TransformUv(SourceUv, Placement.Variant);
-			if (SourceUv.X < 0.0f || SourceUv.X > 1.0f || SourceUv.Y < 0.0f || SourceUv.Y > 1.0f) continue;
-
-			const float W = FMath::Pow(FMath::Max(0.0f, BaseWeights[Corner]), QuiltWeightPower);
-			if (W <= KINDA_SMALL_NUMBER) continue;
-			const float Sample = (Source.Patch.SampleBilinear(SourceUv.X, SourceUv.Y) - Source.Patch.MeanElevationM) * Settings.ReliefScale;
-			WeightedRelief += Sample * W;
-			WeightSquaredSum += W * W;
-			if (W > BestWeight)
-			{
-				BestWeight = W;
-				BestPlacement = PlacementIndices[Corner];
-			}
-		}
-		const float Relief = WeightSquaredSum > KINDA_SMALL_NUMBER
-			? WeightedRelief / FMath::Sqrt(WeightSquaredSum)
-			: 0.0f;
-
+		const double U = static_cast<double>(X) / static_cast<double>(R - 1);
+		const double V = static_cast<double>(Y) / static_cast<double>(R - 1);
+		const FVector2D WorldM(-HalfWorld + U * Settings.WorldSizeMeters, -HalfWorld + V * Settings.WorldSizeMeters);
 		const float CoastDistanceM = CoastSignedDistanceM(WorldM, Settings, CoastShape);
+
 		float Elevation = Settings.OceanFloorM;
 		if (CoastDistanceM >= 0.0f)
 		{
-			// The SDF zero contour is now the actual shore. Land rises from just above
-			// sea level into the real-DEM interior instead of inheriting its coastline
-			// from a huge ocean-floor interpolation band.
-			const float InteriorHeight = FMath::Max(Settings.OceanLevelM + 2.0f, Settings.BaseLandElevationM + Relief);
+			const float InteriorHeight = FMath::Max(
+				Settings.OceanLevelM + 2.0f,
+				Settings.BaseLandElevationM + Pyramid.ReliefM[Cell]);
 			const float InlandT = Smooth01(CoastDistanceM / CoastTransitionM);
 			Elevation = FMath::Lerp(Settings.OceanLevelM + 0.5f, InteriorHeight, InlandT);
 		}
 		else
 		{
-			// Keep a broad submerged shelf without allowing that shelf to round off the
-			// coastline itself. The shoreline stays at the SDF zero contour.
 			const float ShelfT = Smooth01((-CoastDistanceM) / (CoastTransitionM * 3.0f));
 			Elevation = FMath::Lerp(Settings.OceanLevelM - 1.0f, Settings.OceanFloorM, ShelfT);
 		}
@@ -619,9 +468,7 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 		}
 		else
 		{
-			const FPlacement& Placement = Placements[BestPlacement];
-			OutDem.PlateId[Cell] = static_cast<uint8>(BestPlacement % 255);
-			OutDem.ProvinceId[Cell] = static_cast<uint8>(MapProvinceType(Sources[Placement.SourceIndex].Metadata));
+			OutDem.ProvinceId[Cell] = Pyramid.ProvinceId[Cell];
 		}
 	});
 
@@ -629,12 +476,14 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 	if (OutStats)
 	{
 		UE_LOG(LogTemp, Display,
-			TEXT("Cubus raw 500 km DEM: elevation %.0f to %.0f m, mean land slope %.1f deg, steep land %.1f%%"),
+			TEXT("Cubus raw 500 km multiscale DEM: elevation %.0f to %.0f m, mean land slope %.1f deg, steep land %.1f%%"),
 			OutStats->MinimumElevationM, OutStats->MaximumElevationM, OutStats->MeanLandSlopeDegrees,
 			OutStats->SteepLandFraction * 100.0f);
 	}
-	UE_LOG(LogTemp, Display, TEXT("Cubus 500 km DEM quilt: seed %d, %d macro sources, %d x %d placements, %.2f m/cell"),
-		Settings.Seed, Sources.Num(), GridR, GridR, OutDem.CellSizeMeters);
+	UE_LOG(LogTemp, Display,
+		TEXT("Cubus 500 km real-DEM world: seed %d, 128/64/32 km sources %d/%d/%d, %.2f m global cell"),
+		Settings.Seed, Pyramid.Macro128SourceCount, Pyramid.Macro64SourceCount, Pyramid.Macro32SourceCount,
+		OutDem.CellSizeMeters);
 	return true;
 }
 } // namespace CubusDemIsland
