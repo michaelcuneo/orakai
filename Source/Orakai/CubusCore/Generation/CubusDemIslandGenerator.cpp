@@ -1,16 +1,18 @@
 #include "CubusCore/Generation/CubusDemIslandGenerator.h"
 
 #include "Async/ParallelFor.h"
+#include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
-#include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 namespace CubusDemIsland
 {
 namespace
 {
-constexpr uint32 DemMagic = 0x4d454443u; // 'CDEM' in little endian.
+constexpr uint32 DemMagic = 0x4d454443u;
 constexpr uint32 DemVersion = 1u;
 
 struct FHeader
@@ -23,6 +25,18 @@ struct FHeader
 	float MinimumElevationM = 0.0f;
 	float MaximumElevationM = 0.0f;
 	float MeanElevationM = 0.0f;
+};
+
+struct FProvinceSource
+{
+	FIndexedPatch Metadata;
+	FPatch Patch;
+	FVector2D CenterM = FVector2D::ZeroVector;
+	float RadiusM = 50000.0f;
+	float RotationRad = 0.0f;
+	float HeightScale = 1.0f;
+	float Weight = 1.0f;
+	uint8 ProvinceId = 0;
 };
 
 uint32 Hash(uint32 V)
@@ -76,53 +90,84 @@ float Fbm(double X, double Y, const int32 Seed)
 	return Weight > 0.0f ? Sum / Weight : 0.0f;
 }
 
-FVector2D TransformUv(FVector2D UV, const int32 Variant)
-{
-{
-	UV -= FVector2D(0.5, 0.5);
-	if ((Variant & 1) != 0)
-	{
-		UV.X = -UV.X;
-	}
-	if ((Variant & 2) != 0)
-	{
-		UV.Y = -UV.Y;
-	}
-	switch ((Variant >> 2) & 3)
-	{
-	case 1: UV = FVector2D(-UV.Y, UV.X); break;
-	case 2: UV = FVector2D(-UV.X, -UV.Y); break;
-	case 3: UV = FVector2D(UV.Y, -UV.X); break;
-	default: break;
-	}
-	return UV + FVector2D(0.5, 0.5);
-}
-}
-
-float IslandEnvelope(const double WorldX, const double WorldY, const FSettings& Settings, const int32 Seed)
+float IslandEnvelope(const double WorldX, const double WorldY, const FSettings& Settings)
 {
 	const double Half = Settings.WorldSizeMeters * 0.5;
-	const double CoastBand = FMath::Clamp<double>(Settings.CoastBandM, 8.0, Half * 0.45);
+	const double Margin = FMath::Clamp<double>(Settings.CoastBandM, 5000.0, Half * 0.35);
+	const double BroadScale = FMath::Max(50000.0, Settings.WorldSizeMeters * 0.20);
+	const float WarpX = Fbm(WorldX / BroadScale, WorldY / BroadScale, Settings.Seed ^ 0x51d7348d);
+	const float WarpY = Fbm(WorldX / (BroadScale * 1.17), WorldY / (BroadScale * 1.17), Settings.Seed ^ 0x94d049bb);
+	const double X = WorldX + WarpX * Settings.WarpMeters;
+	const double Y = WorldY + WarpY * Settings.WarpMeters;
+	const double Ax = Half - Margin * 0.25;
+	const double Ay = Half - Margin * 0.38;
+	const double Nx = FMath::Abs(X) / FMath::Max(1.0, Ax);
+	const double Ny = FMath::Abs(Y) / FMath::Max(1.0, Ay);
+	const double Super = FMath::Pow(FMath::Pow(Nx, 2.6) + FMath::Pow(Ny, 2.6), 1.0 / 2.6);
+	const double DistanceM = (1.0 - Super) * FMath::Min(Ax, Ay);
+	return Smooth01(static_cast<float>(DistanceM / Margin));
+}
 
-	// Start with a rounded rectangular/superellipse footprint so the entire 500 m
-	// domain remains useful, then disturb the shoreline with broad seeded fields.
-	const float WarpX = Fbm(WorldX / 150.0, WorldY / 150.0, Seed ^ 0x51d7348d);
-	const float WarpY = Fbm(WorldX / 170.0, WorldY / 170.0, Seed ^ 0x94d049bb);
-	const double X = WorldX + WarpX * 28.0;
-	const double Y = WorldY + WarpY * 28.0;
-	const double Nx = FMath::Abs(X) / FMath::Max(1.0, Half - CoastBand * 0.15);
-	const double Ny = FMath::Abs(Y) / FMath::Max(1.0, Half - CoastBand * 0.15);
-	const double Super = FMath::Pow(FMath::Pow(Nx, 3.3) + FMath::Pow(Ny, 3.3), 1.0 / 3.3);
-	const double ApproxDistanceToCoast = (1.0 - Super) * (Half - CoastBand * 0.15);
-	return Smooth01(static_cast<float>(ApproxDistanceToCoast / CoastBand));
+FVector2D Rotate(const FVector2D V, const float Radians)
+{
+	const float C = FMath::Cos(Radians);
+	const float S = FMath::Sin(Radians);
+	return FVector2D(V.X * C - V.Y * S, V.X * S + V.Y * C);
+}
+
+float SampleProvinceRelief(const FProvinceSource& Province, const FVector2D WorldM)
+{
+	const FVector2D Local = Rotate(WorldM - Province.CenterM, -Province.RotationRad);
+	const float Diameter = FMath::Max(1.0f, Province.RadiusM * 2.0f);
+	const float U = Local.X / Diameter + 0.5f;
+	const float V = Local.Y / Diameter + 0.5f;
+	if (U < 0.0f || U > 1.0f || V < 0.0f || V > 1.0f)
+	{
+		return 0.0f;
+	}
+	return (Province.Patch.SampleBilinear(U, V) - Province.Patch.MeanElevationM) * Province.HeightScale;
+}
+
+float ProvinceInfluence(const FProvinceSource& Province, const FVector2D WorldM, const float BlendM)
+{
+	const float Distance = FVector2D::Distance(WorldM, Province.CenterM);
+	const float Inner = FMath::Max(1000.0f, Province.RadiusM - BlendM);
+	if (Distance <= Inner)
+	{
+		return 1.0f;
+	}
+	if (Distance >= Province.RadiusM)
+	{
+		return 0.0f;
+	}
+	return 1.0f - Smooth01((Distance - Inner) / FMath::Max(1.0f, Province.RadiusM - Inner));
+}
+
+CubusLandscapeEvolution::EProvinceType MapProvinceType(const FIndexedPatch& Entry)
+{
+	if (Entry.TerrainClass.Contains(TEXT("mountain"))) return CubusLandscapeEvolution::EProvinceType::FoldMountainBelt;
+	if (Entry.TerrainClass.Contains(TEXT("coast"))) return CubusLandscapeEvolution::EProvinceType::CoastalShelf;
+	if (Entry.TerrainClass.Contains(TEXT("plain")) || Entry.TerrainClass.Contains(TEXT("lowland"))) return CubusLandscapeEvolution::EProvinceType::SedimentaryBasin;
+	if (Entry.TerrainClass.Contains(TEXT("rugged")) || Entry.TerrainClass.Contains(TEXT("dissected"))) return CubusLandscapeEvolution::EProvinceType::UpliftedPlateau;
+	return CubusLandscapeEvolution::EProvinceType::StablePlain;
+}
+
+float ReadNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* Name, const float DefaultValue)
+{
+	double Value = 0.0;
+	return Object.IsValid() && Object->TryGetNumberField(Name, Value) ? static_cast<float>(Value) : DefaultValue;
+}
+
+FString ReadString(const TSharedPtr<FJsonObject>& Object, const TCHAR* Name)
+{
+	FString Value;
+	if (Object.IsValid()) Object->TryGetStringField(Name, Value);
+	return Value;
 }
 
 void Measure(const CubusLandscapeEvolution::FGlobalDem& Dem, CubusLandscapeEvolution::FGenerationStats* Stats)
 {
-	if (!Stats)
-	{
-		return;
-	}
+	if (!Stats) return;
 	Stats->CellCount = Dem.NumCells();
 	Stats->MinimumElevationM = TNumericLimits<float>::Max();
 	Stats->MaximumElevationM = TNumericLimits<float>::Lowest();
@@ -142,10 +187,7 @@ bool FPatch::IsValid() const
 
 float FPatch::SampleBilinear(const float InU, const float InV) const
 {
-	if (!IsValid())
-	{
-		return 0.0f;
-	}
+	if (!IsValid()) return 0.0f;
 	const float U = FMath::Clamp(InU, 0.0f, 1.0f) * static_cast<float>(Width - 1);
 	const float V = FMath::Clamp(InV, 0.0f, 1.0f) * static_cast<float>(Height - 1);
 	const int32 X0 = FMath::Clamp(FMath::FloorToInt(U), 0, Width - 1);
@@ -162,7 +204,7 @@ float FPatch::SampleBilinear(const float InU, const float InV) const
 FString FGenerator::ResolveSourceDirectory(const FSettings& Settings)
 {
 	return FPaths::IsRelative(Settings.SourceDirectory)
-		? FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / Settings.SourceDirectory)
+		? FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectContentDir(), Settings.SourceDirectory))
 		: FPaths::ConvertRelativePathToFull(Settings.SourceDirectory);
 }
 
@@ -174,10 +216,7 @@ bool FGenerator::DiscoverPatches(const FSettings& Settings, TArray<FString>& Out
 	OutPatchPaths.Sort();
 	if (OutPatchPaths.IsEmpty())
 	{
-		if (OutError)
-		{
-			*OutError = FString::Printf(TEXT("No prepared DEM patches found in %s. Run Tools/DemLibrary/prepare_linz_coastal.py first."), *Directory);
-		}
+		if (OutError) *OutError = FString::Printf(TEXT("No prepared DEM patches found in %s."), *Directory);
 		return false;
 	}
 	return true;
@@ -196,7 +235,6 @@ bool FGenerator::LoadPatch(const FString& Path, FPatch& OutPatch, FString* OutEr
 		if (OutError) *OutError = FString::Printf(TEXT("DEM patch header is truncated: %s"), *Path);
 		return false;
 	}
-
 	FHeader Header;
 	FMemory::Memcpy(&Header, Bytes.GetData(), sizeof(FHeader));
 	if (Header.Magic != DemMagic || Header.Version != DemVersion || Header.Width < 2 || Header.Height < 2 || Header.CellSizeM <= 0.0f)
@@ -204,7 +242,6 @@ bool FGenerator::LoadPatch(const FString& Path, FPatch& OutPatch, FString* OutEr
 		if (OutError) *OutError = FString::Printf(TEXT("Unsupported/corrupt DEM patch header: %s"), *Path);
 		return false;
 	}
-
 	const int64 SampleCount = static_cast<int64>(Header.Width) * static_cast<int64>(Header.Height);
 	const int64 ExpectedBytes = static_cast<int64>(sizeof(FHeader)) + SampleCount * static_cast<int64>(sizeof(float));
 	if (ExpectedBytes != Bytes.Num())
@@ -212,7 +249,6 @@ bool FGenerator::LoadPatch(const FString& Path, FPatch& OutPatch, FString* OutEr
 		if (OutError) *OutError = FString::Printf(TEXT("DEM patch has wrong byte count: %s"), *Path);
 		return false;
 	}
-
 	OutPatch.SourcePath = Path;
 	OutPatch.Width = Header.Width;
 	OutPatch.Height = Header.Height;
@@ -225,43 +261,113 @@ bool FGenerator::LoadPatch(const FString& Path, FPatch& OutPatch, FString* OutEr
 	return true;
 }
 
+bool FGenerator::LoadIndex(const FSettings& Settings, TArray<FIndexedPatch>& OutEntries, FString* OutError)
+{
+	OutEntries.Reset();
+	const FString IndexPath = FPaths::Combine(ResolveSourceDirectory(Settings), Settings.IndexFileName);
+	FString JsonText;
+	if (!FFileHelper::LoadFileToString(JsonText, *IndexPath))
+	{
+		if (OutError) *OutError = FString::Printf(TEXT("DEM terrain index not found: %s. Run analyze_dem_library.py."), *IndexPath);
+		return false;
+	}
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		if (OutError) *OutError = FString::Printf(TEXT("Could not parse DEM terrain index: %s"), *IndexPath);
+		return false;
+	}
+	const TArray<TSharedPtr<FJsonValue>>* Patches = nullptr;
+	if (!Root->TryGetArrayField(TEXT("patches"), Patches) || Patches == nullptr)
+	{
+		if (OutError) *OutError = TEXT("DEM terrain index has no patches array.");
+		return false;
+	}
+	for (const TSharedPtr<FJsonValue>& Value : *Patches)
+	{
+		const TSharedPtr<FJsonObject> Object = Value.IsValid() ? Value->AsObject() : nullptr;
+		if (!Object.IsValid()) continue;
+		FIndexedPatch Entry;
+		Entry.RelativePath = ReadString(Object, TEXT("path"));
+		Entry.SourceKey = ReadString(Object, TEXT("source_key"));
+		Entry.TerrainClass = ReadString(Object, TEXT("terrain_class"));
+		Entry.ReliefP90M = ReadNumber(Object, TEXT("relief_p90_m"), 0.0f);
+		Entry.MeanSlopeDeg = ReadNumber(Object, TEXT("mean_slope_deg"), 0.0f);
+		Entry.DominantStructureAngleDeg = ReadNumber(Object, TEXT("dominant_structure_angle_deg"), 0.0f);
+		Entry.DirectionalAnisotropy = ReadNumber(Object, TEXT("directional_anisotropy"), 0.0f);
+		Entry.MacroSuitability = ReadNumber(Object, TEXT("macro_suitability"), 0.0f);
+		Entry.RegionalSuitability = ReadNumber(Object, TEXT("regional_suitability"), 0.0f);
+		Entry.LocalSuitability = ReadNumber(Object, TEXT("local_suitability"), 0.0f);
+		const TArray<TSharedPtr<FJsonValue>>* Tags = nullptr;
+		if (Object->TryGetArrayField(TEXT("tags"), Tags) && Tags)
+		{
+			for (const TSharedPtr<FJsonValue>& Tag : *Tags) Entry.Tags.Add(Tag->AsString());
+		}
+		if (!Entry.RelativePath.IsEmpty()) OutEntries.Add(MoveTemp(Entry));
+	}
+	OutEntries.Sort([](const FIndexedPatch& A, const FIndexedPatch& B) { return A.MacroSuitability > B.MacroSuitability; });
+	if (OutEntries.IsEmpty())
+	{
+		if (OutError) *OutError = TEXT("DEM terrain index contained zero usable patches.");
+		return false;
+	}
+	return true;
+}
+
 bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FGlobalDem& OutDem,
 	CubusLandscapeEvolution::FGenerationStats* OutStats, FString* OutError)
 {
 	if (Settings.Resolution < 33 || Settings.WorldSizeMeters <= 100.0 || Settings.OceanFloorM >= Settings.OceanLevelM)
 	{
-		if (OutError) *OutError = TEXT("Invalid DEM island settings.");
+		if (OutError) *OutError = TEXT("Invalid DEM world settings.");
 		return false;
 	}
 
-	TArray<FString> Paths;
-	if (!DiscoverPatches(Settings, Paths, OutError))
-	{
-		return false;
-	}
+	TArray<FIndexedPatch> IndexEntries;
+	if (!LoadIndex(Settings, IndexEntries, OutError)) return false;
 
 	FRandomStream Random(Settings.Seed);
-	const int32 PrimaryIndex = Random.RandRange(0, Paths.Num() - 1);
-	int32 SecondaryIndex = PrimaryIndex;
-	if (Paths.Num() > 1)
+	const int32 CandidateCount = FMath::Clamp(IndexEntries.Num(), 1, 64);
+	const int32 WantedProvinceCount = FMath::Clamp(Settings.ProvinceCount, 4, 64);
+	TArray<FProvinceSource> Provinces;
+	Provinces.Reserve(WantedProvinceCount);
+	TSet<FString> RecentlyUsedSources;
+	const FString SourceRoot = ResolveSourceDirectory(Settings);
+	const double Half = Settings.WorldSizeMeters * 0.5;
+
+	for (int32 ProvinceIndex = 0; ProvinceIndex < WantedProvinceCount; ++ProvinceIndex)
 	{
-		while (SecondaryIndex == PrimaryIndex)
+		int32 Pick = Random.RandRange(0, CandidateCount - 1);
+		for (int32 Attempt = 0; Attempt < 12; ++Attempt)
 		{
-			SecondaryIndex = Random.RandRange(0, Paths.Num() - 1);
+			const int32 Candidate = Random.RandRange(0, CandidateCount - 1);
+			if (!RecentlyUsedSources.Contains(IndexEntries[Candidate].SourceKey) || Attempt == 11)
+			{
+				Pick = Candidate;
+				break;
+			}
 		}
+		const FIndexedPatch& Entry = IndexEntries[Pick];
+		FProvinceSource Province;
+		Province.Metadata = Entry;
+		const FString PatchPath = FPaths::Combine(SourceRoot, Entry.RelativePath);
+		if (!LoadPatch(PatchPath, Province.Patch, OutError)) return false;
+		const float RadiusKm = Random.FRandRange(Settings.ProvinceMinRadiusKm, Settings.ProvinceMaxRadiusKm);
+		Province.RadiusM = RadiusKm * 1000.0f;
+		const float PlacementRadius = static_cast<float>(Half * 0.72);
+		const float Angle = Random.FRandRange(0.0f, 2.0f * PI);
+		const float Radial = FMath::Sqrt(Random.FRand()) * PlacementRadius;
+		Province.CenterM = FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radial;
+		Province.RotationRad = FMath::DegreesToRadians(Entry.DominantStructureAngleDeg) + Random.FRandRange(-0.55f, 0.55f);
+		const float ReliefTarget = FMath::Lerp(500.0f, 2600.0f, FMath::Clamp(Entry.MacroSuitability, 0.0f, 1.0f));
+		Province.HeightScale = Settings.ReliefScale * ReliefTarget / FMath::Max(30.0f, Entry.ReliefP90M);
+		Province.Weight = FMath::Lerp(0.65f, 1.0f, Entry.MacroSuitability);
+		Province.ProvinceId = static_cast<uint8>(ProvinceIndex % 255);
+		Provinces.Add(MoveTemp(Province));
+		RecentlyUsedSources.Add(Entry.SourceKey);
+		if (RecentlyUsedSources.Num() > 4) RecentlyUsedSources.Reset();
 	}
-
-	FPatch Primary;
-	FPatch Secondary;
-	if (!LoadPatch(Paths[PrimaryIndex], Primary, OutError) || !LoadPatch(Paths[SecondaryIndex], Secondary, OutError))
-	{
-		return false;
-	}
-
-	const int32 PrimaryVariant = Random.RandRange(0, 15);
-	const int32 SecondaryVariant = Random.RandRange(0, 15);
-	const FVector2D PrimaryOffset(Random.FRandRange(-0.10f, 0.10f), Random.FRandRange(-0.10f, 0.10f));
-	const FVector2D SecondaryOffset(Random.FRandRange(-0.15f, 0.15f), Random.FRandRange(-0.15f, 0.15f));
 
 	OutDem.Reset();
 	OutDem.Resolution = Settings.Resolution;
@@ -275,30 +381,37 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 	OutDem.BoundaryType.Init(static_cast<uint8>(CubusLandscapeEvolution::EBoundaryType::Stable), OutDem.NumCells());
 
 	const int32 R = OutDem.Resolution;
-	const double Half = Settings.WorldSizeMeters * 0.5;
-	ParallelFor(OutDem.NumCells(), [&OutDem, &Settings, &Primary, &Secondary, PrimaryVariant, SecondaryVariant, PrimaryOffset, SecondaryOffset, R, Half](const int32 Cell)
+	const float BlendM = Settings.ProvinceBlendKm * 1000.0f;
+	ParallelFor(OutDem.NumCells(), [&OutDem, &Settings, &Provinces, R, Half, BlendM](const int32 Cell)
 	{
 		const int32 X = Cell % R;
 		const int32 Y = Cell / R;
 		const double U = static_cast<double>(X) / static_cast<double>(R - 1);
 		const double V = static_cast<double>(Y) / static_cast<double>(R - 1);
-		const double WorldX = -Half + U * Settings.WorldSizeMeters;
-		const double WorldY = -Half + V * Settings.WorldSizeMeters;
+		const FVector2D WorldM(-Half + U * Settings.WorldSizeMeters, -Half + V * Settings.WorldSizeMeters);
+		const float Envelope = IslandEnvelope(WorldM.X, WorldM.Y, Settings);
 
-		const float WarpU = Fbm(WorldX / 115.0, WorldY / 115.0, Settings.Seed ^ 0x6d2b79f5) * Settings.WarpMeters / static_cast<float>(Settings.WorldSizeMeters);
-		const float WarpV = Fbm(WorldX / 131.0, WorldY / 131.0, Settings.Seed ^ 0x1b873593) * Settings.WarpMeters / static_cast<float>(Settings.WorldSizeMeters);
-		FVector2D SourceUv(U + WarpU, V + WarpV);
+		float WeightedRelief = 0.0f;
+		float WeightSum = 0.0f;
+		float BestWeight = 0.0f;
+		int32 BestProvince = INDEX_NONE;
+		for (int32 ProvinceIndex = 0; ProvinceIndex < Provinces.Num(); ++ProvinceIndex)
+		{
+			const FProvinceSource& Province = Provinces[ProvinceIndex];
+			const float W = ProvinceInfluence(Province, WorldM, BlendM) * Province.Weight;
+			if (W <= 0.0001f) continue;
+			WeightedRelief += SampleProvinceRelief(Province, WorldM) * W;
+			WeightSum += W;
+			if (W > BestWeight)
+			{
+				BestWeight = W;
+				BestProvince = ProvinceIndex;
+			}
+		}
 
-		const FVector2D PUv = TransformUv(SourceUv + PrimaryOffset, PrimaryVariant);
-		const FVector2D SUv = TransformUv(SourceUv + SecondaryOffset, SecondaryVariant);
-		const float P = (Primary.SampleBilinear(PUv.X, PUv.Y) - Primary.MeanElevationM) * Settings.ReliefScale;
-		const float S = (Secondary.SampleBilinear(SUv.X, SUv.Y) - Secondary.MeanElevationM) * Settings.ReliefScale;
-		const float BlendNoise = Smooth01(0.5f + 0.5f * Fbm(WorldX / 210.0, WorldY / 210.0, Settings.Seed ^ 0xa5a5a5a5));
-		const float SecondaryWeight = FMath::Clamp(Settings.SecondaryBlend * FMath::Lerp(0.35f, 1.0f, BlendNoise), 0.0f, 0.48f);
-		const float RealRelief = FMath::Lerp(P, S, SecondaryWeight);
-
-		const float Envelope = IslandEnvelope(WorldX, WorldY, Settings, Settings.Seed);
-		const float LandHeight = Settings.BaseLandElevationM + RealRelief;
+		float Relief = WeightSum > 0.001f ? WeightedRelief / WeightSum : 0.0f;
+		const float InteriorUndulation = Fbm(WorldM.X / 70000.0, WorldM.Y / 70000.0, Settings.Seed ^ 0x68bc21eb) * 120.0f;
+		const float LandHeight = Settings.BaseLandElevationM + Relief + InteriorUndulation;
 		const float Elevation = FMath::Lerp(Settings.OceanFloorM, LandHeight, Envelope);
 		OutDem.ElevationM[Cell] = Elevation;
 
@@ -306,15 +419,20 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 		{
 			OutDem.ProvinceId[Cell] = static_cast<uint8>(CubusLandscapeEvolution::EProvinceType::OceanicBasin);
 		}
-		else if (Envelope < 0.40f)
+		else if (Envelope < 0.35f)
 		{
 			OutDem.ProvinceId[Cell] = static_cast<uint8>(CubusLandscapeEvolution::EProvinceType::CoastalShelf);
+		}
+		else if (BestProvince != INDEX_NONE)
+		{
+			OutDem.PlateId[Cell] = Provinces[BestProvince].ProvinceId;
+			OutDem.ProvinceId[Cell] = static_cast<uint8>(MapProvinceType(Provinces[BestProvince].Metadata));
 		}
 	});
 
 	Measure(OutDem, OutStats);
-	UE_LOG(LogTemp, Display, TEXT("Cubus DEM island: primary %s, secondary %s, seed %d, %.2f m/cell"),
-		*FPaths::GetCleanFilename(Primary.SourcePath), *FPaths::GetCleanFilename(Secondary.SourcePath), Settings.Seed, OutDem.CellSizeMeters);
+	UE_LOG(LogTemp, Display, TEXT("Cubus DEM province world: seed %d, %d provinces, %.0f km world, %.2f m/cell, %d indexed sources"),
+		Settings.Seed, Provinces.Num(), Settings.WorldSizeMeters / 1000.0, OutDem.CellSizeMeters, IndexEntries.Num());
 	return true;
 }
 } // namespace CubusDemIsland
