@@ -121,6 +121,16 @@ void AOrakaiPlayerController::Tick(const float DeltaSeconds)
 void AOrakaiPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (IsLocalPlayerController())
+	{
+		FInputModeGameOnly GameInputMode;
+		SetInputMode(GameInputMode);
+		bShowMouseCursor = false;
+		bEnableClickEvents = false;
+		bEnableMouseOverEvents = false;
+	}
+
 	InitializeWorldLoadingScreen();
 	if (IsLocalPlayerController() && ShouldUseTouchControls())
 	{
