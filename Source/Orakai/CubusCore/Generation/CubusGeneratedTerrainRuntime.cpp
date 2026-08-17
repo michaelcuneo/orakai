@@ -13,11 +13,11 @@ void FCubusGeneratedTerrainRuntime::Configure(
 {
     FWriteScopeLock Lock(StateLock);
 
-    if (!State.bActive || State.WorldSeed != WorldSeed)
-    {
-        State = FState();
-    }
-
+    // A loader generation is a complete replacement world snapshot, even when
+    // the player deliberately regenerates the same seed with different tuning.
+    // Never let tiles from an older run survive until their coordinates happen
+    // to be overwritten by the new run.
+    State = FState();
     State.WorldSeed = WorldSeed;
     State.RasterSettings = RasterSettings;
 
