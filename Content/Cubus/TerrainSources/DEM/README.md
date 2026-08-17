@@ -1,51 +1,81 @@
 # Orakai Real DEM Terrain Sources
 
-This folder contains prepared real-world elevation patches used as geological source material for seeded Orakai islands.
+This folder contains prepared real-world elevation patches used as geological source material for seeded Orakai worlds.
 
-## Current source
+## Source library
 
-**Auckland - Waiheke Island Coastal LiDAR 1m DEM (2025-2026)**
+Orakai's DEM source library is built from open Toitu Te Whenua Land Information New Zealand (LINZ) elevation collections. The current preparer includes deliberately different terrain families:
 
-- Provider/licensor: Toitu Te Whenua Land Information New Zealand (LINZ)
-- Product: bare-earth 1 m coastal DEM
-- CRS of source GeoTIFFs: NZGD2000 / New Zealand Transverse Mercator 2000 (EPSG:2193)
-- Licence: CC BY 4.0
-- Attribution: `Licensed by Toitu Te Whenua Land Information New Zealand for re-use under CC-BY-4.0.`
+- Auckland - Waiheke Island Coastal LiDAR 1 m DEM (2025-2026)
+- Northland - Whangarei to Bream Bay Coastal LiDAR 1 m DEM (2025)
+- Southland - Bluff Coastal LiDAR 1 m DEM (2025)
+- Otago - Dunedin Coastal LiDAR 1 m DEM (2025)
+- West Coast - Okuru Coastal LiDAR 1 m DEM (2026)
+- Canterbury - Banks Peninsula LiDAR 1 m DEM (2023)
+- Taranaki LiDAR 1 m DEM (2021)
 
-The source GeoTIFFs are public Cloud Optimised GeoTIFFs in the LINZ `nz-coastal` AWS Open Data bucket. They are downloaded into `Saved/DemSourceCache` and are **not** shipped directly with the game.
+Provider/licensor: Toitu Te Whenua Land Information New Zealand (LINZ)
+
+Licence: CC BY 4.0
+
+Attribution: `Licensed by Toitu Te Whenua Land Information New Zealand for re-use under CC-BY-4.0.`
+
+The source GeoTIFFs are public Cloud Optimised GeoTIFFs in the LINZ `nz-coastal` and `nz-elevation` AWS Open Data buckets. They are downloaded into `Saved/DemSourceCache` and are **not** shipped directly with the game.
 
 ## Prepare the library
 
-From the repository root on Windows:
+From the repository root with the project's active Python environment:
 
 ```powershell
-py -m pip install rasterio numpy
-py Tools/DemLibrary/prepare_linz_coastal.py
+python -m pip install --upgrade rasterio numpy
+python Tools/DemLibrary/prepare_linz_library.py
 ```
 
-The preparer downloads a small subset of the Waiheke 1 m DEM collection and writes compact Orakai `.cdem` patches beneath:
+The multi-source preparer scans each selected STAC collection, prioritises substantial COG assets, skips sparse edge tiles, ranks mostly-valid 1024 x 1024 m crops by terrain relief, and writes compact Orakai `.cdem` patches beneath:
 
 ```text
-Content/Cubus/TerrainSources/DEM/Prepared/Waiheke/
+Content/Cubus/TerrainSources/DEM/Prepared/
+  Waiheke/
+  WhangareiBreamBay/
+  Bluff/
+  Dunedin/
+  Okuru/
+  BanksPeninsula/
+  Taranaki/
 ```
 
-`.cdem` files are Git-LFS assets and are staged as Non-UFS content for packaged builds.
+Useful subsets:
+
+```powershell
+python Tools/DemLibrary/prepare_linz_library.py --source coastal
+python Tools/DemLibrary/prepare_linz_library.py --source land
+python Tools/DemLibrary/prepare_linz_library.py --source taranaki --source okuru
+python Tools/DemLibrary/prepare_linz_library.py --tiles-per-source 3
+```
+
+The original Waiheke-only preparer remains available for focused testing:
+
+```powershell
+python Tools/DemLibrary/prepare_linz_coastal.py
+```
+
+`.cdem` files are Git-LFS assets and are staged as Non-UFS content for packaged builds. `CubusDemIslandGenerator` discovers them recursively, so newly prepared source folders become available without hardcoding individual CDEM paths in C++.
 
 ## What Orakai does with the data
 
-The game does **not** reproduce Waiheke as its playable map. Absolute NZ elevation datum is discarded. A world seed chooses real DEM patches and then independently:
+The game does **not** reproduce any source location as its playable world. Absolute source elevation datum is discarded. A world seed can choose real DEM patches and then independently:
 
-- crops/selects source landforms;
-- rotates and mirrors them;
-- spatially warps their coordinates;
-- blends multiple real landforms;
-- rescales relief;
-- applies a seeded 500 m island coastline and ocean perimeter;
-- solves hydrology;
-- optionally runs bounded erosion/hillslope evolution;
-- feeds the resulting surface into Cubus density/volumetric geology.
+- crop/select source landforms;
+- rotate and mirror them;
+- spatially warp their coordinates;
+- blend multiple real landforms;
+- rescale relief;
+- place them into the 500 km world hierarchy at an appropriate scale;
+- solve hydrology;
+- optionally run bounded erosion/hillslope evolution;
+- feed regional/local surfaces into Cubus density/volumetric geology.
 
-The intent is to use real geology as high-quality source material while still producing a different playable island for different seeds.
+The 1 m CDEM library is primarily local/regional source material. It must not be stretched directly across the 500 km global world. Large-scale terrain structure should be assembled at a coarser tier, with these high-resolution sources providing realistic landform character during regional refinement.
 
 ## CDEM v1
 
