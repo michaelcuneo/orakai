@@ -100,6 +100,8 @@ namespace CubusTerrainDrainage
         Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.MajorRiverAreaSquareKm * 1000.0f)));
         Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.Raster.DomainOffsetMeters.X)));
         Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.Raster.DomainOffsetMeters.Y)));
+        Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.RegionOriginMeters.X)));
+        Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.RegionOriginMeters.Y)));
         return Hash;
     }
 
@@ -150,7 +152,7 @@ namespace CubusTerrainDrainage
         Region->CellSizeMeters = Settings.AnalysisCellSizeMeters;
 
         const double RegionWorldSize = static_cast<double>(Settings.RegionCellCount) * Settings.AnalysisCellSizeMeters;
-        Region->WorldOriginMeters = FVector2D(
+        Region->WorldOriginMeters = Settings.RegionOriginMeters + FVector2D(
             static_cast<double>(RegionCoordinate.X) * RegionWorldSize - static_cast<double>(Settings.HaloCellCount) * Settings.AnalysisCellSizeMeters,
             static_cast<double>(RegionCoordinate.Y) * RegionWorldSize - static_cast<double>(Settings.HaloCellCount) * Settings.AnalysisCellSizeMeters
         );
@@ -384,8 +386,8 @@ namespace CubusTerrainDrainage
         const double CellSize = FMath::Max(2.0, static_cast<double>(Settings.AnalysisCellSizeMeters));
         const double RegionSize = CellSize * static_cast<double>(FMath::Clamp(Settings.RegionCellCount, 32, 512));
         return FIntPoint(
-            FMath::FloorToInt(WorldXmeters / RegionSize),
-            FMath::FloorToInt(WorldYmeters / RegionSize)
+            FMath::FloorToInt((WorldXmeters - Settings.RegionOriginMeters.X) / RegionSize),
+            FMath::FloorToInt((WorldYmeters - Settings.RegionOriginMeters.Y) / RegionSize)
         );
     }
 
