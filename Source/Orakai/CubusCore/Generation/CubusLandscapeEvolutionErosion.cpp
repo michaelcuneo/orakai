@@ -7,13 +7,13 @@ namespace CubusLandscapeEvolution
 {
 namespace
 {
-constexpr double SqrtTwo = 1.4142135623730950488;
+constexpr double ErosionSqrtTwo = 1.4142135623730950488;
 
-float ReceiverDistanceMeters(const FGlobalDem& Dem, const int32 Cell, const int32 Receiver)
+float ErosionReceiverDistanceMeters(const FGlobalDem& Dem, const int32 Cell, const int32 Receiver)
 {
 	const FIntPoint A = Dem.Coordinates(Cell);
 	const FIntPoint B = Dem.Coordinates(Receiver);
-	return static_cast<float>(Dem.CellSizeMeters * ((A.X != B.X && A.Y != B.Y) ? SqrtTwo : 1.0));
+	return static_cast<float>(Dem.CellSizeMeters * ((A.X != B.X && A.Y != B.Y) ? ErosionSqrtTwo : 1.0));
 }
 
 float ProvinceAgeMultiplier(const FGlobalDem& Dem, const int32 Cell)
@@ -138,7 +138,7 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 				continue;
 			}
 
-			const float DistanceM = FMath::Max(1.0f, ReceiverDistanceMeters(InOutDem, Cell, Receiver));
+			const float DistanceM = FMath::Max(1.0f, ErosionReceiverDistanceMeters(InOutDem, Cell, Receiver));
 			const double AreaM2 = FMath::Max(1.0, static_cast<double>(InOutDem.DrainageAreaKm2[Cell]) * 1000000.0);
 			const EProvinceType Province = InOutDem.ProvinceId.IsValidIndex(Cell)
 				? static_cast<EProvinceType>(InOutDem.ProvinceId[Cell])
