@@ -42,6 +42,26 @@ struct FPlacement
 	FVector2D CenterM = FVector2D::ZeroVector;
 };
 
+struct FCoastFeature
+{
+	FVector2D A = FVector2D::ZeroVector;
+	FVector2D B = FVector2D::ZeroVector;
+	float RadiusM = 10000.0f;
+	bool bAddsLand = false;
+};
+
+struct FCoastShape
+{
+	float AxisXM = 200000.0f;
+	float AxisYM = 170000.0f;
+	float Exponent = 2.4f;
+	float RotationRad = 0.0f;
+	int32 PeninsulaCount = 0;
+	int32 BayCount = 0;
+	int32 InletCount = 0;
+	TArray<FCoastFeature> Features;
+};
+
 uint32 Hash(uint32 V)
 {
 	V ^= V >> 16;
@@ -93,6 +113,13 @@ float Fbm(double X, double Y, const int32 Seed)
 	return Weight > 0.0f ? Sum / Weight : 0.0f;
 }
 
+FVector2D Rotate2D(const FVector2D& V, const float AngleRad)
+{
+	const float C = FMath::Cos(AngleRad);
+	const float S = FMath::Sin(AngleRad);
+	return FVector2D(V.X * C - V.Y * S, V.X * S + V.Y * C);
+}
+
 FVector2D TransformUv(FVector2D UV, const int32 Variant)
 {
 	UV -= FVector2D(0.5, 0.5);
@@ -108,22 +135,143 @@ FVector2D TransformUv(FVector2D UV, const int32 Variant)
 	return UV + FVector2D(0.5, 0.5);
 }
 
-float IslandEnvelope(const double WorldX, const double WorldY, const FSettings& Settings)
+double SuperellipseRadiusM(const float AngleRad, const FCoastShape& Shape)
 {
-	const double Half = Settings.WorldSizeMeters * 0.5;
-	const double Margin = FMath::Clamp<double>(Settings.CoastBandM, 5000.0, Half * 0.35);
-	const double BroadScale = FMath::Max(50000.0, Settings.WorldSizeMeters * 0.20);
-	const float WarpX = Fbm(WorldX / BroadScale, WorldY / BroadScale, Settings.Seed ^ 0x51d7348d);
-	const float WarpY = Fbm(WorldX / (BroadScale * 1.17), WorldY / (BroadScale * 1.17), Settings.Seed ^ 0x94d049bb);
-	const double X = WorldX + WarpX * Settings.WarpMeters;
-	const double Y = WorldY + WarpY * Settings.WarpMeters;
-	const double Ax = Half - Margin * 0.25;
-	const double Ay = Half - Margin * 0.38;
-	const double Nx = FMath::Abs(X) / FMath::Max(1.0, Ax);
-	const double Ny = FMath::Abs(Y) / FMath::Max(1.0, Ay);
-	const double Super = FMath::Pow(FMath::Pow(Nx, 2.6) + FMath::Pow(Ny, 2.6), 1.0 / 2.6);
-	const double DistanceM = (1.0 - Super) * FMath::Min(Ax, Ay);
-	return Smooth01(static_cast<float>(DistanceM / Margin));
+	const double C = FMath::Abs(FMath::Cos(AngleRad));
+	const double S = FMath::Abs(FMath::Sin(AngleRad));
+	const double P = Shape.Exponent;
+	const double Denominator = FMath::Pow(
+		FMath::Pow(C / FMath::Max(1.0f, Shape.AxisXM), P) +
+		FMath::Pow(S / FMath::Max(1.0f, Shape.AxisYM), P),
+		1.0 / P);
+	return Denominator > UE_DOUBLE_SMALL_NUMBER ? 1.0 / Denominator : FMath::Min(Shape.AxisXM, Shape.AxisYM);
+}
+
+FVector2D ShorePointWorld(const float LocalAngleRad, const FCoastShape& Shape)
+{
+	const double R = SuperellipseRadiusM(LocalAngleRad, Shape);
+	const FVector2D Local(FMath::Cos(LocalAngleRad) * R, FMath::Sin(LocalAngleRad) * R);
+	return Rotate2D(Local, Shape.RotationRad);
+}
+
+FVector2D RadialWorld(const float LocalAngleRad, const FCoastShape& Shape)
+{
+	return Rotate2D(FVector2D(FMath::Cos(LocalAngleRad), FMath::Sin(LocalAngleRad)), Shape.RotationRad).GetSafeNormal();
+}
+
+float SignedCapsuleInsideM(const FVector2D& P, const FCoastFeature& Feature)
+{
+	const FVector2D Segment = Feature.B - Feature.A;
+	const double SegmentLengthSq = Segment.SizeSquared();
+	const double T = SegmentLengthSq > UE_DOUBLE_SMALL_NUMBER
+		? FMath::Clamp(FVector2D::DotProduct(P - Feature.A, Segment) / SegmentLengthSq, 0.0, 1.0)
+		: 0.0;
+	const FVector2D Closest = Feature.A + Segment * T;
+	return Feature.RadiusM - static_cast<float>(FVector2D::Distance(P, Closest));
+}
+
+FCoastShape BuildCoastShape(const FSettings& Settings)
+{
+	FCoastShape Shape;
+	FRandomStream Random(Settings.Seed ^ 0x4c8a91d3);
+	const float Half = static_cast<float>(Settings.WorldSizeMeters * 0.5);
+
+	Shape.AxisXM = Half * Random.FRandRange(0.76f, 0.90f);
+	Shape.AxisYM = Half * Random.FRandRange(0.62f, 0.82f);
+	Shape.Exponent = Random.FRandRange(1.9f, 2.65f);
+	Shape.RotationRad = Random.FRandRange(-PI, PI);
+	Shape.PeninsulaCount = Random.RandRange(5, 8);
+	Shape.BayCount = Random.RandRange(7, 11);
+	Shape.InletCount = Random.RandRange(2, 5);
+	Shape.Features.Reserve(Shape.PeninsulaCount + Shape.BayCount + Shape.InletCount);
+
+	const auto AddDistributedFeatures = [&Shape, &Random](const int32 Count, const bool bAddsLand,
+		const float MinLengthM, const float MaxLengthM, const float MinRadiusM, const float MaxRadiusM,
+		const float PhaseOffset, const float MaxTangentialFraction)
+	{
+		if (Count <= 0) return;
+		const float Sector = 2.0f * PI / static_cast<float>(Count);
+		for (int32 I = 0; I < Count; ++I)
+		{
+			const float LocalAngle = PhaseOffset + (I + 0.5f) * Sector + Random.FRandRange(-0.34f, 0.34f) * Sector;
+			const FVector2D Radial = RadialWorld(LocalAngle, Shape);
+			const FVector2D Tangent(-Radial.Y, Radial.X);
+			const FVector2D Shore = ShorePointWorld(LocalAngle, Shape);
+			const float LengthM = Random.FRandRange(MinLengthM, MaxLengthM);
+			const float RadiusM = Random.FRandRange(MinRadiusM, MaxRadiusM);
+			const float BendM = Random.FRandRange(-MaxTangentialFraction, MaxTangentialFraction) * LengthM;
+
+			FCoastFeature Feature;
+			Feature.bAddsLand = bAddsLand;
+			Feature.RadiusM = RadiusM;
+			if (bAddsLand)
+			{
+				// Start well inside the parent landmass so the lobe is guaranteed to be
+				// connected; bend the outer end along the coast to avoid radial starbursts.
+				Feature.A = Shore - Radial * RadiusM * 1.7f;
+				Feature.B = Shore + Radial * LengthM + Tangent * BendM;
+			}
+			else
+			{
+				// Water features always begin outside the parent coast, so every cut is
+				// connected to the ocean rather than accidentally creating an inland lake.
+				Feature.A = Shore + Radial * RadiusM * 1.8f;
+				Feature.B = Shore - Radial * LengthM + Tangent * BendM;
+			}
+			Shape.Features.Add(Feature);
+		}
+	};
+
+	const float Scale = Half / 250000.0f;
+	AddDistributedFeatures(Shape.PeninsulaCount, true,
+		22000.0f * Scale, 62000.0f * Scale, 8500.0f * Scale, 22000.0f * Scale,
+		Random.FRandRange(0.0f, 2.0f * PI), 0.42f);
+	AddDistributedFeatures(Shape.BayCount, false,
+		18000.0f * Scale, 52000.0f * Scale, 10000.0f * Scale, 28000.0f * Scale,
+		Random.FRandRange(0.0f, 2.0f * PI), 0.38f);
+	AddDistributedFeatures(Shape.InletCount, false,
+		42000.0f * Scale, 90000.0f * Scale, 4500.0f * Scale, 10500.0f * Scale,
+		Random.FRandRange(0.0f, 2.0f * PI), 0.55f);
+
+	return Shape;
+}
+
+float CoastSignedDistanceM(const FVector2D& WorldM, const FSettings& Settings, const FCoastShape& Shape)
+{
+	const double BroadScale = FMath::Max(60000.0, Settings.WorldSizeMeters * 0.17);
+	const float WarpAmplitude = FMath::Clamp(Settings.WarpMeters, 0.0f, static_cast<float>(Settings.WorldSizeMeters * 0.04));
+	const FVector2D Warped(
+		WorldM.X + Fbm(WorldM.X / BroadScale, WorldM.Y / BroadScale, Settings.Seed ^ 0x51d7348d) * WarpAmplitude,
+		WorldM.Y + Fbm(WorldM.X / (BroadScale * 1.13), WorldM.Y / (BroadScale * 1.13), Settings.Seed ^ 0x94d049bb) * WarpAmplitude);
+
+	const FVector2D Local = Rotate2D(Warped, -Shape.RotationRad);
+	const double P = Shape.Exponent;
+	const double Super = FMath::Pow(
+		FMath::Pow(FMath::Abs(Local.X) / FMath::Max(1.0f, Shape.AxisXM), P) +
+		FMath::Pow(FMath::Abs(Local.Y) / FMath::Max(1.0f, Shape.AxisYM), P),
+		1.0 / P);
+	float DistanceM = static_cast<float>((1.0 - Super) * FMath::Min(Shape.AxisXM, Shape.AxisYM));
+
+	// Broad and medium coastline undulation prevents untouched portions of the
+	// parent landmass from reverting to a mathematically perfect superellipse.
+	DistanceM += Fbm(WorldM.X / 85000.0, WorldM.Y / 85000.0, Settings.Seed ^ 0x7f4a7c15) * 15000.0f;
+	DistanceM += Fbm(WorldM.X / 31000.0, WorldM.Y / 31000.0, Settings.Seed ^ 0x1ce4e5b9) * 4500.0f;
+
+	for (const FCoastFeature& Feature : Shape.Features)
+	{
+		const float FeatureInsideM = SignedCapsuleInsideM(Warped, Feature);
+		if (Feature.bAddsLand)
+		{
+			// SDF union: positive inside either the parent landmass or peninsula.
+			DistanceM = FMath::Max(DistanceM, FeatureInsideM);
+		}
+		else
+		{
+			// SDF subtraction: positive inside the water capsule must become ocean.
+			DistanceM = FMath::Min(DistanceM, -FeatureInsideM);
+		}
+	}
+	return DistanceM;
 }
 
 CubusLandscapeEvolution::EProvinceType MapProvinceType(const FIndexedPatch& Entry)
@@ -374,6 +522,14 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 		}
 	}
 
+	const FCoastShape CoastShape = BuildCoastShape(Settings);
+	const float CoastTransitionM = FMath::Clamp(Settings.CoastBandM, 3500.0f, static_cast<float>(Settings.WorldSizeMeters * 0.03));
+	UE_LOG(LogTemp, Display,
+		TEXT("Cubus coastline: %.0f x %.0f km parent axes, rotation %.0f deg, %d peninsulas, %d bays, %d deep inlets, %.1f km shore transition"),
+		CoastShape.AxisXM * 2.0f / 1000.0f, CoastShape.AxisYM * 2.0f / 1000.0f,
+		FMath::RadiansToDegrees(CoastShape.RotationRad), CoastShape.PeninsulaCount, CoastShape.BayCount,
+		CoastShape.InletCount, CoastTransitionM / 1000.0f);
+
 	OutDem.Reset();
 	OutDem.Resolution = Settings.Resolution;
 	OutDem.WorldSizeMeters = Settings.WorldSizeMeters;
@@ -386,7 +542,7 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 	OutDem.BoundaryType.Init(static_cast<uint8>(CubusLandscapeEvolution::EBoundaryType::Stable), OutDem.NumCells());
 
 	const int32 R = OutDem.Resolution;
-	ParallelFor(OutDem.NumCells(), [&OutDem, &Settings, &Sources, &Placements, R, GridR, GridSpacingM, GridOrigin](const int32 Cell)
+	ParallelFor(OutDem.NumCells(), [&OutDem, &Settings, &Sources, &Placements, &CoastShape, R, GridR, GridSpacingM, GridOrigin, CoastTransitionM](const int32 Cell)
 	{
 		const int32 X = Cell % R;
 		const int32 Y = Cell / R;
@@ -418,11 +574,6 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 			SourceUv = TransformUv(SourceUv, Placement.Variant);
 			if (SourceUv.X < 0.0f || SourceUv.X > 1.0f || SourceUv.Y < 0.0f || SourceUv.Y > 1.0f) continue;
 
-			// Squaring the partition weights keeps transitions smooth but narrows the
-			// region in which unrelated landforms are mixed. Dividing by the RMS
-			// weight rather than the arithmetic sum preserves relief variance: four
-			// independent mean-centred DEMs no longer lose roughly half their height
-			// simply because they meet in the middle of a quilt cell.
 			const float W = FMath::Pow(FMath::Max(0.0f, BaseWeights[Corner]), QuiltWeightPower);
 			if (W <= KINDA_SMALL_NUMBER) continue;
 			const float Sample = (Source.Patch.SampleBilinear(SourceUv.X, SourceUv.Y) - Source.Patch.MeanElevationM) * Settings.ReliefScale;
@@ -438,16 +589,31 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 			? WeightedRelief / FMath::Sqrt(WeightSquaredSum)
 			: 0.0f;
 
-		const float Envelope = IslandEnvelope(WorldM.X, WorldM.Y, Settings);
-		const float LandHeight = Settings.BaseLandElevationM + Relief;
-		const float Elevation = FMath::Lerp(Settings.OceanFloorM, LandHeight, Envelope);
+		const float CoastDistanceM = CoastSignedDistanceM(WorldM, Settings, CoastShape);
+		float Elevation = Settings.OceanFloorM;
+		if (CoastDistanceM >= 0.0f)
+		{
+			// The SDF zero contour is now the actual shore. Land rises from just above
+			// sea level into the real-DEM interior instead of inheriting its coastline
+			// from a huge ocean-floor interpolation band.
+			const float InteriorHeight = FMath::Max(Settings.OceanLevelM + 2.0f, Settings.BaseLandElevationM + Relief);
+			const float InlandT = Smooth01(CoastDistanceM / CoastTransitionM);
+			Elevation = FMath::Lerp(Settings.OceanLevelM + 0.5f, InteriorHeight, InlandT);
+		}
+		else
+		{
+			// Keep a broad submerged shelf without allowing that shelf to round off the
+			// coastline itself. The shoreline stays at the SDF zero contour.
+			const float ShelfT = Smooth01((-CoastDistanceM) / (CoastTransitionM * 3.0f));
+			Elevation = FMath::Lerp(Settings.OceanLevelM - 1.0f, Settings.OceanFloorM, ShelfT);
+		}
 		OutDem.ElevationM[Cell] = Elevation;
 
-		if (Elevation <= Settings.OceanLevelM)
+		if (CoastDistanceM < 0.0f)
 		{
 			OutDem.ProvinceId[Cell] = static_cast<uint8>(CubusLandscapeEvolution::EProvinceType::OceanicBasin);
 		}
-		else if (Envelope < 0.35f)
+		else if (CoastDistanceM < CoastTransitionM * 1.5f)
 		{
 			OutDem.ProvinceId[Cell] = static_cast<uint8>(CubusLandscapeEvolution::EProvinceType::CoastalShelf);
 		}
