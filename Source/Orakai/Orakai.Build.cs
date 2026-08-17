@@ -23,6 +23,7 @@ public class Orakai : ModuleRules
 			"SlateCore",
 			"ProceduralMeshComponent",
 			"PCG",
+			"Json",
 			"DynamicWind",
 			"SpacetimeDbSdk"
 		});
