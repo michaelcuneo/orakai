@@ -52,6 +52,33 @@ struct ORAKAI_API FCubusTerrainStructureSettings
     float BasinCellSizeKm = 22.0f;
     float BasinRadiusKm = 13.0f;
     float BasinDepthMeters = 240.0f;
+
+    // ---------------------------------------------------------------------
+    // Nested pre-erosion morphology.
+    //
+    // These are subordinate to the explicit mountain/basin skeleton above.
+    // They ensure that a local 1-4 km crop already contains believable relief
+    // for later drainage and erosion instead of being one smooth macro slope.
+    // ---------------------------------------------------------------------
+
+    /** Broad hill masses and intermontane shoulders. */
+    float HillScaleKm = 3.2f;
+    float HillReliefMeters = 230.0f;
+
+    /** Branching subordinate ridge/spur scale. */
+    float SpurScaleKm = 1.15f;
+    float SpurReliefMeters = 145.0f;
+
+    /** Pre-existing shallow swales that drainage can capture and deepen. */
+    float SwaleScaleMeters = 360.0f;
+    float SwaleDepthMeters = 42.0f;
+
+    /** Fine rock/soil morphology retained by the final 1 m DEM. */
+    float FineScaleMeters = 95.0f;
+    float FineReliefMeters = 16.0f;
+
+    /** Low-frequency domain warping prevents repetitive parallel ridges. */
+    float MorphologyWarpMeters = 520.0f;
 };
 
 /** Diagnostics for one sample of the broad, pre-drainage terrain skeleton. */
@@ -64,6 +91,10 @@ struct ORAKAI_API FCubusTerrainStructureSample
     float MassifWeight = 0.0f;
     float BasinWeight = 0.0f;
     float PassWeight = 0.0f;
+    float HillWeight = 0.0f;
+    float SpurWeight = 0.0f;
+    float SwaleWeight = 0.0f;
+    float FineWeight = 0.0f;
     float DistanceToRangeMeters = MAX_flt;
 };
 
@@ -72,8 +103,9 @@ struct ORAKAI_API FCubusTerrainStructureSample
  *
  * Mountain systems are explicit connected polylines. Massifs are attached to
  * their control nodes, sparse branches connect neighbouring systems, and basin
- * bowls occupy the spaces between ranges. Low-amplitude value noise is used
- * only for regional elevation drift; it does not define mountain topology.
+ * bowls occupy the spaces between ranges. Multi-scale morphology is layered
+ * underneath later hydrology/erosion so local DEM crops already contain nested
+ * hill, ridge, spur and swale structure without inventing mountains from noise.
  */
 class ORAKAI_API FCubusTerrainStructure
 {
