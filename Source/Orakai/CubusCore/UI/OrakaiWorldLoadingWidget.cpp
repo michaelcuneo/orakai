@@ -14,7 +14,9 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
+#include "CubusCore/Generation/CubusWorldGenerationPreviewActor.h"
 #include "Engine/Texture2D.h"
+#include "Engine/World.h"
 #include "InputCoreTypes.h"
 
 void UOrakaiWorldLoadingWidget::NativeConstruct()
@@ -56,7 +58,7 @@ void UOrakaiWorldLoadingWidget::NativeConstruct()
 	TitleSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 24.0f));
 
 	StatusText = WidgetTree->ConstructWidget<UTextBlock>();
-	StatusText->SetText(FText::FromString(TEXT("Building generated world chunks")));
+	StatusText->SetText(FText::FromString(TEXT("Choose a spawn location")));
 	StatusText->SetJustification(ETextJustify::Center);
 	StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.63f, 0.70f, 0.64f, 1.0f)));
 	FSlateFontInfo StatusFont = StatusText->GetFont();
@@ -77,7 +79,7 @@ void UOrakaiWorldLoadingWidget::NativeConstruct()
 	ProgressSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 18.0f));
 
 	SpawnInstructionText = WidgetTree->ConstructWidget<UTextBlock>();
-	SpawnInstructionText->SetText(FText::FromString(TEXT("Building DEM-derived terrain coverage...")));
+	SpawnInstructionText->SetText(FText::FromString(TEXT("Choose a location while the real gameplay terrain loads underneath.")));
 	SpawnInstructionText->SetJustification(ETextJustify::Center);
 	SpawnInstructionText->SetAutoWrapText(true);
 	FSlateFontInfo InstructionFont = SpawnInstructionText->GetFont();
@@ -107,10 +109,11 @@ void UOrakaiWorldLoadingWidget::NativeConstruct()
 	SpawnMarker->SetVisibility(ESlateVisibility::Collapsed);
 	UCanvasPanelSlot* MarkerSlot = PreviewCanvas->AddChildToCanvas(SpawnMarker);
 	MarkerSlot->SetAnchors(FAnchors(0.0f, 0.0f));
+	MarkerSlot->SetAlignment(FVector2D(0.5, 0.5));
 	MarkerSlot->SetSize(FVector2D(16.0, 16.0));
 
 	SpawnCoordinateText = WidgetTree->ConstructWidget<UTextBlock>();
-	SpawnCoordinateText->SetText(FText::FromString(TEXT("Select a location on the generated terrain")));
+	SpawnCoordinateText->SetText(FText::FromString(TEXT("Selected spawn: world centre")));
 	SpawnCoordinateText->SetJustification(ETextJustify::Center);
 	FSlateFontInfo CoordinateFont = SpawnCoordinateText->GetFont();
 	CoordinateFont.Size = 14;
@@ -133,7 +136,38 @@ void UOrakaiWorldLoadingWidget::NativeConstruct()
 	ButtonSlot->SetHorizontalAlignment(HAlign_Center);
 
 	BuildGeneratedPreviewTexture();
+	BuildGenerated3DPreview();
+
+	FVector2D ProposedWorldMeters;
+	bHasSpawnSelection = FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(ProposedWorldMeters);
+	if (bHasSpawnSelection && IsValid(SpawnCoordinateText))
+	{
+		SpawnCoordinateText->SetText(FText::FromString(FString::Printf(
+			TEXT("Selected spawn: %.0f m, %.0f m"),
+			ProposedWorldMeters.X,
+			ProposedWorldMeters.Y)));
+	}
+
 	RefreshSpawnUi();
+}
+
+void UOrakaiWorldLoadingWidget::NativeDestruct()
+{
+	if (IsValid(Preview3DActor))
+	{
+		Preview3DActor->Destroy();
+		Preview3DActor = nullptr;
+	}
+	Super::NativeDestruct();
+}
+
+void UOrakaiWorldLoadingWidget::NativeTick(const FGeometry& MyGeometry, const float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (bHasSpawnSelection)
+	{
+		UpdateSelectionMarker(SelectedPreviewUV);
+	}
 }
 
 void UOrakaiWorldLoadingWidget::SetLoadingState(const float Progress, const FText& Status)
@@ -154,12 +188,19 @@ void UOrakaiWorldLoadingWidget::SetSpawnSelectionAvailable(const bool bAvailable
 	RefreshSpawnUi();
 }
 
+void UOrakaiWorldLoadingWidget::SetSpawnReady(const bool bReady)
+{
+	bSpawnReady = bReady && !bSpawnPromotionActive;
+	RefreshSpawnUi();
+}
+
 void UOrakaiWorldLoadingWidget::SetSpawnPromotionActive(const bool bActive)
 {
 	bSpawnPromotionActive = bActive;
 	if (bActive)
 	{
 		bSpawnSelectionAvailable = false;
+		bSpawnReady = false;
 	}
 	RefreshSpawnUi();
 }
@@ -186,31 +227,59 @@ FReply UOrakaiWorldLoadingWidget::NativeOnMouseButtonDown(const FGeometry& InGeo
 		return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
 	}
 
-	SelectedPreviewUV = FVector2D(
-		FMath::Clamp(LocalPosition.X / LocalSize.X, 0.0, 1.0),
-		FMath::Clamp(LocalPosition.Y / LocalSize.Y, 0.0, 1.0)
-	);
-	FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(SelectedPreviewUV);
+	FVector2D WorldMeters;
+	bool bSelected = false;
+	if (IsValid(Preview3DActor))
+	{
+		bSelected = Preview3DActor->SetGeneratedSpawnFromPreviewPosition(
+			LocalPosition,
+			LocalSize,
+			SelectedPreviewUV,
+			WorldMeters);
+	}
+	else
+	{
+		SelectedPreviewUV = FVector2D(
+			FMath::Clamp(LocalPosition.X / LocalSize.X, 0.0, 1.0),
+			FMath::Clamp(LocalPosition.Y / LocalSize.Y, 0.0, 1.0));
+		FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(SelectedPreviewUV);
+		bSelected = FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(WorldMeters);
+	}
+
+	if (!bSelected)
+	{
+		return FReply::Handled();
+	}
+
 	bHasSpawnSelection = true;
+	bSpawnReady = false;
 	UpdateSelectionMarker(SelectedPreviewUV);
 
-	FVector2D WorldMeters;
-	if (FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(WorldMeters) && IsValid(SpawnCoordinateText))
+	if (IsValid(SpawnCoordinateText))
 	{
 		SpawnCoordinateText->SetText(FText::FromString(FString::Printf(
 			TEXT("Selected spawn: %.0f m, %.0f m"),
 			WorldMeters.X,
-			WorldMeters.Y
-		)));
+			WorldMeters.Y)));
 	}
 
 	RefreshSpawnUi();
 	return FReply::Handled();
 }
 
+FReply UOrakaiWorldLoadingWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (IsValid(Preview3DActor) && InMouseEvent.IsMouseButtonDown(EKeys::RightMouseButton))
+	{
+		Preview3DActor->AddOrbitInput(InMouseEvent.GetCursorDelta());
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
+}
+
 void UOrakaiWorldLoadingWidget::HandleSpawnClicked()
 {
-	if (!bSpawnSelectionAvailable || !bHasSpawnSelection || bSpawnPromotionActive)
+	if (!bSpawnSelectionAvailable || !bSpawnReady || !bHasSpawnSelection || bSpawnPromotionActive)
 	{
 		return;
 	}
@@ -226,6 +295,7 @@ void UOrakaiWorldLoadingWidget::HandleSpawnClicked()
 
 	bSpawnPromotionActive = true;
 	bSpawnSelectionAvailable = false;
+	bSpawnReady = false;
 	RefreshSpawnUi();
 }
 
@@ -263,6 +333,29 @@ void UOrakaiWorldLoadingWidget::BuildGeneratedPreviewTexture()
 	PreviewImage->SetBrushFromTexture(RuntimePreviewTexture, true);
 }
 
+void UOrakaiWorldLoadingWidget::BuildGenerated3DPreview()
+{
+	if (!IsValid(GetWorld()) || !IsValid(PreviewImage) || !FCubusGeneratedTerrainRuntime::IsActive())
+	{
+		return;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	SpawnParameters.ObjectFlags |= RF_Transient;
+	Preview3DActor = GetWorld()->SpawnActor<ACubusWorldGenerationPreviewActor>(
+		ACubusWorldGenerationPreviewActor::StaticClass(),
+		FVector::ZeroVector,
+		FRotator::ZeroRotator,
+		SpawnParameters);
+
+	if (IsValid(Preview3DActor))
+	{
+		Preview3DActor->RefreshPreviewNow();
+		Preview3DActor->ApplyPreviewToImage(PreviewImage);
+	}
+}
+
 void UOrakaiWorldLoadingWidget::UpdateSelectionMarker(const FVector2D& PreviewUV)
 {
 	if (!IsValid(SpawnMarker) || !IsValid(PreviewImage))
@@ -279,9 +372,8 @@ void UOrakaiWorldLoadingWidget::UpdateSelectionMarker(const FVector2D& PreviewUV
 	if (UCanvasPanelSlot* MarkerSlot = Cast<UCanvasPanelSlot>(SpawnMarker->Slot))
 	{
 		MarkerSlot->SetPosition(FVector2D(
-			PreviewUV.X * Size.X - 8.0,
-			PreviewUV.Y * Size.Y - 8.0
-		));
+			PreviewUV.X * Size.X,
+			PreviewUV.Y * Size.Y));
 	}
 	SpawnMarker->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
@@ -300,21 +392,25 @@ void UOrakaiWorldLoadingWidget::RefreshSpawnUi()
 	if (IsValid(SpawnButton))
 	{
 		SpawnButton->SetVisibility(bSpawnSelectionAvailable ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-		SpawnButton->SetIsEnabled(bSpawnSelectionAvailable && bHasSpawnSelection);
+		SpawnButton->SetIsEnabled(bSpawnSelectionAvailable && bSpawnReady && bHasSpawnSelection);
 	}
 	if (IsValid(SpawnInstructionText))
 	{
 		if (bSpawnPromotionActive)
 		{
-			SpawnInstructionText->SetText(FText::FromString(TEXT("Promoting the selected DEM-derived chunks to gameplay LOD...")));
+			SpawnInstructionText->SetText(FText::FromString(TEXT("Spawning into the prepared gameplay terrain...")));
+		}
+		else if (bSpawnSelectionAvailable && bSpawnReady)
+		{
+			SpawnInstructionText->SetText(FText::FromString(TEXT("Selected area is ready. Right-drag to orbit, left-click to move the marker, or press SPAWN.")));
 		}
 		else if (bSpawnSelectionAvailable)
 		{
-			SpawnInstructionText->SetText(FText::FromString(TEXT("Choose a location on the generated terrain, then press SPAWN.")));
+			SpawnInstructionText->SetText(FText::FromString(TEXT("Right-drag to orbit. Left-click a location while its gameplay chunks and LODs load underneath.")));
 		}
 		else
 		{
-			SpawnInstructionText->SetText(FText::FromString(TEXT("Building DEM-derived terrain coverage...")));
+			SpawnInstructionText->SetText(FText::FromString(TEXT("Preparing generated terrain...")));
 		}
 	}
 }
