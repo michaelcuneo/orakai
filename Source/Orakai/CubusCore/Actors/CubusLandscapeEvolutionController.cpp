@@ -10,22 +10,42 @@
 
 namespace
 {
-constexpr uint64 LandscapeDiagnosticsMessageKey = 0xC0B05D01ull;
+constexpr uint64 LandscapeDiagnosticsMessageKey = 0xC0B055ULL;
 }
 
 ACubusLandscapeEvolutionController::ACubusLandscapeEvolutionController()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
+
 	PreviewMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("PreviewMesh"));
 	SetRootComponent(PreviewMesh);
 	PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PreviewMesh->bUseAsyncCooking = true;
 }
 
+void ACubusLandscapeEvolutionController::Tick(const float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (!bShowViewportDiagnostics || GEngine == nullptr)
+	{
+		return;
+	}
+
+	GEngine->AddOnScreenDebugMessage(
+		LandscapeDiagnosticsMessageKey,
+		0.0f,
+		FColor::Cyan,
+		BuildViewportDiagnosticsText(),
+		false,
+		FVector2D(1.0f, 1.0f));
+}
+
 void ACubusLandscapeEvolutionController::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+
 	if (bGenerateOnConstruction)
 	{
 		GenerateAndSolve();
@@ -34,28 +54,6 @@ void ACubusLandscapeEvolutionController::OnConstruction(const FTransform& Transf
 	{
 		RebuildPreview();
 	}
-}
-
-void ACubusLandscapeEvolutionController::Tick(const float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
-
-	if (GEngine == nullptr)
-	{
-		return;
-	}
-
-	if (!bShowViewportDiagnostics)
-	{
-		GEngine->RemoveOnScreenDebugMessage(LandscapeDiagnosticsMessageKey);
-		return;
-	}
-
-	GEngine->AddOnScreenDebugMessage(
-		LandscapeDiagnosticsMessageKey,
-		0.2f,
-		FColor::Cyan,
-		BuildViewportDiagnosticsText());
 }
 
 #if WITH_EDITOR
@@ -162,7 +160,9 @@ void ACubusLandscapeEvolutionController::EvolveLandscape()
 		return;
 	}
 	UpdateDiagnostics(Stats);
-	UE_LOG(LogTemp, Display,
+	UE_LOG(
+		LogTemp,
+		Display,
 		TEXT("Cubus landscape evolved: max |delta| %.2f m, mean |delta| %.2f m, max lowering %.2f m, max raising %.2f m, max incision %.2f m"),
 		Stats.MaximumAbsoluteElevationChangeM,
 		Stats.MeanAbsoluteElevationChangeM,
@@ -177,6 +177,7 @@ void ACubusLandscapeEvolutionController::GenerateAndSolve()
 	CubusLandscapeEvolution::FGenerationStats Stats;
 	FString Error;
 	const CubusLandscapeEvolution::FSettings Settings = MakeSettings();
+
 	if (!CubusLandscapeEvolution::FGenerator::GenerateSkeleton(Settings, GlobalDem, &Stats, &Error))
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cubus landscape skeleton generation failed: %s"), *Error);
@@ -187,6 +188,7 @@ void ACubusLandscapeEvolutionController::GenerateAndSolve()
 		UE_LOG(LogTemp, Error, TEXT("Cubus landscape hydrology solve failed: %s"), *Error);
 		return;
 	}
+
 	UpdateDiagnostics(Stats);
 	RebuildPreview();
 }
@@ -196,6 +198,7 @@ void ACubusLandscapeEvolutionController::GenerateSolveAndEvolve()
 	CubusLandscapeEvolution::FGenerationStats Stats;
 	FString Error;
 	const CubusLandscapeEvolution::FSettings Settings = MakeSettings();
+
 	if (!CubusLandscapeEvolution::FGenerator::GenerateSkeleton(Settings, GlobalDem, &Stats, &Error))
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cubus landscape skeleton generation failed: %s"), *Error);
@@ -211,8 +214,11 @@ void ACubusLandscapeEvolutionController::GenerateSolveAndEvolve()
 		UE_LOG(LogTemp, Error, TEXT("Cubus landscape evolution failed: %s"), *Error);
 		return;
 	}
+
 	UpdateDiagnostics(Stats);
-	UE_LOG(LogTemp, Display,
+	UE_LOG(
+		LogTemp,
+		Display,
 		TEXT("Cubus landscape generated + evolved: max |delta| %.2f m, mean |delta| %.2f m, max lowering %.2f m, max raising %.2f m, max incision %.2f m"),
 		Stats.MaximumAbsoluteElevationChangeM,
 		Stats.MeanAbsoluteElevationChangeM,
@@ -232,11 +238,57 @@ float ACubusLandscapeEvolutionController::SampleGlobalHeightMeters(const FVector
 	return GlobalDem.SampleHeightBilinearM(WorldMeters);
 }
 
+void ACubusLandscapeEvolutionController::UpdateDiagnostics(
+	const CubusLandscapeEvolution::FGenerationStats& Stats)
+{
+	if (Stats.CellCount > 0)
+	{
+		GeneratedCellCount = Stats.CellCount;
+		MinimumElevationM = Stats.MinimumElevationM;
+		MaximumElevationM = Stats.MaximumElevationM;
+	}
+
+	if (GlobalDem.IsValid())
+	{
+		GlobalCellSizeM = static_cast<float>(GlobalDem.CellSizeMeters);
+	}
+
+	if (Stats.RiverCellCount > 0 || GlobalDem.HasHydrology())
+	{
+		GeneratedRiverCellCount = Stats.RiverCellCount;
+		GeneratedBasinCount = Stats.BasinCount;
+	}
+
+	if (Stats.EvolutionIterations > 0)
+	{
+		MaximumStreamIncisionM = Stats.MaximumStreamIncisionM;
+		MeanStreamIncisionM = Stats.MeanStreamIncisionM;
+		MaximumAbsoluteElevationChangeM = Stats.MaximumAbsoluteElevationChangeM;
+		MeanAbsoluteElevationChangeM = Stats.MeanAbsoluteElevationChangeM;
+		MaximumTerrainLoweringM = Stats.MaximumTerrainLoweringM;
+		MaximumTerrainRaisingM = Stats.MaximumTerrainRaisingM;
+	}
+}
+
 FString ACubusLandscapeEvolutionController::BuildViewportDiagnosticsText() const
 {
 	const TCHAR* PreviewModeText = PreviewMode == ECubusLandscapePreviewMode::NativeDetail
 		? TEXT("Native Detail")
 		: TEXT("Full World Overview");
+
+	const TCHAR* DebugViewText = TEXT("Elevation");
+	switch (DebugView)
+	{
+	case ECubusLandscapeDebugView::Province: DebugViewText = TEXT("Province"); break;
+	case ECubusLandscapeDebugView::Plate: DebugViewText = TEXT("Plate"); break;
+	case ECubusLandscapeDebugView::Uplift: DebugViewText = TEXT("Uplift"); break;
+	case ECubusLandscapeDebugView::DrainageArea: DebugViewText = TEXT("Drainage Area"); break;
+	case ECubusLandscapeDebugView::RiverNetwork: DebugViewText = TEXT("River Network"); break;
+	case ECubusLandscapeDebugView::StreamIncision: DebugViewText = TEXT("Stream Incision"); break;
+	case ECubusLandscapeDebugView::EvolutionDelta: DebugViewText = TEXT("Evolution Delta"); break;
+	case ECubusLandscapeDebugView::Elevation:
+	default: break;
+	}
 
 	return FString::Printf(
 		TEXT("CUBUS LANDSCAPE\n")
@@ -247,8 +299,10 @@ FString ACubusLandscapeEvolutionController::BuildViewportDiagnosticsText() const
 		TEXT("Displayed cell: %.2f m\n")
 		TEXT("Window: %.2f km\n")
 		TEXT("Center: (%.0f, %.0f) m\n")
+		TEXT("Debug view: %s\n")
 		TEXT("Rivers: %d   Basins: %d\n")
-		TEXT("Max incision: %.2f m   Max |delta|: %.2f m"),
+		TEXT("Max incision: %.2f m\n")
+		TEXT("Max |delta|: %.2f m"),
 		WorldSizeMeters / 1000.0,
 		WorldSizeMeters / 1000.0,
 		GlobalResolution,
@@ -261,38 +315,11 @@ FString ACubusLandscapeEvolutionController::BuildViewportDiagnosticsText() const
 		PreviewWindowSizeKm,
 		PreviewActualCenterWorldMeters.X,
 		PreviewActualCenterWorldMeters.Y,
+		DebugViewText,
 		GeneratedRiverCellCount,
 		GeneratedBasinCount,
 		MaximumStreamIncisionM,
 		MaximumAbsoluteElevationChangeM);
-}
-
-void ACubusLandscapeEvolutionController::UpdateDiagnostics(const CubusLandscapeEvolution::FGenerationStats& Stats)
-{
-	if (Stats.CellCount > 0)
-	{
-		GeneratedCellCount = Stats.CellCount;
-		MinimumElevationM = Stats.MinimumElevationM;
-		MaximumElevationM = Stats.MaximumElevationM;
-	}
-	if (GlobalDem.IsValid())
-	{
-		GlobalCellSizeM = static_cast<float>(GlobalDem.CellSizeMeters);
-	}
-	if (Stats.RiverCellCount > 0 || GlobalDem.HasHydrology())
-	{
-		GeneratedRiverCellCount = Stats.RiverCellCount;
-		GeneratedBasinCount = Stats.BasinCount;
-	}
-	if (Stats.EvolutionIterations > 0)
-	{
-		MaximumStreamIncisionM = Stats.MaximumStreamIncisionM;
-		MeanStreamIncisionM = Stats.MeanStreamIncisionM;
-		MaximumAbsoluteElevationChangeM = Stats.MaximumAbsoluteElevationChangeM;
-		MeanAbsoluteElevationChangeM = Stats.MeanAbsoluteElevationChangeM;
-		MaximumTerrainLoweringM = Stats.MaximumTerrainLoweringM;
-		MaximumTerrainRaisingM = Stats.MaximumTerrainRaisingM;
-	}
 }
 
 FLinearColor ACubusLandscapeEvolutionController::DebugColorForCell(const int32 Cell) const
@@ -343,20 +370,29 @@ FLinearColor ACubusLandscapeEvolutionController::DebugColorForCell(const int32 C
 			return FLinearColor(0.05f, 0.25f, 1.0f);
 		}
 		const float E = GlobalDem.ElevationM[Cell];
-		return E <= GlobalDem.OceanLevelM ? FLinearColor(0.03f, 0.08f, 0.18f) : FLinearColor(0.28f, 0.30f, 0.26f);
+		return E <= GlobalDem.OceanLevelM
+			? FLinearColor(0.03f, 0.08f, 0.18f)
+			: FLinearColor(0.28f, 0.30f, 0.26f);
 	}
 	case ECubusLandscapeDebugView::StreamIncision:
 	{
-		const float Incision = GlobalDem.StreamIncisionM.IsValidIndex(Cell) ? GlobalDem.StreamIncisionM[Cell] : 0.0f;
+		const float Incision = GlobalDem.StreamIncisionM.IsValidIndex(Cell)
+			? GlobalDem.StreamIncisionM[Cell]
+			: 0.0f;
 		const float Scale = FMath::Max(1.0f, MaximumStreamIncisionM);
 		const float T = FMath::Clamp(FMath::Sqrt(Incision / Scale), 0.0f, 1.0f);
 		return FLinearColor(T, 0.08f, 1.0f - T);
 	}
 	case ECubusLandscapeDebugView::EvolutionDelta:
 	{
-		const float Delta = GlobalDem.EvolutionDeltaM.IsValidIndex(Cell) ? GlobalDem.EvolutionDeltaM[Cell] : 0.0f;
+		const float Delta = GlobalDem.EvolutionDeltaM.IsValidIndex(Cell)
+			? GlobalDem.EvolutionDeltaM[Cell]
+			: 0.0f;
 		const float Scale = FMath::Max(1.0f, MaximumAbsoluteElevationChangeM);
-		const float Strength = FMath::Clamp(FMath::Sqrt(FMath::Abs(Delta) / Scale), 0.0f, 1.0f);
+		const float Strength = FMath::Clamp(
+			FMath::Sqrt(FMath::Abs(Delta) / Scale),
+			0.0f,
+			1.0f);
 		if (Delta < 0.0f)
 		{
 			return FLinearColor(0.05f, 0.15f + 0.35f * (1.0f - Strength), 0.35f + 0.65f * Strength);
@@ -371,7 +407,10 @@ FLinearColor ACubusLandscapeEvolutionController::DebugColorForCell(const int32 C
 	default:
 	{
 		const float Range = FMath::Max(1.0f, MaximumElevationM - MinimumElevationM);
-		const float T = FMath::Clamp((GlobalDem.ElevationM[Cell] - MinimumElevationM) / Range, 0.0f, 1.0f);
+		const float T = FMath::Clamp(
+			(GlobalDem.ElevationM[Cell] - MinimumElevationM) / Range,
+			0.0f,
+			1.0f);
 		if (GlobalDem.ElevationM[Cell] <= GlobalDem.OceanLevelM)
 		{
 			return FLinearColor(0.02f, 0.12f + 0.18f * T, 0.35f + 0.45f * T);
@@ -388,9 +427,12 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 		return;
 	}
 
+	GlobalCellSizeM = static_cast<float>(GlobalDem.CellSizeMeters);
+
 	const int32 SourceR = GlobalDem.Resolution;
 	const int32 R = FMath::Clamp(PreviewResolution, 17, FMath::Min(513, SourceR));
 	const int32 VertexCount = R * R;
+
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
 	TArray<FVector> Normals;
@@ -439,8 +481,14 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 		}
 		else if (!bAutoFocusErosion)
 		{
-			const double U = FMath::Clamp((PreviewCenterWorldMeters.X + HalfWorld) / GlobalDem.WorldSizeMeters, 0.0, 1.0);
-			const double V = FMath::Clamp((PreviewCenterWorldMeters.Y + HalfWorld) / GlobalDem.WorldSizeMeters, 0.0, 1.0);
+			const double U = FMath::Clamp(
+				(PreviewCenterWorldMeters.X + HalfWorld) / GlobalDem.WorldSizeMeters,
+				0.0,
+				1.0);
+			const double V = FMath::Clamp(
+				(PreviewCenterWorldMeters.Y + HalfWorld) / GlobalDem.WorldSizeMeters,
+				0.0,
+				1.0);
 			CenterX = FMath::RoundToInt(U * (SourceR - 1));
 			CenterY = FMath::RoundToInt(V * (SourceR - 1));
 		}
@@ -461,7 +509,8 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 	{
 		bNativeDetail = false;
 		PreviewActualCenterWorldMeters = FVector2D::ZeroVector;
-		PreviewDisplayedCellSizeM = static_cast<float>(GlobalDem.WorldSizeMeters / static_cast<double>(R - 1));
+		PreviewDisplayedCellSizeM = static_cast<float>(
+			GlobalDem.WorldSizeMeters / static_cast<double>(R - 1));
 		PreviewWindowSizeKm = static_cast<float>(GlobalDem.WorldSizeMeters / 1000.0);
 	}
 
@@ -493,8 +542,13 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 
 			const int32 SourceCell = GlobalDem.Index(SourceX, SourceY);
 			const int32 I = Y * R + X;
-			const double LocalWorldX = bNativeDetail ? WorldX - PreviewActualCenterWorldMeters.X : WorldX;
-			const double LocalWorldY = bNativeDetail ? WorldY - PreviewActualCenterWorldMeters.Y : WorldY;
+			const double LocalWorldX = bNativeDetail
+				? WorldX - PreviewActualCenterWorldMeters.X
+				: WorldX;
+			const double LocalWorldY = bNativeDetail
+				? WorldY - PreviewActualCenterWorldMeters.Y
+				: WorldY;
+
 			Vertices[I] = FVector(
 				LocalWorldX * PreviewWorldScale,
 				LocalWorldY * PreviewWorldScale,
@@ -514,8 +568,12 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 			const int32 B = A + 1;
 			const int32 C = A + R;
 			const int32 D = C + 1;
-			Triangles.Add(A); Triangles.Add(C); Triangles.Add(B);
-			Triangles.Add(B); Triangles.Add(C); Triangles.Add(D);
+			Triangles.Add(A);
+			Triangles.Add(C);
+			Triangles.Add(B);
+			Triangles.Add(B);
+			Triangles.Add(C);
+			Triangles.Add(D);
 		}
 	}
 
@@ -534,13 +592,24 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 	}
 
 	PreviewMesh->ClearAllMeshSections();
-	PreviewMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, Colors, Tangents, false);
+	PreviewMesh->CreateMeshSection_LinearColor(
+		0,
+		Vertices,
+		Triangles,
+		Normals,
+		UV0,
+		Colors,
+		Tangents,
+		false);
+
 	if (PreviewMaterial)
 	{
 		PreviewMesh->SetMaterial(0, PreviewMaterial);
 	}
 
-	UE_LOG(LogTemp, Display,
+	UE_LOG(
+		LogTemp,
+		Display,
 		TEXT("Cubus preview: %s, %.2f m/vertex, %.2f km window, center (%.0f, %.0f) m"),
 		bNativeDetail ? TEXT("Native Detail") : TEXT("Full World Overview"),
 		PreviewDisplayedCellSizeM,
