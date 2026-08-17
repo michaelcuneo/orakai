@@ -82,7 +82,7 @@ ACubusWorldGenerationPreviewActor::ACubusWorldGenerationPreviewActor()
     PreviewCapture = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("PreviewCapture"));
     PreviewCapture->SetupAttachment(Root);
     PreviewCapture->ProjectionType = ECameraProjectionMode::Orthographic;
-    PreviewCapture->OrthoWidth = PreviewHorizontalSize * 1.5f;
+    PreviewCapture->OrthoWidth = PreviewHorizontalSize * 2.0f;
     PreviewCapture->bCaptureEveryFrame = false;
     PreviewCapture->bCaptureOnMovement = false;
     PreviewCapture->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
@@ -192,15 +192,15 @@ void ACubusWorldGenerationPreviewActor::AddOrbitInput(const FVector2D PointerDel
     PreviewYawDegrees = FMath::Fmod(PreviewYawDegrees + static_cast<float>(PointerDelta.X) * OrbitDegreesPerPixel, 360.0f);
     PreviewPitchDegrees = FMath::Clamp(
         PreviewPitchDegrees - static_cast<float>(PointerDelta.Y) * OrbitDegreesPerPixel,
-        -24.0f,
-        34.0f);
+        -18.0f,
+        28.0f);
     ApplyOrbitTransform();
     CapturePreview();
 }
 
 void ACubusWorldGenerationPreviewActor::ResetOrbit()
 {
-    PreviewYawDegrees = -28.0f;
+    PreviewYawDegrees = 0.0f;
     PreviewPitchDegrees = 0.0f;
     ApplyOrbitTransform();
     CapturePreview();
@@ -219,13 +219,18 @@ void ACubusWorldGenerationPreviewActor::ApplyOrbitTransform()
         const float HalfY = static_cast<float>(BuiltMeshDimensions.Y) * 0.5f;
         const float HalfZ = PreviewVerticalRelief * 0.5f;
         const float BoundingRadius = FMath::Sqrt(HalfX * HalfX + HalfY * HalfY + HalfZ * HalfZ);
-        const float FramingDiameter = FMath::Max(PreviewHorizontalSize, BoundingRadius * 2.0f) * FMath::Max(1.0f, PreviewFramingMargin);
+
+        // Enforce a large whole-domain frame even if an old placed actor has a stale serialized value.
+        const float EffectiveMargin = FMath::Max(1.75f, PreviewFramingMargin);
+        const float FullDiameter = FMath::Max(PreviewHorizontalSize, BoundingRadius * 2.0f);
 
         PreviewCapture->ProjectionType = ECameraProjectionMode::Orthographic;
-        PreviewCapture->OrthoWidth = FramingDiameter;
+        PreviewCapture->OrthoWidth = FullDiameter * EffectiveMargin;
 
-        const float Distance = FMath::Max(BoundingRadius * 3.0f, PreviewHorizontalSize * 1.5f);
-        const FVector CameraLocation(Distance, 0.0f, Distance * 0.72f);
+        // Proper off-axis isometric camera. This is deliberately NOT on the X axis
+        // and therefore no longer reads as a camera sitting in the terrain centre.
+        const float Distance = FMath::Max(FullDiameter * 1.6f, 1800.0f);
+        const FVector CameraLocation(Distance, -Distance, Distance * 0.95f);
         PreviewCapture->SetRelativeLocation(CameraLocation);
         PreviewCapture->SetRelativeRotation(UKismetMathLibrary::FindLookAtRotation(CameraLocation, FVector::ZeroVector));
     }
@@ -435,15 +440,27 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         Normal = Normal.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
     }
 
-    PreviewMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, Colors, Tangents, false);
-    PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    if (IsValid(PreviewMaterial))
+    const bool bTopologyMatches =
+        PreviewMesh->GetNumSections() > 0 &&
+        CachedPickVertices.Num() == Vertices.Num() &&
+        CachedPickTriangles.Num() == Triangles.Num();
+
+    if (bTopologyMatches)
     {
-        PreviewMesh->SetMaterial(0, PreviewMaterial);
+        PreviewMesh->UpdateMeshSection_LinearColor(0, Vertices, Normals, UVs, Colors, Tangents);
+    }
+    else
+    {
+        PreviewMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, Colors, Tangents, false);
+        PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        if (IsValid(PreviewMaterial))
+        {
+            PreviewMesh->SetMaterial(0, PreviewMaterial);
+        }
     }
 
-    CachedPickVertices = Vertices;
-    CachedPickTriangles = Triangles;
+    CachedPickVertices = MoveTemp(Vertices);
+    CachedPickTriangles = MoveTemp(Triangles);
     bHasRenderableTerrain = true;
 }
 
