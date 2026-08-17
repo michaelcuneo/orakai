@@ -48,9 +48,11 @@ class ORAKAI_API ACubusLandscapeEvolutionController final : public AActor
 public:
 	ACubusLandscapeEvolutionController();
 	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void Tick(float DeltaSeconds) override;
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual bool ShouldTickIfViewportsOnly() const override;
 #endif
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Generate World Skeleton"))
@@ -153,6 +155,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview")
 	bool bGenerateOnConstruction = false;
 
+	/** Show the live DEM/preview diagnostics as a fixed multiline overlay in the viewport corner. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview")
+	bool bShowViewportDiagnostics = true;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
 	int32 GeneratedCellCount = 0;
 
@@ -201,6 +207,7 @@ protected:
 private:
 	CubusLandscapeEvolution::FSettings MakeSettings() const;
 	FLinearColor DebugColorForCell(int32 Cell) const;
+	FString BuildViewportDiagnosticsText() const;
 	void UpdateDiagnostics(const CubusLandscapeEvolution::FGenerationStats& Stats);
 
 	CubusLandscapeEvolution::FGlobalDem GlobalDem;
