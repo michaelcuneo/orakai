@@ -1,5 +1,6 @@
 #include "CubusCore/Generation/CubusWorldGenerationPreviewActor.h"
 
+#include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
 #include "CubusCore/Generation/CubusWorldGenerationLoaderActor.h"
 
 #include "Components/DirectionalLightComponent.h"
@@ -182,30 +183,45 @@ void ACubusWorldGenerationPreviewActor::RefreshPreviewNow()
 {
     ResolveLoader();
     EnsureRenderTarget();
-    if (!IsValid(TargetLoader))
+    if (!IsValid(TargetLoader) && !FCubusGeneratedTerrainRuntime::IsActive())
     {
         return;
     }
 
     RebuildPreviewMesh();
-    LastObservedOverallProgress = TargetLoader->GetOverallProgress();
-    LastObservedStage = static_cast<uint8>(TargetLoader->GetGenerationStage());
+    if (IsValid(TargetLoader))
+    {
+        LastObservedOverallProgress = TargetLoader->GetOverallProgress();
+        LastObservedStage = static_cast<uint8>(TargetLoader->GetGenerationStage());
+    }
     CapturePreview();
 }
 
 void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
 {
-    if (!IsValid(TargetLoader) || !IsValid(PreviewMesh))
+    if (!IsValid(PreviewMesh))
     {
         return;
     }
 
-    const int32 Resolution = FMath::Clamp(PreviewMeshResolution, 32, 256);
-    const FVector2D WorldSizeMeters(
-        FMath::Max(1.0, TargetLoader->GenerationSizeKm.X * 1000.0),
-        FMath::Max(1.0, TargetLoader->GenerationSizeKm.Y * 1000.0));
-    const FVector2D HalfWorld = WorldSizeMeters * 0.5;
+    FBox2D RuntimeBounds;
+    const bool bUseLoader = IsValid(TargetLoader);
+    if (!bUseLoader && !FCubusGeneratedTerrainRuntime::GetPreviewBoundsMeters(RuntimeBounds))
+    {
+        PreviewMesh->ClearAllMeshSections();
+        bHasRenderableTerrain = false;
+        bPickingCollisionBuilt = false;
+        return;
+    }
 
+    const FVector2D WorldSizeMeters = bUseLoader
+        ? FVector2D(
+            FMath::Max(1.0, TargetLoader->GenerationSizeKm.X * 1000.0),
+            FMath::Max(1.0, TargetLoader->GenerationSizeKm.Y * 1000.0))
+        : RuntimeBounds.GetSize();
+    const FVector2D WorldMinimum = bUseLoader ? WorldSizeMeters * -0.5 : RuntimeBounds.Min;
+
+    const int32 Resolution = FMath::Clamp(PreviewMeshResolution, 32, 256);
     const float MaxDimensionMeters = static_cast<float>(FMath::Max(WorldSizeMeters.X, WorldSizeMeters.Y));
     const float HorizontalScale = PreviewHorizontalSize / FMath::Max(1.0f, MaxDimensionMeters);
     BuiltMeshDimensions = FVector2D(
@@ -220,13 +236,16 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
     for (int32 Y = 0; Y < Resolution; ++Y)
     {
         const double V = static_cast<double>(Y) / static_cast<double>(Resolution - 1);
-        const double WorldY = FMath::Lerp(-HalfWorld.Y, HalfWorld.Y, V);
+        const double WorldY = WorldMinimum.Y + V * WorldSizeMeters.Y;
         for (int32 X = 0; X < Resolution; ++X)
         {
             const double U = static_cast<double>(X) / static_cast<double>(Resolution - 1);
-            const double WorldX = FMath::Lerp(-HalfWorld.X, HalfWorld.X, U);
+            const double WorldX = WorldMinimum.X + U * WorldSizeMeters.X;
             float HeightMeters = 0.0f;
-            if (!TargetLoader->GetGeneratedHeightMeters(WorldX, WorldY, HeightMeters))
+            const bool bHasHeight = bUseLoader
+                ? TargetLoader->GetGeneratedHeightMeters(WorldX, WorldY, HeightMeters)
+                : FCubusGeneratedTerrainRuntime::TrySampleHeightMeters(FVector2D(WorldX, WorldY), HeightMeters);
+            if (!bHasHeight)
             {
                 continue;
             }
@@ -398,7 +417,7 @@ bool ACubusWorldGenerationPreviewActor::SetGeneratedSpawnFromPreviewPosition(
 {
     OutPreviewUV = FVector2D::ZeroVector;
     OutWorldMeters = FVector2D::ZeroVector;
-    if (!IsValid(TargetLoader) || !bHasRenderableTerrain || !bPickingCollisionBuilt ||
+    if (!bHasRenderableTerrain || !bPickingCollisionBuilt ||
         PreviewWidgetSize.X <= UE_SMALL_NUMBER || PreviewWidgetSize.Y <= UE_SMALL_NUMBER)
     {
         return false;
@@ -427,5 +446,15 @@ bool ACubusWorldGenerationPreviewActor::SetGeneratedSpawnFromPreviewPosition(
     const double VBottomUp = FMath::Clamp(LocalHit.Y / FMath::Max(1.0, BuiltMeshDimensions.Y) + 0.5, 0.0, 1.0);
 
     OutPreviewUV = FVector2D(U, 1.0 - VBottomUp);
-    return TargetLoader->SetGeneratedSpawnFromPreviewUV(OutPreviewUV, OutWorldMeters);
+    if (IsValid(TargetLoader))
+    {
+        return TargetLoader->SetGeneratedSpawnFromPreviewUV(OutPreviewUV, OutWorldMeters);
+    }
+
+    if (!FCubusGeneratedTerrainRuntime::IsActive())
+    {
+        return false;
+    }
+    FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(OutPreviewUV);
+    return FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(OutWorldMeters);
 }
