@@ -2,10 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "CubusCore/Generation/CubusTerrainCarving.h"
 #include "CubusCore/Generation/CubusTerrainErosion.h"
 #include "CubusCore/Generation/CubusTerrainDeposition.h"
 #include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
+#include "CubusCore/Generation/CubusWorldGenerationPreviewActor.h"
 #include "CubusWorldGenerationLoaderActor.generated.h"
 
 class UTexture2D;
@@ -81,6 +84,51 @@ public:
 
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Preview")
     UTexture2D* GetPreviewTexture() const { return PreviewTexture; }
+
+    /**
+     * Existing WBP integration point for the interactive 3D preview.
+     * If a preview actor was placed in the generation level it is reused;
+     * otherwise the loader creates one. The WBP never needs another UI system.
+     */
+    UFUNCTION(BlueprintCallable, Category="Cubus|Generation|3D Preview",
+        meta=(DisplayName="Get Or Create Generated Terrain 3D Preview"))
+    ACubusWorldGenerationPreviewActor* GetOrCreateGeneratedTerrain3DPreview()
+    {
+        if (IsValid(GeneratedTerrainPreviewActor))
+        {
+            GeneratedTerrainPreviewActor->TargetLoader = this;
+            return GeneratedTerrainPreviewActor;
+        }
+
+        if (!IsValid(GetWorld()))
+        {
+            return nullptr;
+        }
+
+        GeneratedTerrainPreviewActor = Cast<ACubusWorldGenerationPreviewActor>(
+            UGameplayStatics::GetActorOfClass(this, ACubusWorldGenerationPreviewActor::StaticClass())
+        );
+
+        if (!IsValid(GeneratedTerrainPreviewActor))
+        {
+            FActorSpawnParameters SpawnParameters;
+            SpawnParameters.Owner = this;
+            SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+            SpawnParameters.ObjectFlags |= RF_Transient;
+            GeneratedTerrainPreviewActor = GetWorld()->SpawnActor<ACubusWorldGenerationPreviewActor>(
+                ACubusWorldGenerationPreviewActor::StaticClass(),
+                FVector::ZeroVector,
+                FRotator::ZeroRotator,
+                SpawnParameters
+            );
+        }
+
+        if (IsValid(GeneratedTerrainPreviewActor))
+        {
+            GeneratedTerrainPreviewActor->TargetLoader = this;
+        }
+        return GeneratedTerrainPreviewActor;
+    }
 
     /** Preserve the final DEM preview across OpenLevel for the runtime spawn picker. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Preview", meta=(DisplayName="Publish Generated DEM Preview"))
@@ -170,6 +218,37 @@ public:
         return FCubusGeneratedTerrainRuntime::TryGetConfirmedSpawnSurfaceHeightMeters(OutHeightMeters);
     }
 
+    /**
+     * The only intended transition from the generation picker into gameplay.
+     * Generation completion alone never travels. The player must have explicitly
+     * confirmed a proposed DEM spawn first. The gameplay GameMode then keeps the
+     * controller on its hidden streaming focus pawn through the full chunk-load
+     * pass before the real character is created.
+     */
+    UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Enter Generated World"))
+    bool EnterGeneratedWorld()
+    {
+        if (Stage != ECubusGenerationLoaderStage::Complete)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Cubus refused generated-world travel: generation is not complete."));
+            return false;
+        }
+        if (!FCubusGeneratedTerrainRuntime::HasConfirmedSpawn())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Cubus refused generated-world travel: no spawn point has been confirmed."));
+            return false;
+        }
+        if (!IsValid(GetWorld()) || GameplayLevelName.IsNone())
+        {
+            UE_LOG(LogTemp, Error, TEXT("Cubus refused generated-world travel: gameplay level is invalid."));
+            return false;
+        }
+
+        PublishPreviewSnapshotToRuntime();
+        UGameplayStatics::OpenLevel(this, GameplayLevelName);
+        return true;
+    }
+
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Diagnostics")
     int32 GetGeneratedTerrainTileCount() const { return TerrainTiles.Num(); }
 
@@ -188,11 +267,12 @@ public:
     UPROPERTY(BlueprintAssignable, Category="Cubus|Generation|Events")
     FCubusGenerationFinished OnGenerationFinished;
 
+    /** Legacy setting retained for placed actors. Generation completion no longer auto-travels. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation")
-    bool bTravelToGameplayWhenComplete = true;
+    bool bTravelToGameplayWhenComplete = false;
 
-    /** Gameplay map opened once the generated DEM has been published to runtime density. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(EditCondition="bTravelToGameplayWhenComplete"))
+    /** Gameplay map opened only by Enter Generated World after spawn confirmation. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation")
     FName GameplayLevelName = TEXT("Lvl_ThirdPerson");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(ClampMin="0.5", UIMin="1.0"))
@@ -285,6 +365,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> PreviewTexture = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<ACubusWorldGenerationPreviewActor> GeneratedTerrainPreviewActor = nullptr;
 
     TArray<float> PreviewHeightMeters;
     TArray<FColor> PreviewPixels;
