@@ -1,4 +1,5 @@
 #include "CubusCore/Generation/CubusTerrainRaster.h"
+#include "CubusCore/Generation/CubusTerrainMorphology.h"
 
 bool FCubusTerrainRasterTile::IsValid() const
 {
@@ -103,11 +104,18 @@ float FCubusTerrainRasterBuilder::SampleStructuralHeightMeters(
 {
     const double SourceXmeters = WorldXmeters + Settings.DomainOffsetMeters.X;
     const double SourceYmeters = WorldYmeters + Settings.DomainOffsetMeters.Y;
-    return FCubusTerrainStructure::Sample(
+    const FCubusTerrainStructureSample Structure = FCubusTerrainStructure::Sample(
         SourceXmeters,
         SourceYmeters,
         Settings.Structure
-    ).HeightMeters;
+    );
+    const FCubusTerrainMorphologySample Morphology = FCubusTerrainMorphology::Sample(
+        SourceXmeters,
+        SourceYmeters,
+        Structure,
+        Settings.Structure
+    );
+    return Structure.HeightMeters + Morphology.HeightOffsetMeters;
 }
 
 FIntPoint FCubusTerrainRasterBuilder::WorldToTileCoordinate(
