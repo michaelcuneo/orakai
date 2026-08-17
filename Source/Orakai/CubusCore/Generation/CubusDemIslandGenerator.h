@@ -26,6 +26,12 @@ struct FIndexedPatch
 	FString SourceKey;
 	FString TerrainClass;
 	TArray<FString> Tags;
+	float MinimumElevationM = 0.0f;
+	float MaximumElevationM = 0.0f;
+	float MeanElevationM = 0.0f;
+	float MedianElevationM = 0.0f;
+	float ElevationP05M = 0.0f;
+	float ElevationP95M = 0.0f;
 	float ReliefP90M = 0.0f;
 	float MeanSlopeDeg = 0.0f;
 	float DominantStructureAngleDeg = 0.0f;
