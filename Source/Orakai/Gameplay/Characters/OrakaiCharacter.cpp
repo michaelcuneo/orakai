@@ -17,6 +17,9 @@
 #include "Gameplay/Interaction/Voxel/CubusVoxelEditLibrary.h"
 #include "EngineUtils.h"
 #include "InputCoreTypes.h"
+#include "Animation/AnimInstance.h"
+#include "Engine/SkeletalMesh.h"
+#include "UObject/ConstructorHelpers.h"
 
 AOrakaiCharacter::AOrakaiCharacter()
 {
@@ -42,6 +45,31 @@ AOrakaiCharacter::AOrakaiCharacter()
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> JumpActionAsset(TEXT("/Game/Cubus/Input/Actions/IA_Jump.IA_Jump"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> MoveActionAsset(TEXT("/Game/Cubus/Input/Actions/IA_Move.IA_Move"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> LookActionAsset(TEXT("/Game/Cubus/Input/Actions/IA_Look.IA_Look"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> MouseLookActionAsset(TEXT("/Game/Cubus/Input/Actions/IA_MouseLook.IA_MouseLook"));
+	JumpAction = JumpActionAsset.Object;
+	MoveAction = MoveActionAsset.Object;
+	LookAction = LookActionAsset.Object;
+	MouseLookAction = MouseLookActionAsset.Object;
+
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> CharacterMeshAsset(
+		TEXT("/Game/Cubus/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
+	if (CharacterMeshAsset.Succeeded())
+	{
+		GetMesh()->SetSkeletalMesh(CharacterMeshAsset.Object);
+		GetMesh()->SetRelativeLocation(FVector(0.0, 0.0, -90.0));
+		GetMesh()->SetRelativeRotation(FRotator(0.0, -90.0, 0.0));
+	}
+
+	static ConstructorHelpers::FClassFinder<UAnimInstance> CharacterAnimClass(
+		TEXT("/Game/Cubus/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
+	if (CharacterAnimClass.Succeeded())
+	{
+		GetMesh()->SetAnimInstanceClass(CharacterAnimClass.Class);
+	}
 }
 
 void AOrakaiCharacter::Tick(const float DeltaSeconds)
