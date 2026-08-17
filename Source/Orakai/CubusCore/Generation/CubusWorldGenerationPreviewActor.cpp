@@ -330,7 +330,7 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
     }
     for (FVector& Normal : Normals)
     {
-        Normal = Normal.GetSafeNormal(FVector::UpVector);
+        Normal = Normal.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
     }
 
     PreviewMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
