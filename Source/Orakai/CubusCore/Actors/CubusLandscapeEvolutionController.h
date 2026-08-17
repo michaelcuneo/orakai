@@ -17,7 +17,8 @@ enum class ECubusLandscapeDebugView : uint8
 	Uplift,
 	DrainageArea,
 	RiverNetwork,
-	StreamIncision
+	StreamIncision,
+	EvolutionDelta
 };
 
 UENUM(BlueprintType)
@@ -32,10 +33,6 @@ enum class ECubusLandscapeEditorAction : uint8
 	RebuildPreview UMETA(DisplayName = "Rebuild Preview")
 };
 
-/**
- * Isolated world-scale terrain-generation testbed controller intended for Lvl_Streaming.
- * It owns the coarse global DEM and debug preview only; it does not modify the legacy biome generator.
- */
 UCLASS(BlueprintType, Blueprintable, ClassGroup = "Cubus")
 class ORAKAI_API ACubusLandscapeEvolutionController final : public AActor
 {
@@ -77,10 +74,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Landscape Evolution")
 	TObjectPtr<UProceduralMeshComponent> PreviewMesh;
 
-	/**
-	 * Reliable editor fallback for Unreal versions/configurations that fail to surface native CallInEditor buttons.
-	 * Choose an action and it executes immediately, then resets to "Choose Action".
-	 */
 	UPROPERTY(EditAnywhere, Category = "Cubus|Landscape Evolution|Actions",
 		meta = (DisplayName = "RUN EDITOR ACTION", ToolTip = "Choose an action to execute immediately on this placed controller."))
 	ECubusLandscapeEditorAction EditorAction = ECubusLandscapeEditorAction::None;
@@ -122,13 +115,11 @@ protected:
 	int32 HydrologyRefreshInterval = 2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "17", ClampMax = "513"))
-	int32 PreviewResolution = 129;
+	int32 PreviewResolution = 513;
 
-	/** Uniform scale applied to the physical DEM after converting metres to Unreal centimetres. 0.01 displays a 500 km world as 5 km wide. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.0001"))
 	float PreviewHorizontalScale = 0.01f;
 
-	/** Height exaggeration relative to the uniform preview scale. 1.0 preserves the DEM's real aspect ratio. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.01", DisplayName = "Preview Vertical Exaggeration"))
 	float PreviewVerticalScale = 1.0f;
 
@@ -161,6 +152,18 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
 	float MeanStreamIncisionM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
+	float MaximumAbsoluteElevationChangeM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
+	float MeanAbsoluteElevationChangeM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
+	float MaximumTerrainLoweringM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
+	float MaximumTerrainRaisingM = 0.0f;
 
 private:
 	CubusLandscapeEvolution::FSettings MakeSettings() const;
