@@ -45,9 +45,6 @@ void ACubusLandscapeEvolutionController::PostEditChangeProperty(FPropertyChanged
 		EditorAction = ECubusLandscapeEditorAction::None;
 	}
 
-	// Let Unreal finish its property edit/construction handling first. Executing
-	// generation before this call can cause the freshly rebuilt procedural mesh to
-	// be reconstructed immediately afterwards, making the action appear to do nothing.
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
 	switch (PendingAction)
@@ -209,6 +206,10 @@ void ACubusLandscapeEvolutionController::UpdateDiagnostics(const CubusLandscapeE
 		MinimumElevationM = Stats.MinimumElevationM;
 		MaximumElevationM = Stats.MaximumElevationM;
 	}
+	if (GlobalDem.IsValid())
+	{
+		GlobalCellSizeM = static_cast<float>(GlobalDem.CellSizeMeters);
+	}
 	if (Stats.RiverCellCount > 0 || GlobalDem.HasHydrology())
 	{
 		GeneratedRiverCellCount = Stats.RiverCellCount;
@@ -318,8 +319,8 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 		return;
 	}
 
-	const int32 R = FMath::Clamp(PreviewResolution, 17, 513);
 	const int32 SourceR = GlobalDem.Resolution;
+	const int32 R = FMath::Clamp(PreviewResolution, 17, FMath::Min(513, SourceR));
 	const int32 VertexCount = R * R;
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
@@ -337,25 +338,101 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 	constexpr double CentimetersPerMeter = 100.0;
 	const double PreviewWorldScale = CentimetersPerMeter * PreviewHorizontalScale;
 	const double PreviewHeightScale = PreviewWorldScale * PreviewVerticalScale;
-	const double Half = GlobalDem.WorldSizeMeters * 0.5;
+	const double HalfWorld = GlobalDem.WorldSizeMeters * 0.5;
+
+	int32 StartX = 0;
+	int32 StartY = 0;
+	bool bNativeDetail = PreviewMode == ECubusLandscapePreviewMode::NativeDetail && SourceR > R;
+
+	if (bNativeDetail)
+	{
+		int32 CenterCell = INDEX_NONE;
+		if (bAutoFocusErosion && GlobalDem.EvolutionDeltaM.Num() == GlobalDem.NumCells())
+		{
+			float BestChange = -1.0f;
+			for (int32 Cell = 0; Cell < GlobalDem.NumCells(); ++Cell)
+			{
+				const float Change = FMath::Abs(GlobalDem.EvolutionDeltaM[Cell]);
+				if (Change > BestChange)
+				{
+					BestChange = Change;
+					CenterCell = Cell;
+				}
+			}
+		}
+
+		int32 CenterX = SourceR / 2;
+		int32 CenterY = SourceR / 2;
+		if (CenterCell != INDEX_NONE)
+		{
+			CenterX = CenterCell % SourceR;
+			CenterY = CenterCell / SourceR;
+		}
+		else if (!bAutoFocusErosion)
+		{
+			const double U = FMath::Clamp((PreviewCenterWorldMeters.X + HalfWorld) / GlobalDem.WorldSizeMeters, 0.0, 1.0);
+			const double V = FMath::Clamp((PreviewCenterWorldMeters.Y + HalfWorld) / GlobalDem.WorldSizeMeters, 0.0, 1.0);
+			CenterX = FMath::RoundToInt(U * (SourceR - 1));
+			CenterY = FMath::RoundToInt(V * (SourceR - 1));
+		}
+
+		const int32 HalfWindow = (R - 1) / 2;
+		StartX = FMath::Clamp(CenterX - HalfWindow, 0, SourceR - R);
+		StartY = FMath::Clamp(CenterY - HalfWindow, 0, SourceR - R);
+
+		const int32 ActualCenterX = StartX + (R - 1) / 2;
+		const int32 ActualCenterY = StartY + (R - 1) / 2;
+		PreviewActualCenterWorldMeters = FVector2D(
+			-HalfWorld + ActualCenterX * GlobalDem.CellSizeMeters,
+			-HalfWorld + ActualCenterY * GlobalDem.CellSizeMeters);
+		PreviewDisplayedCellSizeM = static_cast<float>(GlobalDem.CellSizeMeters);
+		PreviewWindowSizeKm = static_cast<float>((R - 1) * GlobalDem.CellSizeMeters / 1000.0);
+	}
+	else
+	{
+		bNativeDetail = false;
+		PreviewActualCenterWorldMeters = FVector2D::ZeroVector;
+		PreviewDisplayedCellSizeM = static_cast<float>(GlobalDem.WorldSizeMeters / static_cast<double>(R - 1));
+		PreviewWindowSizeKm = static_cast<float>(GlobalDem.WorldSizeMeters / 1000.0);
+	}
 
 	for (int32 Y = 0; Y < R; ++Y)
 	{
-		const double V = static_cast<double>(Y) / static_cast<double>(R - 1);
-		const int32 SourceY = FMath::Clamp(FMath::RoundToInt(V * (SourceR - 1)), 0, SourceR - 1);
 		for (int32 X = 0; X < R; ++X)
 		{
-			const double U = static_cast<double>(X) / static_cast<double>(R - 1);
-			const int32 SourceX = FMath::Clamp(FMath::RoundToInt(U * (SourceR - 1)), 0, SourceR - 1);
+			int32 SourceX = 0;
+			int32 SourceY = 0;
+			double WorldX = 0.0;
+			double WorldY = 0.0;
+
+			if (bNativeDetail)
+			{
+				SourceX = StartX + X;
+				SourceY = StartY + Y;
+				WorldX = -HalfWorld + SourceX * GlobalDem.CellSizeMeters;
+				WorldY = -HalfWorld + SourceY * GlobalDem.CellSizeMeters;
+			}
+			else
+			{
+				const double U = static_cast<double>(X) / static_cast<double>(R - 1);
+				const double V = static_cast<double>(Y) / static_cast<double>(R - 1);
+				SourceX = FMath::Clamp(FMath::RoundToInt(U * (SourceR - 1)), 0, SourceR - 1);
+				SourceY = FMath::Clamp(FMath::RoundToInt(V * (SourceR - 1)), 0, SourceR - 1);
+				WorldX = -HalfWorld + U * GlobalDem.WorldSizeMeters;
+				WorldY = -HalfWorld + V * GlobalDem.WorldSizeMeters;
+			}
+
 			const int32 SourceCell = GlobalDem.Index(SourceX, SourceY);
 			const int32 I = Y * R + X;
-			const double WorldX = -Half + U * GlobalDem.WorldSizeMeters;
-			const double WorldY = -Half + V * GlobalDem.WorldSizeMeters;
+			const double LocalWorldX = bNativeDetail ? WorldX - PreviewActualCenterWorldMeters.X : WorldX;
+			const double LocalWorldY = bNativeDetail ? WorldY - PreviewActualCenterWorldMeters.Y : WorldY;
 			Vertices[I] = FVector(
-				WorldX * PreviewWorldScale,
-				WorldY * PreviewWorldScale,
+				LocalWorldX * PreviewWorldScale,
+				LocalWorldY * PreviewWorldScale,
 				GlobalDem.ElevationM[SourceCell] * PreviewHeightScale);
-			UV0[I] = FVector2D(U, V);
+			UV0[I] = FVector2D(
+				static_cast<double>(X) / static_cast<double>(R - 1),
+				static_cast<double>(Y) / static_cast<double>(R - 1));
 			Colors[I] = DebugColorForCell(SourceCell);
 		}
 	}
@@ -393,4 +470,12 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 	{
 		PreviewMesh->SetMaterial(0, PreviewMaterial);
 	}
+
+	UE_LOG(LogTemp, Display,
+		TEXT("Cubus preview: %s, %.2f m/vertex, %.2f km window, center (%.0f, %.0f) m"),
+		bNativeDetail ? TEXT("Native Detail") : TEXT("Full World Overview"),
+		PreviewDisplayedCellSizeM,
+		PreviewWindowSizeKm,
+		PreviewActualCenterWorldMeters.X,
+		PreviewActualCenterWorldMeters.Y);
 }
