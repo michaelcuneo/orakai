@@ -5,6 +5,7 @@
 #include "CubusCore/Actors/CubusTerrainLodWorldActor.h"
 #include "Gameplay/WorldObjects/CubusSpawnStreamingPawn.h"
 
+#include "Async/Async.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -29,6 +30,12 @@ void ACubusWorldGenerationLoaderActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	(void)DeltaSeconds;
+
+	if (bUseProductionRealDemWorld && Stage == ECubusGenerationLoaderStage::StructuralDEM)
+	{
+		PollProductionGlobalDemBuild();
+		return;
+	}
 
 	const int32 Budget = FMath::Clamp(WorkItemsPerTick, 1, 8);
 	for (int32 Work = 0; Work < Budget; ++Work)
@@ -62,6 +69,7 @@ void ACubusWorldGenerationLoaderActor::Tick(float DeltaSeconds)
 void ACubusWorldGenerationLoaderActor::StartGeneration(const int32 InWorldSeed)
 {
 	ResetSession();
+	++GenerationSessionSerial;
 	WorldSeed = InWorldSeed;
 	BuildSettings();
 	EnsurePreviewTexture();
@@ -72,9 +80,8 @@ void ACubusWorldGenerationLoaderActor::StartGeneration(const int32 InWorldSeed)
 
 	if (bUseProductionRealDemWorld)
 	{
-		// Production generation is one authoritative 500 km DEM. Do not build the
-		// legacy 4 km procedural raster first and then try to approximate it in voxels.
 		BeginStage(ECubusGenerationLoaderStage::StructuralDEM);
+		StartProductionGlobalDemBuild();
 		return;
 	}
 
@@ -90,6 +97,10 @@ void ACubusWorldGenerationLoaderActor::StartGeneration(const int32 InWorldSeed)
 
 void ACubusWorldGenerationLoaderActor::CancelGeneration()
 {
+	if (bProductionDemBuildInFlight)
+	{
+		bDiscardProductionDemBuildResult = true;
+	}
 	FCubusGeneratedTerrainRuntime::Reset();
 	ResetSession();
 	EnsurePreviewTexture();
@@ -166,10 +177,17 @@ bool ACubusWorldGenerationLoaderActor::GetLivePreviewHeightField(
 	OutHeights.SetNumUninitialized(SampleCount);
 	OutValid.Init(0, SampleCount);
 
+	// In production mode there is deliberately no synthetic placeholder terrain.
+	// Until the worker finishes the authoritative DEM, the preview stays empty.
+	if (bUseProductionRealDemWorld && (!GeneratedGlobalDem.IsValid() || !GeneratedGlobalDem->IsValid()))
+	{
+		OutHeights.Init(0.0f, SampleCount);
+		return false;
+	}
+
 	const FBox2D Bounds = GetGenerationBoundsMeters();
 	const FVector2D Size = Bounds.GetSize();
 	bool bAnyValid = false;
-
 	for (int32 Y = 0; Y < SafeResolution; ++Y)
 	{
 		const double V = static_cast<double>(Y) / static_cast<double>(SafeResolution - 1);
@@ -349,8 +367,14 @@ void ACubusWorldGenerationLoaderActor::BeginStage(const ECubusGenerationLoaderSt
 	OnProgressChanged.Broadcast(Stage, StageProgress);
 }
 
-bool ACubusWorldGenerationLoaderActor::BuildProductionGlobalDem()
+void ACubusWorldGenerationLoaderActor::StartProductionGlobalDemBuild()
 {
+	if (bProductionDemBuildInFlight)
+	{
+		bDiscardProductionDemBuildResult = true;
+		return;
+	}
+
 	CubusDemIsland::FSettings DemSettings;
 	DemSettings.Seed = WorldSeed;
 	DemSettings.Resolution = FMath::Clamp(ProductionDemResolution, 33, 8193);
@@ -362,23 +386,79 @@ bool ACubusWorldGenerationLoaderActor::BuildProductionGlobalDem()
 	DemSettings.ReliefScale = FMath::Clamp(ProductionReliefScale, 0.05f, 4.0f);
 	DemSettings.WarpMeters = FMath::Max(0.0f, ProductionCoastWarpMeters);
 
-	TSharedPtr<CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe> Dem =
-		MakeShared<CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe>();
-	CubusLandscapeEvolution::FGenerationStats Stats;
-	FString Error;
-	if (!CubusDemIsland::FGenerator::Generate(DemSettings, *Dem, &Stats, &Error))
+	ProductionDemBuildSessionSerial = GenerationSessionSerial;
+	const uint64 BuildSerial = ProductionDemBuildSessionSerial;
+	bDiscardProductionDemBuildResult = false;
+	bProductionDemBuildInFlight = true;
+	StageProgress = 0.03f;
+	OverallProgress = 0.03f;
+	OnProgressChanged.Broadcast(Stage, StageProgress);
+
+	UE_LOG(LogTemp, Display,
+		TEXT("Cubus starting asynchronous production DEM: seed=%d resolution=%d world=%.1fkm"),
+		DemSettings.Seed, DemSettings.Resolution, DemSettings.WorldSizeMeters / 1000.0);
+
+	ProductionDemFuture = Async(EAsyncExecution::ThreadPool, [DemSettings, BuildSerial]() mutable
 	{
-		UE_LOG(LogTemp, Error, TEXT("Cubus production real-DEM generation failed: %s"), *Error);
-		return false;
+		FCubusProductionDemBuildResult Result;
+		Result.SessionSerial = BuildSerial;
+		Result.Dem = MakeShared<CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe>();
+		if (!CubusDemIsland::FGenerator::Generate(DemSettings, *Result.Dem, &Result.Stats, &Result.Error))
+		{
+			Result.Dem.Reset();
+		}
+		return Result;
+	});
+}
+
+void ACubusWorldGenerationLoaderActor::PollProductionGlobalDemBuild()
+{
+	if (!bProductionDemBuildInFlight)
+	{
+		return;
 	}
 
-	GeneratedGlobalDem = MoveTemp(Dem);
+	if (!ProductionDemFuture.IsReady())
+	{
+		// We do not fake detailed percentages because the generator currently has
+		// no internal progress callback. Keep the UI visibly alive instead.
+		StageProgress = FMath::Min(0.90f, StageProgress + 0.0015f);
+		OverallProgress = StageProgress * 0.98f;
+		OnProgressChanged.Broadcast(Stage, StageProgress);
+		return;
+	}
+
+	FCubusProductionDemBuildResult Result = ProductionDemFuture.Get();
+	bProductionDemBuildInFlight = false;
+	const bool bStale = bDiscardProductionDemBuildResult || Result.SessionSerial != GenerationSessionSerial;
+	bDiscardProductionDemBuildResult = false;
+	if (bStale)
+	{
+		UE_LOG(LogTemp, Display, TEXT("Cubus discarded stale production DEM result."));
+		return;
+	}
+
+	if (!Result.Dem.IsValid() || !Result.Dem->IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cubus production real-DEM generation failed: %s"), *Result.Error);
+		FCubusGeneratedTerrainRuntime::Reset();
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
+
+	GeneratedGlobalDem = MoveTemp(Result.Dem);
 	FCubusGeneratedTerrainRuntime::StoreGlobalDem(GeneratedGlobalDem);
 	UE_LOG(LogTemp, Display,
 		TEXT("Cubus generator page owns authoritative DEM: seed=%d resolution=%d world=%.1fkm cell=%.2fm elevation=%.0f..%.0fm"),
 		WorldSeed, GeneratedGlobalDem->Resolution, GeneratedGlobalDem->WorldSizeMeters / 1000.0,
-		GeneratedGlobalDem->CellSizeMeters, Stats.MinimumElevationM, Stats.MaximumElevationM);
-	return true;
+		GeneratedGlobalDem->CellSizeMeters, Result.Stats.MinimumElevationM, Result.Stats.MaximumElevationM);
+
+	StageProgress = 1.0f;
+	OverallProgress = 0.98f;
+	RebuildPreviewFromGlobalDem();
+	UploadPreview();
+	OnProgressChanged.Broadcast(Stage, StageProgress);
+	BeginRuntimeTerrainLoading();
 }
 
 void ACubusWorldGenerationLoaderActor::RebuildPreviewFromGlobalDem()
@@ -440,8 +520,6 @@ void ACubusWorldGenerationLoaderActor::BeginRuntimeTerrainLoading()
 		WorldSeed, FCubusGeneratedTerrainRuntime::HasGlobalDem() ? TEXT("yes") : TEXT("no"),
 		FCubusGeneratedTerrainRuntime::GetTileCount());
 
-	// Remain on the generator page by default so the player can inspect the exact
-	// world and choose a spawn. ConfirmGeneratedSpawn performs the normal travel.
 	if (bTravelToGameplayWhenComplete)
 	{
 		UGameplayStatics::OpenLevel(this, GameplayLevelName);
@@ -463,24 +541,8 @@ void ACubusWorldGenerationLoaderActor::ProcessStructuralDEM()
 {
 	if (bUseProductionRealDemWorld)
 	{
-		if (!GeneratedGlobalDem.IsValid())
-		{
-			StageProgress = 0.05f;
-			OverallProgress = 0.05f;
-			OnProgressChanged.Broadcast(Stage, StageProgress);
-			if (!BuildProductionGlobalDem())
-			{
-				FCubusGeneratedTerrainRuntime::Reset();
-				BeginStage(ECubusGenerationLoaderStage::Failed);
-				return;
-			}
-			StageProgress = 1.0f;
-			OverallProgress = 0.98f;
-			RebuildPreviewFromGlobalDem();
-			UploadPreview();
-			OnProgressChanged.Broadcast(Stage, StageProgress);
-		}
-		BeginRuntimeTerrainLoading();
+		// Production work is launched in StartGeneration and polled from Tick.
+		PollProductionGlobalDemBuild();
 		return;
 	}
 
