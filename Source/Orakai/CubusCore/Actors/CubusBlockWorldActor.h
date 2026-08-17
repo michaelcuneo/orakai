@@ -30,9 +30,6 @@ struct FCubusStreamingChunkBuild
 	bool										   bIsBlockBuild  = false;
 	bool										   bIsHybridBuild = false;
 
-	// Resolution and six-face topology captured by this worker. If either
-	// changes while the task runs, the result is discarded rather than
-	// publishing a mesh with an obsolete seam contract.
 	int32  SubdivisionsPerVoxel = 1;
 	uint32 TransitionSignature	= 0;
 };
@@ -52,19 +49,29 @@ public:
 	void RegisterChunk(ACubusVoxelVolumeActor* ChunkActor);
 	void UnregisterChunk(ACubusVoxelVolumeActor* ChunkActor);
 
-	ACubusVoxelVolumeActor*											FindChunk(const FIntVector& ChunkCoordinate) const;
+	ACubusVoxelVolumeActor* FindChunk(const FIntVector& ChunkCoordinate) const;
 	const TMap<FIntVector, TWeakObjectPtr<ACubusVoxelVolumeActor>>& GetRegisteredChunks() const { return ChunksByCoordinate; }
-	void															RebuildChunkAndNeighbours(const FIntVector& ChunkCoordinate);
-	void															QueueChunkForRebuild(const FIntVector& ChunkCoordinate);
+	void RebuildChunkAndNeighbours(const FIntVector& ChunkCoordinate);
+	void QueueChunkForRebuild(const FIntVector& ChunkCoordinate);
 	void QueueChunkAndFaceNeighboursForRebuild(const FIntVector& ChunkCoordinate);
 	void QueueDensityEditDependenciesForRebuild(const FIntVector& ChangedSampleMinimum, const FIntVector& ChangedSampleMaximum);
 	FCubusDensityEditMap BuildDensityEditSnapshot(const FIntVector& ChunkCoordinate) const;
-	bool				 BuildBlockEditOverlayChunk(const FIntVector& ChunkCoordinate, FCubusBlockChunkData& OutChunk) const;
+	bool BuildBlockEditOverlayChunk(const FIntVector& ChunkCoordinate, FCubusBlockChunkData& OutChunk) const;
 
 	const FCubusGenerationSeeds GetGenerationSeeds() const { return FCubusGenerationSeeds::FromWorldSeed(WorldSeed); }
 
 	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Seed")
 	int64 GetWorldSeed() const { return WorldSeed; }
+
+	/**
+	 * Generated-world handoff hook. GameMode calls this from StartPlay before
+	 * Super::StartPlay(), so BeginPlay, persistence and the very first terrain
+	 * sample all see the authoritative generated DEM seed.
+	 */
+	void AdoptGeneratedWorldSeed(const int64 InWorldSeed)
+	{
+		WorldSeed = InWorldSeed;
+	}
 
 	UFUNCTION(BlueprintCallable, Category = "Cubus|Client Settings")
 	void SetClientViewDistance(int32 InHorizontalViewRadius, int32 InVerticalViewRadius, bool bSaveSetting = true);
@@ -81,13 +88,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Cubus|Client Settings")
 	int32 GetClientChunkLoadRate() const { return MaxChunksGeneratedPerTick; }
 
-	/** Canonical LOD0 voxel size used by world-space systems such as vegetation. */
 	float GetGeneratedVoxelSize() const { return GeneratedVoxelSize; }
 
 	FCubusDensityTransitionFaces BuildDensityTransitionFaces(const FIntVector& ChunkCoordinate, int32 SelfSubdivisions) const;
 
 	const FCubusDensityTileBounds2D& GetDensityStreamingCoverageBounds() const { return DensityStreamingCoverageBounds; }
-	bool							 IsDensityStreamingCoverageReady() const;
+	bool IsDensityStreamingCoverageReady() const;
+
+	/**
+	 * Readiness for a specific selected world location, not merely whatever
+	 * clipmap happened to be resident before the spawn selection moved.
+	 */
+	bool IsDensityStreamingCoverageReadyAtWorldLocation(const FVector& WorldLocation) const
+	{
+		const FIntVector Coordinate = WorldLocationToChunkCoordinate(WorldLocation);
+		return DensityStreamingCoverageBounds.Contains(Coordinate.X, Coordinate.Y) &&
+			IsDensityStreamingCoverageReady();
+	}
 
 	bool IsWorldVegetationEnabled() const { return bEnableWorldVegetation; }
 
@@ -229,12 +246,6 @@ protected:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "1", UIMax = "16"))
 	int32 VerticalViewRadius = 2;
 
-	/**
-	 * Density terrain follows the generated surface per XY column instead of
-	 * loading a tall ellipsoid around one Z anchor. This value adds a small
-	 * voxel-space safety allowance to the sampled per-column height range; it
-	 * no longer forces whole empty chunks above and below every column.
-	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD", meta = (ClampMin = "0", ClampMax = "2", UIMax = "2"))
 	int32 DensitySurfaceVerticalPaddingChunks = 1;
 
@@ -253,23 +264,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
 	int32 MaxConcurrentDensityBuilds = 4;
 
-	/*
-	 * Maximum number of completed density meshes uploaded into hidden staging
-	 * components during one game-thread tick.
-	 *
-	 * Uploads remain invisible until the complete transaction is committed.
-	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing", meta = (ClampMin = "1", ClampMax = "16", UIMax = "8"))
 	int32 MaxAtomicDensityUploadsPerTick = 4;
 
-	/*
-	 * Soft game-thread time budget for hidden density mesh uploads.
-	 *
-	 * At least one pending upload is allowed each tick so an individually
-	 * expensive chunk can never permanently stall the transaction.
-	 *
-	 * The hard MaxAtomicDensityUploadsPerTick limit still applies as well.
-	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density Editing",
 			  meta = (ClampMin = "0.25", ClampMax = "16.0", UIMax = "8.0", Units = "ms"))
 	float MaxAtomicDensityUploadMillisecondsPerTick = 3.0f;
@@ -427,156 +424,101 @@ private:
 	TArray<FIntVector> PendingChunkGeneration;
 	TArray<FIntVector> PendingChunkRemoval;
 
-	/*
-	 * Ordinary block/streaming rebuilds may publish independently.
-	 */
 	TSet<FIntVector> DirtyChunkCoordinates;
-
-	/*
-	 * Density edits may never publish independently.
-	 *
-	 * Every loaded chunk in this set is rebuilt into its hidden staging
-	 * component first. Only after the complete set is ready do we publish
-	 * the batch.
-	 */
 	TSet<FIntVector> AtomicDensityDirtyChunkCoordinates;
-
 	TArray<FCubusStreamingChunkBuild> StreamingChunkBuilds;
-
 	TSet<FIntVector> StreamingChunksBuilding;
-
 	TSet<FIntVector> StreamingChunksReady;
 	TSet<FIntVector> DensitySurfaceRetryCoordinates;
 	TSet<FIntVector> FineDensityEditCoordinates;
 	TSet<FIntVector> DensityEditTransitionCoordinates;
-
-	/* LOD resolution swaps are staged and published as one local topology transaction. */
 	TSet<FIntVector> ActiveDensityLodTransitionCoordinates;
 	TSet<FIntVector> StagedDensityLodTransitionCoordinates;
-	bool			 bDensityLodTransitionActive = false;
+	bool bDensityLodTransitionActive = false;
 
-	/*
-	 * Current hidden density rebuild transaction.
-	 *
-	 * The visible terrain remains on the previous committed revision until every
-	 * coordinate in ActiveAtomicDensityBatchCoordinates has been staged.
-	 */
 	TArray<FIntVector> ActiveAtomicDensityBatchCoordinates;
-
 	TArray<TWeakObjectPtr<ACubusVoxelVolumeActor>> ActiveAtomicDensityStagedChunks;
-
 	int32 ActiveAtomicDensityBuildIndex = 0;
 
 	struct FAtomicDensityAsyncBuild
 	{
 		FIntVector ChunkCoordinate = FIntVector::ZeroValue;
-
 		uint64 Revision = 0;
-
 		UE::Tasks::TTask<FCubusDensityMeshBuildResult> Task;
 	};
 
 	TArray<TUniquePtr<FAtomicDensityAsyncBuild>> ActiveAtomicDensityAsyncBuilds;
 
-	/*
-	 * Worker-complete mesh data waiting for its bounded game-thread upload.
-	 *
-	 * These results contain no visible terrain state. They are uploaded only to
-	 * each chunk's hidden staging procedural mesh.
-	 */
 	struct FAtomicDensityPendingUpload
 	{
 		FIntVector ChunkCoordinate = FIntVector::ZeroValue;
-
 		uint64 Revision = 0;
-
 		FCubusDensityMeshBuildResult BuildResult;
 	};
 
 	TArray<TUniquePtr<FAtomicDensityPendingUpload>> ActiveAtomicDensityPendingUploads;
-
-	/*
-	 * Incremented whenever the authoritative density edit field changes.
-	 */
 	uint64 DensityEditRevision = 0;
-
-	/*
-	 * Revision against which the current staged transaction is being built.
-	 */
 	uint64 ActiveAtomicDensityRevision = 0;
-
 	bool bAtomicDensityBatchActive = false;
-
 	TSet<FIntVector> RequiredChunkCoordinates;
 	TSet<FIntVector> InitialRequiredCoordinates;
-
 	FCubusDensityEditMap DensityEdits;
-
 	TMap<FIntVector, FCubusDensityEditMap> DensityEditsByChunk;
-
-	TWeakObjectPtr<APawn>					   TrackedPawn;
+	TWeakObjectPtr<APawn> TrackedPawn;
 	TWeakObjectPtr<ACubusWorldVegetationActor> WorldVegetationActor;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AActor> CachedWeatherActor = nullptr;
 
-	FIntVector				  LastTrackedChunk		= FIntVector(MAX_int32, MAX_int32, MAX_int32);
-	FIntVector				  DensityLodCentreChunk = FIntVector(MAX_int32, MAX_int32, MAX_int32);
+	FIntVector LastTrackedChunk = FIntVector(MAX_int32, MAX_int32, MAX_int32);
+	FIntVector DensityLodCentreChunk = FIntVector(MAX_int32, MAX_int32, MAX_int32);
 	FCubusDensityTileBounds2D DensityStreamingCoverageBounds;
-	FVector					  HeldPawnLocation				 = FVector::ZeroVector;
-	bool					  bPawnHeldForStreaming			 = false;
-	bool					  bSpawnTimeoutReported			 = false;
-	float					  HeldPawnElapsedSeconds		 = 0.0f;
-	float					  TimeUntilStreamingUpdate		 = 0.0f;
-	float					  TimeUntilWeatherMaterialUpdate = 0.0f;
-	float					  WeatherMaterialElapsedSeconds	 = 0.0f;
+	FVector HeldPawnLocation = FVector::ZeroVector;
+	bool bPawnHeldForStreaming = false;
+	bool bSpawnTimeoutReported = false;
+	float HeldPawnElapsedSeconds = 0.0f;
+	float TimeUntilStreamingUpdate = 0.0f;
+	float TimeUntilWeatherMaterialUpdate = 0.0f;
+	float WeatherMaterialElapsedSeconds = 0.0f;
 
 	void RemoveInvalidChunks();
 	void RebuildChunkAtCoordinate(const FIntVector& ChunkCoordinate);
 	void PublishWorldConfig();
-
 	void RestoreDensityEdits();
-
 	void RebuildDensityEditIndex();
 	void RebuildDensityEditResolutionTopology(bool bQueueLoadedChanges);
-
-	void					ReindexDensityEditSample(const FIntVector& WorldSample);
-	void					ApplyPersistedEditsToChunk(ACubusVoxelVolumeActor& ChunkActor);
-	void					RecordTrackedPawnCoordinate();
+	void ReindexDensityEditSample(const FIntVector& WorldSample);
+	void ApplyPersistedEditsToChunk(ACubusVoxelVolumeActor& ChunkActor);
+	void RecordTrackedPawnCoordinate();
 	ACubusVoxelVolumeActor* SpawnChunkAtCoordinate(const FIntVector& Coordinate, bool bGenerateVegetation, bool bBuildImmediately = true);
-	void					UpdateRuntimeStreaming(bool bForce);
-	void					ProcessRuntimeQueues();
-	void					ProcessAtomicDensityEditBatch();
-	void					DiscardActiveAtomicDensityBuilds();
-	double					ActiveAtomicDensityWorkerMilliseconds		 = 0.0;
-	double					ActiveAtomicDensityUploadMilliseconds		 = 0.0;
-	double					ActiveAtomicDensityMaxUploadTickMilliseconds = 0.0;
-
+	void UpdateRuntimeStreaming(bool bForce);
+	void ProcessRuntimeQueues();
+	void ProcessAtomicDensityEditBatch();
+	void DiscardActiveAtomicDensityBuilds();
+	double ActiveAtomicDensityWorkerMilliseconds = 0.0;
+	double ActiveAtomicDensityUploadMilliseconds = 0.0;
+	double ActiveAtomicDensityMaxUploadTickMilliseconds = 0.0;
 	int32 ActiveAtomicDensityCompletedBuildCount = 0;
-	int32 ActiveAtomicDensityUploadTickCount	 = 0;
-
+	int32 ActiveAtomicDensityUploadTickCount = 0;
 	void ProcessInitialStreaming();
-
 	void QueueStreamingChunkBuilds();
 	void ProcessCompletedStreamingChunkBuilds();
-
 	bool IsInitialChunkReady(const FIntVector& Coordinate) const;
-
-	bool	   AreInitialChunksReady() const;
-	void	   ProcessDirtyChunkQueue();
-	void	   BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius,
-										TSet<FIntVector>& OutCoordinates) const;
-	void	   BuildDensitySurfaceRequiredCoordinates(const FCubusDensityTileBounds2D& CoverageBounds,
-													  const FCubusTerrainFormSettings& TerrainSettings, int32 TerrainOffsetX,
-													  int32 TerrainOffsetY, int32 VerticalPadding, TSet<FIntVector>& OutCoordinates) const;
-	bool	   AreRequiredStreamingChunksReady() const;
-	void	   TryCommitDensityLodTransition();
+	bool AreInitialChunksReady() const;
+	void ProcessDirtyChunkQueue();
+	void BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius,
+		TSet<FIntVector>& OutCoordinates) const;
+	void BuildDensitySurfaceRequiredCoordinates(const FCubusDensityTileBounds2D& CoverageBounds,
+		const FCubusTerrainFormSettings& TerrainSettings, int32 TerrainOffsetX,
+		int32 TerrainOffsetY, int32 VerticalPadding, TSet<FIntVector>& OutCoordinates) const;
+	bool AreRequiredStreamingChunksReady() const;
+	void TryCommitDensityLodTransition();
 	FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;
-	int32	   ResolveDensitySubdivisions(const FIntVector& ChunkCoordinate) const;
-	void	   UpdateDensityLods();
-	void	   HoldPawnForInitialStreaming();
-	void	   TryReleasePawnToTerrain();
-	void	   EnsureWorldVegetationActor();
-	void	   UpdateWeatherMaterials(float DeltaSeconds);
-	void	   RecordGeneratedTreeTombstone(const FIntVector& WorldVoxel);
+	int32 ResolveDensitySubdivisions(const FIntVector& ChunkCoordinate) const;
+	void UpdateDensityLods();
+	void HoldPawnForInitialStreaming();
+	void TryReleasePawnToTerrain();
+	void EnsureWorldVegetationActor();
+	void UpdateWeatherMaterials(float DeltaSeconds);
+	void RecordGeneratedTreeTombstone(const FIntVector& WorldVoxel);
 };
