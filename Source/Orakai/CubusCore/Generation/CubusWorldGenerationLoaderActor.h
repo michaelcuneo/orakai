@@ -83,6 +83,7 @@ public:
     UTexture2D* GetPreviewTexture() const { return PreviewTexture; }
 
     /** Preserve the final DEM preview across OpenLevel for the runtime spawn picker. */
+    UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Preview", meta=(DisplayName="Publish Generated DEM Preview"))
     void PublishPreviewSnapshotToRuntime() const
     {
         FCubusGeneratedTerrainRuntime::StorePreviewSnapshot(
@@ -90,6 +91,83 @@ public:
             GetGenerationBoundsMeters(),
             PreviewPixels
         );
+    }
+
+    /**
+     * Set the proposed spawn from a normalized point on the DEM preview.
+     * PreviewUV.X and PreviewUV.Y are expected in the 0..1 range where
+     * (0,0) is the top-left of the preview image and (1,1) is bottom-right.
+     */
+    UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Set Generated Spawn From Preview UV"))
+    bool SetGeneratedSpawnFromPreviewUV(FVector2D PreviewUV, FVector2D& OutWorldMeters) const
+    {
+        if (Stage != ECubusGenerationLoaderStage::Complete)
+        {
+            OutWorldMeters = FVector2D::ZeroVector;
+            return false;
+        }
+
+        FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(PreviewUV);
+        return FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(OutWorldMeters);
+    }
+
+    /** Convenience node for UMG: pass the mouse/marker local position and image size directly. */
+    UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Set Generated Spawn From Preview Position"))
+    bool SetGeneratedSpawnFromPreviewPosition(
+        FVector2D LocalPreviewPosition,
+        FVector2D PreviewSize,
+        FVector2D& OutPreviewUV,
+        FVector2D& OutWorldMeters
+    ) const
+    {
+        if (PreviewSize.X <= UE_SMALL_NUMBER || PreviewSize.Y <= UE_SMALL_NUMBER)
+        {
+            OutPreviewUV = FVector2D::ZeroVector;
+            OutWorldMeters = FVector2D::ZeroVector;
+            return false;
+        }
+
+        OutPreviewUV = FVector2D(
+            FMath::Clamp(LocalPreviewPosition.X / PreviewSize.X, 0.0, 1.0),
+            FMath::Clamp(LocalPreviewPosition.Y / PreviewSize.Y, 0.0, 1.0)
+        );
+        return SetGeneratedSpawnFromPreviewUV(OutPreviewUV, OutWorldMeters);
+    }
+
+    UFUNCTION(BlueprintPure, Category="Cubus|Generation|Spawn", meta=(DisplayName="Get Proposed Generated Spawn"))
+    bool GetProposedGeneratedSpawn(FVector2D& OutWorldMeters) const
+    {
+        return FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(OutWorldMeters);
+    }
+
+    UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Confirm Generated Spawn"))
+    bool ConfirmGeneratedSpawn(FVector2D& OutWorldMeters) const
+    {
+        if (!FCubusGeneratedTerrainRuntime::ConfirmProposedSpawn())
+        {
+            OutWorldMeters = FVector2D::ZeroVector;
+            return false;
+        }
+
+        return FCubusGeneratedTerrainRuntime::GetConfirmedSpawnWorldMeters(OutWorldMeters);
+    }
+
+    UFUNCTION(BlueprintPure, Category="Cubus|Generation|Spawn", meta=(DisplayName="Has Confirmed Generated Spawn"))
+    bool HasConfirmedGeneratedSpawn() const
+    {
+        return FCubusGeneratedTerrainRuntime::HasConfirmedSpawn();
+    }
+
+    UFUNCTION(BlueprintPure, Category="Cubus|Generation|Spawn", meta=(DisplayName="Get Confirmed Generated Spawn"))
+    bool GetConfirmedGeneratedSpawn(FVector2D& OutWorldMeters) const
+    {
+        return FCubusGeneratedTerrainRuntime::GetConfirmedSpawnWorldMeters(OutWorldMeters);
+    }
+
+    UFUNCTION(BlueprintPure, Category="Cubus|Generation|Spawn", meta=(DisplayName="Get Confirmed Generated Spawn Height"))
+    bool GetConfirmedGeneratedSpawnHeight(float& OutHeightMeters) const
+    {
+        return FCubusGeneratedTerrainRuntime::TryGetConfirmedSpawnSurfaceHeightMeters(OutHeightMeters);
     }
 
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Diagnostics")
@@ -120,7 +198,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(ClampMin="0.5", UIMin="1.0"))
     FVector2D GenerationSizeKm = FVector2D(4.0, 4.0);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(ClampMin="1", ClampMax="8"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation")
     int32 WorkItemsPerTick = 1;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview", meta=(ClampMin="64", ClampMax="2048"))
