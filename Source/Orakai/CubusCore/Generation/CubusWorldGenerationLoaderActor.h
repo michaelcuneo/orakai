@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "CubusCore/Generation/CubusTerrainCarving.h"
 #include "CubusCore/Generation/CubusTerrainErosion.h"
+#include "CubusCore/Generation/CubusTerrainDeposition.h"
 #include "CubusWorldGenerationLoaderActor.generated.h"
 
 class UTexture2D;
@@ -15,7 +16,9 @@ enum class ECubusGenerationLoaderStage : uint8
     StructuralDEM UMETA(DisplayName="Structural DEM"),
     Drainage UMETA(DisplayName="Drainage"),
     TerrainCarving UMETA(DisplayName="Terrain Carving"),
-    Erosion UMETA(DisplayName="Erosion and Weathering"),
+    Erosion UMETA(DisplayName="Coarse Erosion"),
+    Deposition UMETA(DisplayName="Alluvial Deposition"),
+    FineErosion UMETA(DisplayName="Fine Erosion"),
     Complete UMETA(DisplayName="Current Pipeline Complete"),
     Failed UMETA(DisplayName="Failed")
 };
@@ -96,14 +99,12 @@ public:
     UPROPERTY(BlueprintAssignable, Category="Cubus|Generation|Events")
     FCubusGenerationFinished OnGenerationFinished;
 
-    /** Size of the authored DEM region, centred on world XY zero. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(ClampMin="0.5", UIMin="1.0"))
     FVector2D GenerationSizeKm = FVector2D(4.0, 4.0);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(ClampMin="1", ClampMax="8"))
     int32 WorkItemsPerTick = 1;
 
-    /** Preview resolution only; it never changes the actual 1 m DEM resolution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview", meta=(ClampMin="64", ClampMax="2048"))
     int32 PreviewTextureResolution = 768;
 
@@ -113,7 +114,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview", meta=(ClampMin="0.0", ClampMax="1.0"))
     float PreviewHillshadeStrength = 0.72f;
 
-    /** 1 m DEM settings used by the real structural tiles. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Terrain", meta=(ClampMin="0.25"))
     float DEMSampleSpacingMeters = 1.0f;
 
@@ -132,6 +132,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Erosion", meta=(ClampMin="5.0", ClampMax="60.0"))
     float ErosionTalusAngleDegrees = 33.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Deposition", meta=(ClampMin="1", ClampMax="8"))
+    int32 DepositionIterations = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Fine Erosion", meta=(ClampMin="1", ClampMax="8"))
+    int32 FineErosionIterations = 3;
+
 protected:
     virtual void BeginPlay() override;
 
@@ -146,6 +152,8 @@ private:
     void ProcessDrainage();
     void ProcessTerrainCarving();
     void ProcessErosion();
+    void ProcessDeposition();
+    void ProcessFineErosion();
 
     FBox2D GetGenerationBoundsMeters() const;
     void SetWorkProgress(int32 CompletedItems, int32 TotalItems);
@@ -171,6 +179,8 @@ private:
     FCubusTerrainDrainageSettings DrainageSettings;
     FCubusTerrainCarvingSettings CarvingSettings;
     FCubusTerrainErosionSettings ErosionSettings;
+    FCubusTerrainDepositionSettings DepositionSettings;
+    FCubusTerrainErosionSettings FineErosionSettings;
 
     TArray<FIntPoint> TerrainTileQueue;
     TArray<FIntPoint> DrainageRegionQueue;
