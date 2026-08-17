@@ -2,6 +2,8 @@
 
 #include "OrakaiGameMode.h"
 
+#include "CubusCore/Actors/CubusBlockWorldActor.h"
+#include "CubusCore/Actors/CubusTerrainLodWorldActor.h"
 #include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
 #include "CubusCore/Generation/CubusWorldGenerationLoaderActor.h"
 #include "Engine/World.h"
@@ -22,6 +24,21 @@ AOrakaiGameMode::AOrakaiGameMode()
 
 void AOrakaiGameMode::StartPlay()
 {
+    if (FCubusGeneratedTerrainRuntime::IsActive())
+    {
+        if (UWorld* World = GetWorld())
+        {
+            const int64 GeneratedSeed = FCubusGeneratedTerrainRuntime::GetWorldSeed();
+            for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
+            {
+                if (IsValid(*Iterator))
+                {
+                    Iterator->AdoptGeneratedWorldSeed(GeneratedSeed);
+                }
+            }
+        }
+    }
+
     Super::StartPlay();
 }
 
@@ -30,10 +47,7 @@ void AOrakaiGameMode::HandleStartingNewPlayer_Implementation(APlayerController* 
     UWorld* World = GetWorld();
     if (IsValid(World))
     {
-        // The world-generation screen owns the complete pre-spawn lifecycle.
-        // Hold the real character even before StartGeneration configures the
-        // generated DEM runtime, otherwise GameMode would create a character
-        // underneath the WBP at map entry.
+        // Never create the real character underneath the generation WBP.
         for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(World); Iterator; ++Iterator)
         {
             if (IsValid(*Iterator))
@@ -45,6 +59,8 @@ void AOrakaiGameMode::HandleStartingNewPlayer_Implementation(APlayerController* 
         }
     }
 
+    // After SPAWN opens Lvl_ThirdPerson, keep the real character withheld while
+    // that gameplay map builds its own density chunks and LODs at the selected XY.
     if (FCubusGeneratedTerrainRuntime::IsActive())
     {
         PendingGeneratedPlayer = NewPlayer;
@@ -76,21 +92,14 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         return;
     }
 
-    // The Loader's Complete stage is deliberately AFTER:
-    //   DEM generation -> support chunks -> full gameplay chunks -> LOD1-LOD6.
-    // Never let a confirmed proposal create the player before that state.
-    ACubusWorldGenerationLoaderActor* Loader = nullptr;
+    // While still in Lvl_Generator, the WBP owns the flow. Confirm Generated
+    // Spawn immediately opens Lvl_ThirdPerson, so never create a character here.
     for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(World); Iterator; ++Iterator)
     {
         if (IsValid(*Iterator))
         {
-            Loader = *Iterator;
-            break;
+            return;
         }
-    }
-    if (IsValid(Loader) && !Loader->IsGeneratedSpawnSelectionReady())
-    {
-        return;
     }
 
     FVector2D SelectedWorldMeters;
@@ -102,27 +111,86 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         return;
     }
 
-    const FVector DemSpawnLocation(
+    const FVector StreamingFocusLocation(
         SelectedWorldMeters.X * 100.0,
         SelectedWorldMeters.Y * 100.0,
-        static_cast<double>(SelectedHeightMeters) * 100.0 + 200.0
+        static_cast<double>(SelectedHeightMeters) * 100.0 + 500.0
     );
 
-    FVector FinalSpawnLocation = DemSpawnLocation;
+    ACubusSpawnStreamingPawn* StreamingPawn = SpawnStreamingPawn.Get();
+    if (!IsValid(StreamingPawn))
+    {
+        FActorSpawnParameters SpawnParameters;
+        SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        SpawnParameters.ObjectFlags |= RF_Transient;
+
+        StreamingPawn = World->SpawnActor<ACubusSpawnStreamingPawn>(
+            ACubusSpawnStreamingPawn::StaticClass(),
+            StreamingFocusLocation,
+            FRotator::ZeroRotator,
+            SpawnParameters
+        );
+
+        if (!IsValid(StreamingPawn))
+        {
+            return;
+        }
+
+        SpawnStreamingPawn = StreamingPawn;
+        PlayerController->Possess(StreamingPawn);
+
+        UE_LOG(LogTemp, Display,
+            TEXT("Cubus Lvl_ThirdPerson preload focus at generated spawn %.1fm, %.1fm"),
+            SelectedWorldMeters.X,
+            SelectedWorldMeters.Y);
+        return;
+    }
+
+    ACubusBlockWorldActor* BlockWorld = nullptr;
+    for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
+    {
+        if (IsValid(*Iterator))
+        {
+            BlockWorld = *Iterator;
+            break;
+        }
+    }
+
+    // This is the real second-layer loading pass in Lvl_ThirdPerson. The
+    // generator map's temporary preload cannot be reused after OpenLevel.
+    if (!IsValid(BlockWorld) ||
+        !BlockWorld->IsWorldLoadingComplete() ||
+        !BlockWorld->IsDensityStreamingCoverageReadyAtWorldLocation(StreamingFocusLocation))
+    {
+        return;
+    }
+
+    for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(World); Iterator; ++Iterator)
+    {
+        if (IsValid(*Iterator) && !Iterator->IsPreSpawnVisualCoverageReady())
+        {
+            return;
+        }
+        break;
+    }
+
+    FVector FinalSpawnLocation = StreamingFocusLocation;
     FHitResult SurfaceHit;
-    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CubusGeneratedSpawnSurface), true, PlayerController->GetPawn());
-    const FVector TraceStart = DemSpawnLocation + FVector(0.0, 0.0, 50000.0);
-    const FVector TraceEnd = DemSpawnLocation - FVector(0.0, 0.0, 50000.0);
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CubusGeneratedSpawnSurface), true, StreamingPawn);
+    const FVector TraceStart = StreamingFocusLocation + FVector(0.0, 0.0, 50000.0);
+    const FVector TraceEnd = StreamingFocusLocation - FVector(0.0, 0.0, 50000.0);
     if (World->LineTraceSingleByChannel(SurfaceHit, TraceStart, TraceEnd, ECC_Visibility, QueryParams))
     {
         FinalSpawnLocation = SurfaceHit.ImpactPoint + FVector(0.0, 0.0, 200.0);
     }
-
-    APawn* PreviousPawn = PlayerController->GetPawn();
+    else
+    {
+        FinalSpawnLocation.Z = static_cast<double>(SelectedHeightMeters) * 100.0 + 200.0;
+    }
 
     FActorSpawnParameters CharacterSpawnParameters;
     CharacterSpawnParameters.Owner = PlayerController;
-    CharacterSpawnParameters.Instigator = PreviousPawn;
+    CharacterSpawnParameters.Instigator = StreamingPawn;
     CharacterSpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
     APawn* GeneratedCharacter = World->SpawnActor<APawn>(
@@ -135,7 +203,7 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     if (!IsValid(GeneratedCharacter))
     {
         UE_LOG(LogTemp, Error,
-            TEXT("Cubus failed to create OrakaiCharacter at confirmed generated spawn %s"),
+            TEXT("Cubus failed to create OrakaiCharacter at generated spawn %s; retaining preload pawn"),
             *FinalSpawnLocation.ToCompactString());
         return;
     }
@@ -146,27 +214,16 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     if (PlayerController->GetPawn() != GeneratedCharacter)
     {
         UE_LOG(LogTemp, Error,
-            TEXT("Cubus created generated character %s but possession failed"),
+            TEXT("Cubus created generated character %s but possession failed; retaining preload pawn"),
             *GetNameSafe(GeneratedCharacter));
         GeneratedCharacter->Destroy();
-        if (IsValid(PreviousPawn))
-        {
-            PlayerController->Possess(PreviousPawn);
-        }
+        PlayerController->Possess(StreamingPawn);
         return;
     }
 
-    // The hidden streaming-focus pawn existed only to run the support/full/LOD
-    // passes before the WBP enabled SPAWN. It is no longer needed once the real
-    // character is successfully possessed.
-    if (IsValid(PreviousPawn) && PreviousPawn->IsA<ACubusSpawnStreamingPawn>())
-    {
-        PreviousPawn->Destroy();
-    }
+    StreamingPawn->Destroy();
+    SpawnStreamingPawn.Reset();
 
-    // The generation screen held Game+UI input and the mouse cursor throughout
-    // terrain generation/loading/selection. SPAWN is the exact point where
-    // gameplay input is finally released.
     FInputModeGameOnly GameplayInputMode;
     PlayerController->SetInputMode(GameplayInputMode);
     PlayerController->SetShowMouseCursor(false);
@@ -175,12 +232,11 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     PlayerController->ResetIgnoreMoveInput();
     PlayerController->ResetIgnoreLookInput();
 
-    SpawnStreamingPawn.Reset();
     bGeneratedSpawnCompleted = true;
     PendingGeneratedPlayer.Reset();
 
     UE_LOG(LogTemp, Display,
-        TEXT("Cubus SPAWN confirmed: created and possessed %s at %s after all preload passes were already complete"),
+        TEXT("Cubus Lvl_ThirdPerson generated character %s created after full selected-area load at %s"),
         *GetNameSafe(GeneratedCharacter),
         *FinalSpawnLocation.ToCompactString());
 }
