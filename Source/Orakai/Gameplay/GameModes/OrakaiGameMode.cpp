@@ -28,12 +28,9 @@ void AOrakaiGameMode::StartPlay()
                 if (IsValid(*Iterator))
                 {
                     Iterator->AdoptGeneratedWorldSeed(GeneratedSeed);
-                    UE_LOG(
-                        LogTemp,
-                        Display,
+                    UE_LOG(LogTemp, Display,
                         TEXT("Cubus gameplay adopting authoritative generated DEM seed %lld before actor BeginPlay"),
-                        GeneratedSeed
-                    );
+                        GeneratedSeed);
                 }
             }
         }
@@ -112,13 +109,9 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         SpawnStreamingPawn = StreamingPawn;
         PlayerController->Possess(StreamingPawn);
 
-        UE_LOG(
-            LogTemp,
-            Display,
+        UE_LOG(LogTemp, Display,
             TEXT("Cubus promoting selected generated spawn at %.1fm, %.1fm before character creation"),
-            SelectedWorldMeters.X,
-            SelectedWorldMeters.Y
-        );
+            SelectedWorldMeters.X, SelectedWorldMeters.Y);
         return;
     }
 
@@ -139,7 +132,7 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
 
     for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(World); Iterator; ++Iterator)
     {
-        if (IsValid(*Iterator) && !Iterator->IsInitialVisualCoverageReady())
+        if (IsValid(*Iterator) && !Iterator->IsPreSpawnVisualCoverageReady())
         {
             return;
         }
@@ -164,21 +157,14 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     StreamingPawn->Destroy();
     SpawnStreamingPawn.Reset();
 
-    RestartPlayerAtTransform(
-        PlayerController,
-        FTransform(FRotator::ZeroRotator, FinalSpawnLocation)
-    );
+    RestartPlayerAtTransform(PlayerController, FTransform(FRotator::ZeroRotator, FinalSpawnLocation));
 
     if (IsValid(PlayerController->GetPawn()))
     {
         bGeneratedSpawnCompleted = true;
         PendingGeneratedPlayer.Reset();
-
-        UE_LOG(
-            LogTemp,
-            Display,
+        UE_LOG(LogTemp, Display,
             TEXT("Cubus generated player created after selected terrain became resident at %s"),
-            *FinalSpawnLocation.ToCompactString()
-        );
+            *FinalSpawnLocation.ToCompactString());
     }
 }
