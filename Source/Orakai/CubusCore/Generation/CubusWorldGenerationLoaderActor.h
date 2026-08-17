@@ -57,11 +57,9 @@ public:
 
     virtual void Tick(float DeltaSeconds) override;
 
-    /** Begin a new deterministic generation session from one world seed. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation")
     void StartGeneration(int32 InWorldSeed);
 
-    /** Cancel the current session and return to the seed-entry state. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation")
     void CancelGeneration();
 
@@ -89,7 +87,6 @@ public:
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Diagnostics")
     int32 GetDrainageSegmentCount() const { return DrainageSegments.Num(); }
 
-    /** Sample the latest generated DEM if its tile is already resident. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Diagnostics")
     bool GetGeneratedHeightMeters(double WorldXmeters, double WorldYmeters, float& OutHeightMeters) const;
 
@@ -106,19 +103,20 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(ClampMin="0.5", UIMin="1.0"))
     FVector2D GenerationSizeKm = FVector2D(4.0, 4.0);
 
-    /** Number of expensive work items allowed per game-thread tick. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation", meta=(ClampMin="1", ClampMax="8"))
     int32 WorkItemsPerTick = 1;
 
-    /** Square preview texture resolution. This does not change DEM resolution. */
+    /** Preview resolution only; it never changes the actual 1 m DEM resolution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview", meta=(ClampMin="64", ClampMax="2048"))
-    int32 PreviewTextureResolution = 512;
+    int32 PreviewTextureResolution = 768;
 
+    /** Adds terrain-normal lighting to the DEM preview. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview")
-    float PreviewMinimumElevationMeters = -300.0f;
+    bool bPreviewHillshade = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview")
-    float PreviewMaximumElevationMeters = 2200.0f;
+    /** Strength of slope lighting applied after adaptive elevation normalization. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Preview", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float PreviewHillshadeStrength = 0.72f;
 
     /** 1 m DEM settings used by the real structural tiles. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Terrain", meta=(ClampMin="0.25"))
@@ -127,7 +125,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Terrain", meta=(ClampMin="64.0"))
     float DEMTileSizeMeters = 512.0f;
 
-    /** Coarser routing grid used only for hydrology topology. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|Drainage", meta=(ClampMin="2.0"))
     float DrainageCellSizeMeters = 8.0f;
 
@@ -155,8 +152,9 @@ private:
     void ClearPreview();
     void UploadPreview();
     void PaintTileToPreview(const FCubusTerrainRasterTile& Tile);
+    void RebuildTerrainPreview(bool bOverlayDrainage);
     void DrawDrainageSegmentsToPreview(const TArray<FCubusTerrainDrainageSegment>& Segments);
-    FColor HeightToPreviewColor(float HeightMeters) const;
+    FColor HeightToPreviewColor(float NormalizedHeight, float Hillshade) const;
     FIntPoint WorldToPreviewPixel(const FVector2D& WorldMeters) const;
     FVector2D PreviewPixelToWorld(int32 PixelX, int32 PixelY) const;
     void DrawPreviewLine(FIntPoint Start, FIntPoint End, const FColor& Color, int32 RadiusPixels);
@@ -179,5 +177,7 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> PreviewTexture = nullptr;
 
+    /** Actual DEM heights represented by the preview pixels; NAN means not generated yet. */
+    TArray<float> PreviewHeightMeters;
     TArray<FColor> PreviewPixels;
 };
