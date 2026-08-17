@@ -4,12 +4,12 @@
 #include "Blueprint/UserWidget.h"
 #include "OrakaiWorldLoadingWidget.generated.h"
 
-class ACubusWorldGenerationPreviewActor;
 class UBorder;
 class UButton;
 class UCanvasPanel;
 class UImage;
 class UProgressBar;
+class USizeBox;
 class UTextBlock;
 class UTexture2D;
 
@@ -26,18 +26,17 @@ public:
 	bool IsSpawnSelectionAvailable() const { return bSpawnSelectionAvailable; }
 
 protected:
-	virtual void NativeConstruct() override;
-	virtual void NativeDestruct() override;
-	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
-	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void				NativeConstruct() override;
+	virtual void				NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual FReply				NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
 	UFUNCTION()
 	void HandleSpawnClicked();
 
+	void BuildWidgetTree();
 	void BuildGeneratedPreviewTexture();
-	void BuildGenerated3DPreview();
 	void UpdateSelectionMarker(const FVector2D& PreviewUV);
 	void RefreshSpawnUi();
 
@@ -57,6 +56,9 @@ private:
 	TObjectPtr<UCanvasPanel> PreviewCanvas = nullptr;
 
 	UPROPERTY(Transient)
+	TObjectPtr<USizeBox> PreviewSizeBox = nullptr;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UImage> PreviewImage = nullptr;
 
 	UPROPERTY(Transient)
@@ -71,12 +73,9 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> RuntimePreviewTexture = nullptr;
 
-	UPROPERTY(Transient)
-	TObjectPtr<ACubusWorldGenerationPreviewActor> Preview3DActor = nullptr;
-
-	FVector2D SelectedPreviewUV = FVector2D(0.5, 0.5);
-	bool bHasSpawnSelection = false;
-	bool bSpawnSelectionAvailable = false;
-	bool bSpawnReady = false;
-	bool bSpawnPromotionActive = false;
+	FVector2D SelectedPreviewUV		   = FVector2D(0.5, 0.5);
+	bool	  bHasSpawnSelection	   = false;
+	bool	  bSpawnSelectionAvailable = false;
+	bool	  bSpawnReady			   = false;
+	bool	  bSpawnPromotionActive	   = false;
 };

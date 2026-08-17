@@ -6,11 +6,14 @@
 /** Diagnostics for the nested pre-erosion morphology layered over the macro skeleton. */
 struct ORAKAI_API FCubusTerrainMorphologySample
 {
-    float HeightOffsetMeters = 0.0f;
-    float HillMeters = 0.0f;
-    float SpurMeters = 0.0f;
-    float SwaleMeters = 0.0f;
-    float FineMeters = 0.0f;
+	float HeightOffsetMeters = 0.0f;
+	float HillMeters		 = 0.0f;
+	float SpurMeters		 = 0.0f;
+	float SwaleMeters		 = 0.0f;
+	float FineMeters		 = 0.0f;
+	float PlainWeight		 = 0.0f;
+	float RollingWeight		 = 0.0f;
+	float UplandWeight		 = 0.0f;
 };
 
 /**
@@ -24,10 +27,6 @@ struct ORAKAI_API FCubusTerrainMorphologySample
 class ORAKAI_API FCubusTerrainMorphology
 {
 public:
-    static FCubusTerrainMorphologySample Sample(
-        double WorldXmeters,
-        double WorldYmeters,
-        const FCubusTerrainStructureSample& Structure,
-        const FCubusTerrainStructureSettings& Settings
-    );
+	static FCubusTerrainMorphologySample Sample(double WorldXmeters, double WorldYmeters, const FCubusTerrainStructureSample& Structure,
+												const FCubusTerrainStructureSettings& Settings);
 };

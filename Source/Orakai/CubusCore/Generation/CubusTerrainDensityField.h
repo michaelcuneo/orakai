@@ -19,6 +19,7 @@ struct ORAKAI_API FCubusTerrainDensitySettings
 {
 	bool bUseHeightTerrain				= true;
 	bool bUseFastMaterialClassification = false;
+	bool bPreserveAuthoredHeightfield	= false;
 
 	float FlatSurfaceWorldZ = 8.0f;
 	float BaseHeight		= 8.0f;

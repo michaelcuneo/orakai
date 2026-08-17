@@ -220,7 +220,7 @@ void ACubusTerrainLodWorldActor::UpdateTierStreaming(FCubusTerrainLodTierRuntime
 	Tier.PendingTiles.Reset();
 
 	const double	TileSizeVoxels		  = static_cast<double>(Cubus::ChunkSize * SafeStride);
-	constexpr int32 SurfaceSamplesPerAxis = 7;
+	constexpr int32 SurfaceSamplesPerAxis = 17;
 
 	for (int32 TileY = OuterBounds.Min.Y; TileY < OuterBounds.MaxExclusive.Y; ++TileY)
 	{
@@ -384,9 +384,12 @@ void ACubusTerrainLodWorldActor::StartPendingBuilds()
 		return;
 	}
 
-	const int32 SafeConcurrentBuilds = FMath::Clamp(MaxConcurrentLodBuilds, 1, 16);
+	const bool	bPreSpawnCoverageIncomplete = !IsPreSpawnVisualCoverageReady();
+	const int32 SafeConcurrentBuilds		= bPreSpawnCoverageIncomplete ? FMath::Max(12, FMath::Clamp(MaxConcurrentLodBuilds, 1, 16))
+																		  : FMath::Clamp(MaxConcurrentLodBuilds, 1, 16);
 
-	const int32 SafeStartsPerTick = FMath::Clamp(MaxLodBuildStartsPerTick, 1, 16);
+	const int32 SafeStartsPerTick = bPreSpawnCoverageIncomplete ? FMath::Max(12, FMath::Clamp(MaxLodBuildStartsPerTick, 1, 16))
+																: FMath::Clamp(MaxLodBuildStartsPerTick, 1, 16);
 
 	const FCubusTerrainDensitySettings DensitySettings = SnapshotChunk->CaptureTerrainDensitySettings();
 
@@ -410,12 +413,15 @@ void ACubusTerrainLodWorldActor::StartPendingBuilds()
 		FCubusTerrainLodTierRuntime* Tier = nullptr;
 		for (int32 Offset = 0; Offset < UE_ARRAY_COUNT(Tiers); ++Offset)
 		{
-			const int32					 TierIndex	   = (NextLodBuildTierIndex + Offset) % UE_ARRAY_COUNT(Tiers);
+			const int32 TierIndex = bPreSpawnCoverageIncomplete ? Offset : (NextLodBuildTierIndex + Offset) % UE_ARRAY_COUNT(Tiers);
 			FCubusTerrainLodTierRuntime* CandidateTier = Tiers[TierIndex];
 			if (!CandidateTier->PendingTiles.IsEmpty())
 			{
-				Tier				  = CandidateTier;
-				NextLodBuildTierIndex = (TierIndex + 1) % UE_ARRAY_COUNT(Tiers);
+				Tier = CandidateTier;
+				if (!bPreSpawnCoverageIncomplete)
+				{
+					NextLodBuildTierIndex = (TierIndex + 1) % UE_ARRAY_COUNT(Tiers);
+				}
 				break;
 			}
 		}
@@ -493,7 +499,9 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
 
 	UMaterialInterface* TerrainMaterial = ResolveTerrainMaterial();
 
-	const int32 UploadLimit = FMath::Clamp(MaxLodUploadsPerTick, 1, 16);
+	const bool	bPreSpawnCoverageIncomplete = !IsPreSpawnVisualCoverageReady();
+	const int32 UploadLimit =
+		bPreSpawnCoverageIncomplete ? FMath::Max(6, FMath::Clamp(MaxLodUploadsPerTick, 1, 16)) : FMath::Clamp(MaxLodUploadsPerTick, 1, 16);
 
 	int32  UploadedThisTick			  = 0;
 	double WorkerMillisecondsThisTick = 0.0;
@@ -506,15 +514,18 @@ void ACubusTerrainLodWorldActor::UploadCompletedBuilds()
 		bool bFoundCompletedTier = false;
 		for (int32 Offset = 0; Offset < UE_ARRAY_COUNT(Tiers); ++Offset)
 		{
-			const int32					 TierIndex = (NextLodUploadTierIndex + Offset) % UE_ARRAY_COUNT(Tiers);
-			FCubusTerrainLodTierRuntime* Tier	   = Tiers[TierIndex];
+			const int32 TierIndex = bPreSpawnCoverageIncomplete ? Offset : (NextLodUploadTierIndex + Offset) % UE_ARRAY_COUNT(Tiers);
+			FCubusTerrainLodTierRuntime* Tier = Tiers[TierIndex];
 			if (Tier->CompletedBuilds.IsEmpty())
 			{
 				continue;
 			}
-			bFoundCompletedTier	   = true;
-			bUploaded			   = UploadOneCompletedBuild(*Tier, CanonicalVoxelSize, TerrainMaterial, WorkerMillisecondsThisTick);
-			NextLodUploadTierIndex = (TierIndex + 1) % UE_ARRAY_COUNT(Tiers);
+			bFoundCompletedTier = true;
+			bUploaded			= UploadOneCompletedBuild(*Tier, CanonicalVoxelSize, TerrainMaterial, WorkerMillisecondsThisTick);
+			if (!bPreSpawnCoverageIncomplete)
+			{
+				NextLodUploadTierIndex = (TierIndex + 1) % UE_ARRAY_COUNT(Tiers);
+			}
 			break;
 		}
 		if (!bFoundCompletedTier)
@@ -684,21 +695,19 @@ void ACubusTerrainLodWorldActor::RetireStableTierWindows()
 	}
 
 	FCubusTerrainLodTierRuntime* Tiers[] = {&Lod1Runtime, &Lod2Runtime, &Lod3Runtime, &Lod4Runtime, &Lod5Runtime, &Lod6Runtime};
-	for (const FCubusTerrainLodTierRuntime* Tier : Tiers)
-	{
-		if (!IsTierWindowResident(*Tier))
-		{
-			return;
-		}
-	}
-
-	/*
-	 * Retire the previous hierarchy only after the complete replacement
-	 * hierarchy is resident. This trades a short-lived overlap for zero holes
-	 * and prevents one tier from exposing a gap while its neighbour catches up.
-	 */
 	for (FCubusTerrainLodTierRuntime* Tier : Tiers)
 	{
+		/*
+		 * Retire each old ring as soon as its own replacement is resident.
+		 * Waiting for LOD6 previously left stale LOD1-LOD5 components visible
+		 * inside newer finer windows, producing duplicate floating surfaces.
+		 * Iterating fine-to-coarse guarantees the replacement beneath this ring
+		 * is already resident before stale components are removed.
+		 */
+		if (!IsTierWindowResident(*Tier))
+		{
+			break;
+		}
 		RemoveUnneededTiles(*Tier);
 	}
 }

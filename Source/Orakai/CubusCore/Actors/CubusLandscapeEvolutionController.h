@@ -15,7 +15,9 @@ enum class ECubusLandscapeDebugView : uint8
 	Province,
 	Plate,
 	Uplift,
+	FlowDirection,
 	DrainageArea,
+	Watershed,
 	RiverNetwork,
 	StreamIncision,
 	EvolutionDelta
@@ -24,20 +26,20 @@ enum class ECubusLandscapeDebugView : uint8
 UENUM(BlueprintType)
 enum class ECubusLandscapePreviewMode : uint8
 {
-	NativeDetail UMETA(DisplayName = "Native Detail (~122 m/vertex)"),
+	NativeDetail	  UMETA(DisplayName = "Native Detail (~122 m/vertex)"),
 	FullWorldOverview UMETA(DisplayName = "Full 500 km Overview")
 };
 
 UENUM(BlueprintType)
 enum class ECubusLandscapeEditorAction : uint8
 {
-	None UMETA(DisplayName = "-- Choose Action --"),
-	GenerateWorldSkeleton UMETA(DisplayName = "Generate World Skeleton"),
-	SolveGlobalHydrology UMETA(DisplayName = "Solve Global Hydrology"),
-	EvolveLandscape UMETA(DisplayName = "Evolve Current Landscape"),
-	GenerateAndSolve UMETA(DisplayName = "Generate + Solve"),
+	None				   UMETA(DisplayName = "-- Choose Action --"),
+	GenerateWorldSkeleton  UMETA(DisplayName = "Generate World Skeleton"),
+	SolveGlobalHydrology   UMETA(DisplayName = "Solve Global Hydrology"),
+	EvolveLandscape		   UMETA(DisplayName = "Evolve Current Landscape"),
+	GenerateAndSolve	   UMETA(DisplayName = "Generate + Solve"),
 	GenerateSolveAndEvolve UMETA(DisplayName = "Generate + Solve + Evolve"),
-	RebuildPreview UMETA(DisplayName = "Rebuild Preview")
+	RebuildPreview		   UMETA(DisplayName = "Rebuild Preview")
 };
 
 UCLASS(BlueprintType, Blueprintable, ClassGroup = "Cubus")
@@ -55,19 +57,23 @@ public:
 	virtual bool ShouldTickIfViewportsOnly() const override;
 #endif
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Generate World Skeleton"))
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions",
+			  meta = (DisplayName = "Generate World Skeleton"))
 	void GenerateWorldSkeleton();
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Solve Global Hydrology"))
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions",
+			  meta = (DisplayName = "Solve Global Hydrology"))
 	void SolveGlobalHydrology();
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Evolve Current Landscape"))
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions",
+			  meta = (DisplayName = "Evolve Current Landscape"))
 	void EvolveLandscape();
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Generate + Solve"))
 	void GenerateAndSolve();
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Generate + Solve + Evolve"))
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions",
+			  meta = (DisplayName = "Generate + Solve + Evolve"))
 	void GenerateSolveAndEvolve();
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution|Actions", meta = (DisplayName = "Rebuild Preview"))
@@ -84,21 +90,35 @@ protected:
 	TObjectPtr<UProceduralMeshComponent> PreviewMesh;
 
 	UPROPERTY(EditAnywhere, Category = "Cubus|Landscape Evolution|Actions",
-		meta = (DisplayName = "RUN EDITOR ACTION", ToolTip = "Choose an action to execute immediately on this placed controller."))
+			  meta = (DisplayName = "RUN EDITOR ACTION", ToolTip = "Choose an action to execute immediately on this placed controller."))
 	ECubusLandscapeEditorAction EditorAction = ECubusLandscapeEditorAction::None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation")
 	int32 Seed = 1337;
 
 	/** Full 500 km global DEM. 4097 samples produce 4096 intervals at ~122.07 m spacing. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "17", ClampMax = "4097"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation",
+			  meta = (ClampMin = "17", ClampMax = "4097"))
 	int32 GlobalResolution = 4097;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "10000.0", Units = "m"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation",
+			  meta = (ClampMin = "10000.0", Units = "m"))
 	double WorldSizeMeters = 500000.0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "2", ClampMax = "30"))
 	int32 PlateCount = 18;
+
+	/** Water surface datum. Terrain below this elevation is ocean. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Ocean", meta = (Units = "m"))
+	float OceanLevelM = 0.0f;
+
+	/** Guaranteed elevation along every outer DEM edge. Must remain below Ocean Level. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Ocean", meta = (ClampMax = "-1.0", Units = "m"))
+	float OceanFloorM = -1000.0f;
+
+	/** Width of the smooth square transition from generated terrain down to the outer ocean floor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Ocean", meta = (ClampMin = "1000.0", Units = "m"))
+	float CoastalMarginM = 45000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "0.01"))
 	float RiverSourceAreaKm2 = 20.0f;
@@ -112,8 +132,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "0.0"))
 	float StreamPowerK = 5.0e-7f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution",
+			  meta = (ClampMin = "0.1", ClampMax = "1.0"))
 	float StreamPowerM = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "0.0", Units = "m"))
+	float MaximumIncisionPerIterationM = 35.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "0.0"))
 	float BaseUpliftRateMPerYear = 0.00015f;
@@ -130,11 +154,11 @@ protected:
 
 	/** Native Detail displays a contiguous DEM window at one preview vertex per DEM cell. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview")
-	ECubusLandscapePreviewMode PreviewMode = ECubusLandscapePreviewMode::NativeDetail;
+	ECubusLandscapePreviewMode PreviewMode = ECubusLandscapePreviewMode::FullWorldOverview;
 
 	/** In Native Detail mode, focus the window on the strongest erosion/elevation change after evolution. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview")
-	bool bAutoFocusErosion = true;
+	bool bAutoFocusErosion = false;
 
 	/** Manual world-space centre in metres, used when auto-focus is disabled. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (Units = "m"))
@@ -143,8 +167,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.0001"))
 	float PreviewHorizontalScale = 0.01f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.01", DisplayName = "Preview Vertical Exaggeration"))
-	float PreviewVerticalScale = 1.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview",
+			  meta = (ClampMin = "0.01", DisplayName = "Preview Vertical Exaggeration"))
+	float PreviewVerticalScale = 8.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview")
 	ECubusLandscapeDebugView DebugView = ECubusLandscapeDebugView::Elevation;
@@ -204,11 +229,23 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
 	float MaximumTerrainRaisingM = 0.0f;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
+	float LandPercent = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics", meta = (Units = "deg"))
+	float MeanLandSlopeDegrees = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
+	float SteepLandPercent = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics", meta = (Units = "m"))
+	float MaximumNeighbourStepM = 0.0f;
+
 private:
 	CubusLandscapeEvolution::FSettings MakeSettings() const;
-	FLinearColor DebugColorForCell(int32 Cell) const;
-	FString BuildViewportDiagnosticsText() const;
-	void UpdateDiagnostics(const CubusLandscapeEvolution::FGenerationStats& Stats);
+	FLinearColor					   DebugColorForCell(int32 Cell) const;
+	FString							   BuildViewportDiagnosticsText() const;
+	void							   UpdateDiagnostics(const CubusLandscapeEvolution::FGenerationStats& Stats);
 
 	CubusLandscapeEvolution::FGlobalDem GlobalDem;
 };

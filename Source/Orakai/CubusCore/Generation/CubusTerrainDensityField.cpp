@@ -197,7 +197,7 @@ FCubusDensitySample FCubusTerrainDensityField::SampleContinuous(const FVector& G
 	 * detached spike or move a cliff by metres.
 	 */
 	float FineSurfaceDisplacement = 0.0f;
-	if (Settings.bUseHeightTerrain && FMath::Abs(MacroTerrainDensity) < 2.5f)
+	if (!Settings.bPreserveAuthoredHeightfield && Settings.bUseHeightTerrain && FMath::Abs(MacroTerrainDensity) < 2.5f)
 	{
 		const float WorldX			= static_cast<float>(GlobalSampleCoordinate.X) + static_cast<float>(Settings.TerrainOffsetX);
 		const float WorldY			= static_cast<float>(GlobalSampleCoordinate.Y) + static_cast<float>(Settings.TerrainOffsetY);
@@ -219,12 +219,12 @@ FCubusDensitySample FCubusTerrainDensityField::SampleContinuous(const FVector& G
 	}
 
 	const float BaseTerrainDensity = MacroTerrainDensity + FineSurfaceDisplacement;
-	const float TerrainDensity	   = Settings.bGenerateVolumetricGeology
+	const float TerrainDensity	   = !Settings.bPreserveAuthoredHeightfield && Settings.bGenerateVolumetricGeology
 										 ? SampleGeologicalDensity(GlobalSampleCoordinate, Column, BaseTerrainDensity)
 										 : BaseTerrainDensity;
 
 	float CompositeDensity = TerrainDensity;
-	if (Settings.bGenerateCaves)
+	if (!Settings.bPreserveAuthoredHeightfield && Settings.bGenerateCaves)
 	{
 		CompositeDensity = FMath::Min(CompositeDensity, SampleCaveDensity(GlobalSampleCoordinate, Column.SurfaceVoxelHeight, Column.Slope));
 	}
@@ -273,10 +273,14 @@ float FCubusTerrainDensityField::SampleSurfaceVoxelHeight(const float WorldX, co
 		return Settings.FlatSurfaceWorldZ;
 	}
 
-	const float				   TerrainX			 = WorldX + static_cast<float>(Settings.TerrainOffsetX);
-	const float				   TerrainY			 = WorldY + static_cast<float>(Settings.TerrainOffsetY);
-	const float				   BaseSurfaceHeight = FCubusTerrainForm::Sample(TerrainX, TerrainY, TerrainFormSettings).Height;
-	const FCubusLandmarkSample LandmarkSample	 = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
+	const float TerrainX		  = WorldX + static_cast<float>(Settings.TerrainOffsetX);
+	const float TerrainY		  = WorldY + static_cast<float>(Settings.TerrainOffsetY);
+	const float BaseSurfaceHeight = FCubusTerrainForm::Sample(TerrainX, TerrainY, TerrainFormSettings).Height;
+	if (Settings.bPreserveAuthoredHeightfield)
+	{
+		return BaseSurfaceHeight;
+	}
+	const FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
 	return ApplyRiverLowering(BaseSurfaceHeight + LandmarkSample.HeightOffset, WorldX, WorldY);
 }
 
@@ -313,9 +317,11 @@ const FCubusTerrainDensityField::FSurfaceData& FCubusTerrainDensityField::GetCac
 		const float TerrainX							 = WorldX + static_cast<float>(Settings.TerrainOffsetX);
 		const float TerrainY							 = WorldY + static_cast<float>(Settings.TerrainOffsetY);
 		Surface.FormSample								 = FCubusTerrainForm::Sample(TerrainX, TerrainY, TerrainFormSettings);
-		const FCubusLandmarkSample LandmarkSample		 = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
+		const FCubusLandmarkSample LandmarkSample		 = Settings.bPreserveAuthoredHeightfield
+															   ? FCubusLandmarkSample()
+															   : FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);
 		const float				   UncarvedSurfaceHeight = Surface.FormSample.Height + LandmarkSample.HeightOffset;
-		if (HydrologySettings.bEnabled)
+		if (!Settings.bPreserveAuthoredHeightfield && HydrologySettings.bEnabled)
 		{
 			Surface.HydrologySample		= FCubusHydrologyField::Sample(WorldX, WorldY, HydrologySettings);
 			Surface.bHasHydrologySample = true;
@@ -350,7 +356,7 @@ const FCubusTerrainDensityField::FColumnData& FCubusTerrainDensityField::GetColu
 	// into SurfaceCache and rehash its TMap, invalidating references.
 	const FSurfaceData Surface = GetCachedSurfaceData(WorldSampleX, WorldSampleY);
 	Column.SurfaceVoxelHeight  = Surface.SurfaceVoxelHeight;
-	Column.SurfaceSampleZ	   = Column.SurfaceVoxelHeight + 1.0f;
+	Column.SurfaceSampleZ	   = Column.SurfaceVoxelHeight + (Settings.bPreserveAuthoredHeightfield ? 0.0f : 1.0f);
 	Column.FormSample		   = Surface.FormSample;
 
 	const float HeightPositiveX = GetCachedSurfaceVoxelHeight(WorldSampleX + 1, WorldSampleY);

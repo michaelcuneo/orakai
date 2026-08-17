@@ -28,10 +28,10 @@ namespace OrakaiTerrainInspector
 constexpr uint64 ScreenMessageKey = 0x43554255534D4154ull;
 
 bool ResolveSectionAndFace(UProceduralMeshComponent* ProceduralMesh, const FHitResult& Hit, const FProcMeshSection*& OutSection,
-	int32& OutFaceIndex, int32& OutSectionIndex)
+						   int32& OutFaceIndex, int32& OutSectionIndex)
 {
-	OutSection = nullptr;
-	OutFaceIndex = INDEX_NONE;
+	OutSection		= nullptr;
+	OutFaceIndex	= INDEX_NONE;
 	OutSectionIndex = INDEX_NONE;
 	if (!IsValid(ProceduralMesh) || Hit.FaceIndex < 0)
 	{
@@ -44,15 +44,15 @@ bool ResolveSectionAndFace(UProceduralMeshComponent* ProceduralMesh, const FHitR
 			const int32 TriangleCount = Section->ProcIndexBuffer.Num() / 3;
 			if (Hit.FaceIndex < TriangleCount)
 			{
-				OutSection = Section;
-				OutFaceIndex = Hit.FaceIndex;
+				OutSection		= Section;
+				OutFaceIndex	= Hit.FaceIndex;
 				OutSectionIndex = Hit.Item;
 				return true;
 			}
 		}
 	}
-	int32 RemainingFaceIndex = Hit.FaceIndex;
-	const int32 SectionCount = ProceduralMesh->GetNumSections();
+	int32		RemainingFaceIndex = Hit.FaceIndex;
+	const int32 SectionCount	   = ProceduralMesh->GetNumSections();
 	for (int32 SectionIndex = 0; SectionIndex < SectionCount; ++SectionIndex)
 	{
 		FProcMeshSection* Section = ProceduralMesh->GetProcMeshSection(SectionIndex);
@@ -63,8 +63,8 @@ bool ResolveSectionAndFace(UProceduralMeshComponent* ProceduralMesh, const FHitR
 		const int32 TriangleCount = Section->ProcIndexBuffer.Num() / 3;
 		if (RemainingFaceIndex < TriangleCount)
 		{
-			OutSection = Section;
-			OutFaceIndex = RemainingFaceIndex;
+			OutSection		= Section;
+			OutFaceIndex	= RemainingFaceIndex;
 			OutSectionIndex = SectionIndex;
 			return true;
 		}
@@ -100,18 +100,16 @@ FString ResolveMaterialName(const int32 MaterialId)
 
 AOrakaiPlayerController::AOrakaiPlayerController()
 {
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick		   = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
 
-	static ConstructorHelpers::FObjectFinder<UInputMappingContext> DefaultContext(
-		TEXT("/Game/Cubus/Input/IMC_Default.IMC_Default"));
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> DefaultContext(TEXT("/Game/Cubus/Input/IMC_Default.IMC_Default"));
 	if (DefaultContext.Succeeded())
 	{
 		DefaultMappingContexts.Add(DefaultContext.Object);
 	}
 
-	static ConstructorHelpers::FObjectFinder<UInputMappingContext> MouseLookContext(
-		TEXT("/Game/Cubus/Input/IMC_MouseLook.IMC_MouseLook"));
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> MouseLookContext(TEXT("/Game/Cubus/Input/IMC_MouseLook.IMC_MouseLook"));
 	if (MouseLookContext.Succeeded())
 	{
 		MobileExcludedMappingContexts.Add(MouseLookContext.Object);
@@ -121,6 +119,14 @@ AOrakaiPlayerController::AOrakaiPlayerController()
 void AOrakaiPlayerController::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (!IsValid(WorldLoadingWidget) && FCubusGeneratedTerrainRuntime::IsActive() && !FCubusGeneratedTerrainRuntime::HasConfirmedSpawn())
+	{
+		InitializeWorldLoadingScreen();
+		if (IsValid(WorldLoadingWidget))
+		{
+			EnterWorldLoadingInputMode();
+		}
+	}
 	UpdateWorldLoadingScreen(DeltaSeconds);
 	if (!IsValid(WorldLoadingWidget) && bShowTerrainMaterialInspector && IsLocalPlayerController())
 	{
@@ -152,7 +158,7 @@ void AOrakaiPlayerController::BeginPlay()
 			GenerationInputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 			SetInputMode(GenerationInputMode);
 			SetShowMouseCursor(true);
-			bEnableClickEvents = true;
+			bEnableClickEvents	   = true;
 			bEnableMouseOverEvents = true;
 			return;
 		}
@@ -199,13 +205,11 @@ void AOrakaiPlayerController::InitializeWorldLoadingScreen()
 		return;
 	}
 	WorldLoadingWidget->AddToPlayerScreen(1000);
-	WorldLoadingWidget->SetLoadingState(
-		0.0f,
-		bGeneratedWorld
-			? FText::FromString(TEXT("Choose a spawn location"))
-			: FText::FromString(TEXT("Preparing world")));
+	WorldLoadingWidget->SetLoadingState(0.0f, bGeneratedWorld ? FText::FromString(TEXT("Choose a spawn location"))
+															  : FText::FromString(TEXT("Preparing world")));
 	WorldLoadingWidget->SetSpawnSelectionAvailable(bGeneratedWorld);
 	WorldLoadingWidget->SetSpawnReady(false);
+	UE_LOG(LogTemp, Display, TEXT("Cubus gameplay 2D spawn picker created: generated=%s"), bGeneratedWorld ? TEXT("true") : TEXT("false"));
 	SetIgnoreMoveInput(true);
 	SetIgnoreLookInput(true);
 }
@@ -236,13 +240,11 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 		WorldLoadingWidget->SetSpawnSelectionAvailable(true);
 
 		// Keep the spawn UI alive even if BlockWorld has not reached BeginPlay yet.
-		// The 3D DEM preview is independent of gameplay chunk construction.
+		// The 2D DEM snapshot is independent of gameplay chunk construction.
 		if (!IsValid(LoadingBlockWorld))
 		{
 			WorldLoadingWidget->SetSpawnReady(false);
-			WorldLoadingWidget->SetLoadingState(
-				0.0f,
-				FText::FromString(TEXT("Waiting for gameplay terrain system")));
+			WorldLoadingWidget->SetLoadingState(0.0f, FText::FromString(TEXT("Waiting for gameplay terrain system")));
 			return;
 		}
 
@@ -256,23 +258,20 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 			}
 		}
 
-		FVector2D ProposedWorldMeters;
-		float ProposedHeightMeters = 0.0f;
-		const bool bHasProposal =
-			FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(ProposedWorldMeters) &&
-			FCubusGeneratedTerrainRuntime::TrySampleHeightMeters(ProposedWorldMeters, ProposedHeightMeters);
+		FVector2D  ProposedWorldMeters;
+		float	   ProposedHeightMeters = 0.0f;
+		const bool bHasProposal			= FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(ProposedWorldMeters) &&
+										  FCubusGeneratedTerrainRuntime::TrySampleHeightMeters(ProposedWorldMeters, ProposedHeightMeters);
 
 		bool bDensityReady = false;
-		bool bLodReady = false;
+		bool bLodReady	   = false;
 		if (bHasProposal)
 		{
-			const FVector ProposedFocusLocation(
-				ProposedWorldMeters.X * 100.0,
-				ProposedWorldMeters.Y * 100.0,
-				static_cast<double>(ProposedHeightMeters) * 100.0 + 500.0);
+			const FVector ProposedFocusLocation(ProposedWorldMeters.X * 100.0, ProposedWorldMeters.Y * 100.0,
+												static_cast<double>(ProposedHeightMeters) * 100.0 + 500.0);
 			bDensityReady = LoadingBlockWorld->IsWorldLoadingComplete() &&
-				LoadingBlockWorld->IsDensityStreamingCoverageReadyAtWorldLocation(ProposedFocusLocation);
-			bLodReady = IsValid(LodWorld) && LodWorld->IsPreSpawnVisualCoverageReady();
+							LoadingBlockWorld->IsDensityStreamingCoverageReadyAtWorldLocation(ProposedFocusLocation);
+			bLodReady	  = IsValid(LodWorld) && LodWorld->IsPreSpawnVisualCoverageReady();
 		}
 
 		const bool bSelectedAreaReady = bHasProposal && bDensityReady && bLodReady;
@@ -284,9 +283,7 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 			if (!IsValid(CurrentPawn) || CurrentPawn->IsA<ACubusSpawnStreamingPawn>())
 			{
 				WorldLoadingWidget->SetSpawnPromotionActive(true);
-				WorldLoadingWidget->SetLoadingState(
-					1.0f,
-					FText::FromString(TEXT("Spawning into selected terrain")));
+				WorldLoadingWidget->SetLoadingState(1.0f, FText::FromString(TEXT("Spawning into selected terrain")));
 				return;
 			}
 
@@ -312,45 +309,34 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 
 		if (!bHasProposal)
 		{
-			WorldLoadingWidget->SetLoadingState(
-				0.0f,
-				FText::FromString(TEXT("Choose a spawn location")));
+			WorldLoadingWidget->SetLoadingState(0.0f, FText::FromString(TEXT("Choose a spawn location")));
 			return;
 		}
 
 		if (!LoadingBlockWorld->IsInitialSpawnAreaReady())
 		{
-			WorldLoadingWidget->SetLoadingState(
-				FMath::Min(0.15f, LoadingBlockWorld->GetWorldLoadingProgress()),
-				FText::FromString(TEXT("Preparing support terrain at selected spawn")));
+			WorldLoadingWidget->SetLoadingState(FMath::Min(0.15f, LoadingBlockWorld->GetWorldLoadingProgress()),
+												FText::FromString(TEXT("Preparing support terrain at selected spawn")));
 			return;
 		}
 
 		if (!bDensityReady)
 		{
-			const float ChunkProgress = LoadingBlockWorld->IsWorldLoadingComplete()
-				? 0.75f
-				: LoadingBlockWorld->GetWorldLoadingProgress();
-			WorldLoadingWidget->SetLoadingState(
-				FMath::Clamp(ChunkProgress, 0.15f, 0.85f),
-				FText::FromString(TEXT("Building gameplay chunks for selected spawn")));
+			const float ChunkProgress = LoadingBlockWorld->IsWorldLoadingComplete() ? 0.75f : LoadingBlockWorld->GetWorldLoadingProgress();
+			WorldLoadingWidget->SetLoadingState(FMath::Clamp(ChunkProgress, 0.15f, 0.85f),
+												FText::FromString(TEXT("Building gameplay chunks for selected spawn")));
 			return;
 		}
 
 		if (!bLodReady)
 		{
-			const float LodProgress = IsValid(LodWorld)
-				? LodWorld->GetPreSpawnVisualCoverageProgress()
-				: 0.0f;
-			WorldLoadingWidget->SetLoadingState(
-				FMath::Clamp(0.85f + LodProgress * 0.15f, 0.85f, 0.99f),
-				FText::FromString(TEXT("Building terrain LOD1-LOD6 for selected spawn")));
+			const float LodProgress = IsValid(LodWorld) ? LodWorld->GetPreSpawnVisualCoverageProgress() : 0.0f;
+			WorldLoadingWidget->SetLoadingState(FMath::Clamp(0.85f + LodProgress * 0.15f, 0.85f, 0.99f),
+												FText::FromString(TEXT("Building terrain LOD1-LOD6 for selected spawn")));
 			return;
 		}
 
-		WorldLoadingWidget->SetLoadingState(
-			1.0f,
-			FText::FromString(TEXT("Selected spawn area ready")));
+		WorldLoadingWidget->SetLoadingState(1.0f, FText::FromString(TEXT("Selected spawn area ready")));
 		return;
 	}
 
@@ -393,7 +379,7 @@ void AOrakaiPlayerController::EnterWorldLoadingInputMode()
 	LoadingInputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(LoadingInputMode);
 	SetShowMouseCursor(true);
-	bEnableClickEvents = true;
+	bEnableClickEvents	   = true;
 	bEnableMouseOverEvents = true;
 }
 
@@ -406,7 +392,7 @@ void AOrakaiPlayerController::EnterGameplayInputMode()
 	FInputModeGameOnly GameInputMode;
 	SetInputMode(GameInputMode);
 	SetShowMouseCursor(false);
-	bEnableClickEvents = false;
+	bEnableClickEvents	   = false;
 	bEnableMouseOverEvents = false;
 }
 
@@ -432,7 +418,8 @@ void AOrakaiPlayerController::SetupInputComponent()
 	Super::SetupInputComponent();
 	if (IsLocalPlayerController())
 	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
+				ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
 			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
 			{
@@ -460,14 +447,14 @@ void AOrakaiPlayerController::UpdateTerrainMaterialInspector()
 	{
 		return;
 	}
-	FVector ViewLocation = FVector::ZeroVector;
+	FVector	 ViewLocation = FVector::ZeroVector;
 	FRotator ViewRotation = FRotator::ZeroRotator;
 	GetPlayerViewPoint(ViewLocation, ViewRotation);
 	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * TerrainMaterialTraceDistance;
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(OrakaiTerrainMaterialInspector), true, GetPawn());
 	QueryParams.bReturnFaceIndex = true;
-	QueryParams.bTraceComplex = true;
+	QueryParams.bTraceComplex	 = true;
 
 	FHitResult Hit;
 	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation, TraceEnd, ECC_Visibility, QueryParams);
@@ -477,23 +464,23 @@ void AOrakaiPlayerController::UpdateTerrainMaterialInspector()
 		return;
 	}
 
-	const int32 MaterialId = ResolveRenderedTerrainMaterialId(Hit);
-	const FString MaterialName = MaterialId > 0 ? OrakaiTerrainInspector::ResolveMaterialName(MaterialId) : TEXT("Not a Cubus density triangle");
+	const int32	  MaterialId = ResolveRenderedTerrainMaterialId(Hit);
+	const FString MaterialName =
+		MaterialId > 0 ? OrakaiTerrainInspector::ResolveMaterialName(MaterialId) : TEXT("Not a Cubus density triangle");
 	const FString Message = MaterialId > 0
-		? FString::Printf(TEXT("Terrain material: %s [ID %d]"), *MaterialName, MaterialId)
-		: FString::Printf(TEXT("Terrain material: %s | Actor: %s"), *MaterialName, *GetNameSafe(Hit.GetActor()));
-	GEngine->AddOnScreenDebugMessage(
-		OrakaiTerrainInspector::ScreenMessageKey, 0.0f,
-		MaterialId > 0 ? FColor::Yellow : FColor::Silver, Message);
+								? FString::Printf(TEXT("Terrain material: %s [ID %d]"), *MaterialName, MaterialId)
+								: FString::Printf(TEXT("Terrain material: %s | Actor: %s"), *MaterialName, *GetNameSafe(Hit.GetActor()));
+	GEngine->AddOnScreenDebugMessage(OrakaiTerrainInspector::ScreenMessageKey, 0.0f, MaterialId > 0 ? FColor::Yellow : FColor::Silver,
+									 Message);
 	DrawDebugPoint(GetWorld(), Hit.ImpactPoint, 12.0f, FColor::Yellow, false, 0.0f);
 }
 
 int32 AOrakaiPlayerController::ResolveRenderedTerrainMaterialId(const FHitResult& Hit) const
 {
 	UProceduralMeshComponent* ProceduralMesh = Cast<UProceduralMeshComponent>(Hit.GetComponent());
-	const FProcMeshSection* Section = nullptr;
-	int32 FaceIndex = INDEX_NONE;
-	int32 SectionIndex = INDEX_NONE;
+	const FProcMeshSection*	  Section		 = nullptr;
+	int32					  FaceIndex		 = INDEX_NONE;
+	int32					  SectionIndex	 = INDEX_NONE;
 	if (!OrakaiTerrainInspector::ResolveSectionAndFace(ProceduralMesh, Hit, Section, FaceIndex, SectionIndex))
 	{
 		return INDEX_NONE;
@@ -503,11 +490,8 @@ int32 AOrakaiPlayerController::ResolveRenderedTerrainMaterialId(const FHitResult
 	{
 		return INDEX_NONE;
 	}
-	const uint32 VertexIndices[3] = {
-		Section->ProcIndexBuffer[FirstIndex],
-		Section->ProcIndexBuffer[FirstIndex + 1],
-		Section->ProcIndexBuffer[FirstIndex + 2]
-	};
+	const uint32 VertexIndices[3] = {Section->ProcIndexBuffer[FirstIndex], Section->ProcIndexBuffer[FirstIndex + 1],
+									 Section->ProcIndexBuffer[FirstIndex + 2]};
 	for (const uint32 VertexIndex : VertexIndices)
 	{
 		if (VertexIndex >= static_cast<uint32>(Section->ProcVertexBuffer.Num()))
@@ -515,21 +499,16 @@ int32 AOrakaiPlayerController::ResolveRenderedTerrainMaterialId(const FHitResult
 			return INDEX_NONE;
 		}
 	}
-	const FProcMeshVertex& Vertex0 = Section->ProcVertexBuffer[VertexIndices[0]];
-	const FProcMeshVertex& Vertex1 = Section->ProcVertexBuffer[VertexIndices[1]];
-	const FProcMeshVertex& Vertex2 = Section->ProcVertexBuffer[VertexIndices[2]];
-	const int32 PackingBase = FCubusDensityMesher::MaterialIdPackingBase;
-	const int32 Packed01 = FMath::RoundToInt(Vertex0.UV0.X);
-	const int32 Packed23 = FMath::RoundToInt(Vertex0.UV0.Y);
-	const int32 MaterialIds[4] = {
-		Packed01 % PackingBase,
-		Packed01 / PackingBase,
-		Packed23 % PackingBase,
-		Packed23 / PackingBase
-	};
-	const FLinearColor AverageWeights = (FLinearColor(Vertex0.Color) + FLinearColor(Vertex1.Color) + FLinearColor(Vertex2.Color)) / 3.0f;
-	const float Weights[4] = {AverageWeights.R, AverageWeights.G, AverageWeights.B, AverageWeights.A};
-	int32 DominantSlot = 0;
+	const FProcMeshVertex& Vertex0	   = Section->ProcVertexBuffer[VertexIndices[0]];
+	const FProcMeshVertex& Vertex1	   = Section->ProcVertexBuffer[VertexIndices[1]];
+	const FProcMeshVertex& Vertex2	   = Section->ProcVertexBuffer[VertexIndices[2]];
+	const int32			   PackingBase = FCubusDensityMesher::MaterialIdPackingBase;
+	const int32			   Packed01	   = FMath::RoundToInt(Vertex0.UV0.X);
+	const int32			   Packed23	   = FMath::RoundToInt(Vertex0.UV0.Y);
+	const int32		   MaterialIds[4]  = {Packed01 % PackingBase, Packed01 / PackingBase, Packed23 % PackingBase, Packed23 / PackingBase};
+	const FLinearColor AverageWeights  = (FLinearColor(Vertex0.Color) + FLinearColor(Vertex1.Color) + FLinearColor(Vertex2.Color)) / 3.0f;
+	const float		   Weights[4]	   = {AverageWeights.R, AverageWeights.G, AverageWeights.B, AverageWeights.A};
+	int32			   DominantSlot	   = 0;
 	for (int32 Slot = 1; Slot < 4; ++Slot)
 	{
 		if (Weights[Slot] > Weights[DominantSlot])

@@ -12,361 +12,425 @@
 
 ACubusWorldGenerationLoaderActor::ACubusWorldGenerationLoaderActor()
 {
-    PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = true;
 }
 
 void ACubusWorldGenerationLoaderActor::BeginPlay()
 {
-    Super::BeginPlay();
-    ResetSession();
-    EnsurePreviewTexture();
-    ClearPreview();
-    UploadPreview();
+	Super::BeginPlay();
+	ResetSession();
+	EnsurePreviewTexture();
+	ClearPreview();
+	UploadPreview();
 }
 
 void ACubusWorldGenerationLoaderActor::Tick(float DeltaSeconds)
 {
-    Super::Tick(DeltaSeconds);
-    (void)DeltaSeconds;
+	Super::Tick(DeltaSeconds);
+	(void) DeltaSeconds;
 
-    const int32 Budget = FMath::Clamp(WorkItemsPerTick, 1, 8);
-    for (int32 Work = 0; Work < Budget; ++Work)
-    {
-        switch (Stage)
-        {
-        case ECubusGenerationLoaderStage::StructuralDEM:
-            ProcessStructuralDEM();
-            break;
-        case ECubusGenerationLoaderStage::Drainage:
-            ProcessDrainage();
-            break;
-        case ECubusGenerationLoaderStage::TerrainCarving:
-            ProcessTerrainCarving();
-            break;
-        case ECubusGenerationLoaderStage::Erosion:
-            ProcessErosion();
-            break;
-        case ECubusGenerationLoaderStage::Deposition:
-            ProcessDeposition();
-            break;
-        case ECubusGenerationLoaderStage::FineErosion:
-            ProcessFineErosion();
-            break;
-        default:
-            return;
-        }
-    }
+	const int32 Budget = FMath::Clamp(WorkItemsPerTick, 1, 8);
+	for (int32 Work = 0; Work < Budget; ++Work)
+	{
+		switch (Stage)
+		{
+		case ECubusGenerationLoaderStage::StructuralDEM:
+			ProcessStructuralDEM();
+			break;
+		case ECubusGenerationLoaderStage::Drainage:
+			ProcessDrainage();
+			break;
+		case ECubusGenerationLoaderStage::TerrainCarving:
+			ProcessTerrainCarving();
+			break;
+		case ECubusGenerationLoaderStage::Erosion:
+			ProcessErosion();
+			break;
+		case ECubusGenerationLoaderStage::Deposition:
+			ProcessDeposition();
+			break;
+		case ECubusGenerationLoaderStage::FineErosion:
+			ProcessFineErosion();
+			break;
+		default:
+			return;
+		}
+	}
 }
 
 void ACubusWorldGenerationLoaderActor::StartGeneration(const int32 InWorldSeed)
 {
-    ResetSession();
-    WorldSeed = InWorldSeed;
-    BuildSettings();
-    EnsurePreviewTexture();
-    ClearPreview();
-    UploadPreview();
+	ResetSession();
+	WorldSeed = InWorldSeed;
+	BuildSettings();
+	EnsurePreviewTexture();
+	ClearPreview();
+	UploadPreview();
 
-    FCubusGeneratedTerrainRuntime::Configure(WorldSeed, RasterSettings);
-    BuildWorkQueues();
+	FCubusGeneratedTerrainRuntime::Configure(WorldSeed, RasterSettings);
+	BuildWorkQueues();
 
-    if (TerrainTileQueue.IsEmpty())
-    {
-        FCubusGeneratedTerrainRuntime::Reset();
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	if (TerrainTileQueue.IsEmpty())
+	{
+		FCubusGeneratedTerrainRuntime::Reset();
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    BeginStage(ECubusGenerationLoaderStage::StructuralDEM);
+	BeginStage(ECubusGenerationLoaderStage::StructuralDEM);
 }
 
 void ACubusWorldGenerationLoaderActor::CancelGeneration()
 {
-    FCubusGeneratedTerrainRuntime::Reset();
-    ResetSession();
-    EnsurePreviewTexture();
-    ClearPreview();
-    UploadPreview();
+	FCubusGeneratedTerrainRuntime::Reset();
+	ResetSession();
+	EnsurePreviewTexture();
+	ClearPreview();
+	UploadPreview();
 }
 
 FText ACubusWorldGenerationLoaderActor::GetStageDisplayName() const
 {
-    switch (Stage)
-    {
-    case ECubusGenerationLoaderStage::WaitingForSeed:
-        return FText::FromString(TEXT("Waiting for Seed"));
-    case ECubusGenerationLoaderStage::StructuralDEM:
-        return FText::FromString(TEXT("Building Structural DEM"));
-    case ECubusGenerationLoaderStage::Drainage:
-        return FText::FromString(TEXT("Solving Drainage"));
-    case ECubusGenerationLoaderStage::TerrainCarving:
-        return FText::FromString(TEXT("Carving Valleys and Rivers"));
-    case ECubusGenerationLoaderStage::Erosion:
-        return FText::FromString(TEXT("Coarse Hillslope Erosion"));
-    case ECubusGenerationLoaderStage::Deposition:
-        return FText::FromString(TEXT("Building Floodplains and Alluvial Fans"));
-    case ECubusGenerationLoaderStage::FineErosion:
-        return FText::FromString(TEXT("Cutting Fine Gullies and Weathering"));
-    case ECubusGenerationLoaderStage::SupportChunks:
-    case ECubusGenerationLoaderStage::GameplayChunks:
-    case ECubusGenerationLoaderStage::TerrainLOD:
-        return FText::FromString(TEXT("Transferring Generated World"));
-    case ECubusGenerationLoaderStage::Complete:
-        return FText::FromString(TEXT("Terrain Generation Complete"));
-    case ECubusGenerationLoaderStage::Failed:
-        return FText::FromString(TEXT("Generation Failed"));
-    default:
-        return FText::GetEmpty();
-    }
+	switch (Stage)
+	{
+	case ECubusGenerationLoaderStage::WaitingForSeed:
+		return FText::FromString(TEXT("Waiting for Seed"));
+	case ECubusGenerationLoaderStage::StructuralDEM:
+		return FText::FromString(TEXT("Building Structural DEM"));
+	case ECubusGenerationLoaderStage::Drainage:
+		return FText::FromString(TEXT("Solving Drainage"));
+	case ECubusGenerationLoaderStage::TerrainCarving:
+		return FText::FromString(TEXT("Carving Valleys and Rivers"));
+	case ECubusGenerationLoaderStage::Erosion:
+		return FText::FromString(TEXT("Coarse Hillslope Erosion"));
+	case ECubusGenerationLoaderStage::Deposition:
+		return FText::FromString(TEXT("Building Floodplains and Alluvial Fans"));
+	case ECubusGenerationLoaderStage::FineErosion:
+		return FText::FromString(TEXT("Cutting Fine Gullies and Weathering"));
+	case ECubusGenerationLoaderStage::SupportChunks:
+	case ECubusGenerationLoaderStage::GameplayChunks:
+	case ECubusGenerationLoaderStage::TerrainLOD:
+		return FText::FromString(TEXT("Transferring Generated World"));
+	case ECubusGenerationLoaderStage::Complete:
+		return FText::FromString(TEXT("Terrain Generation Complete"));
+	case ECubusGenerationLoaderStage::Failed:
+		return FText::FromString(TEXT("Generation Failed"));
+	default:
+		return FText::GetEmpty();
+	}
 }
 
-bool ACubusWorldGenerationLoaderActor::GetGeneratedHeightMeters(
-    const double WorldXmeters,
-    const double WorldYmeters,
-    float& OutHeightMeters) const
+bool ACubusWorldGenerationLoaderActor::GetGeneratedHeightMeters(const double WorldXmeters, const double WorldYmeters,
+																float& OutHeightMeters) const
 {
-    const FIntPoint TileCoordinate = FCubusTerrainRasterBuilder::WorldToTileCoordinate(
-        WorldXmeters,
-        WorldYmeters,
-        RasterSettings);
+	const FIntPoint TileCoordinate = FCubusTerrainRasterBuilder::WorldToTileCoordinate(WorldXmeters, WorldYmeters, RasterSettings);
 
-    const FCubusTerrainRasterTile* Tile = TerrainTiles.Find(TileCoordinate);
-    if (Tile == nullptr || !Tile->IsValid())
-    {
-        return false;
-    }
+	const FCubusTerrainRasterTile* Tile = TerrainTiles.Find(TileCoordinate);
+	if (Tile == nullptr || !Tile->IsValid())
+	{
+		return false;
+	}
 
-    OutHeightMeters = Tile->SampleHeightMeters(WorldXmeters, WorldYmeters);
-    return true;
+	OutHeightMeters = Tile->SampleHeightMeters(WorldXmeters, WorldYmeters);
+	return true;
 }
 
-bool ACubusWorldGenerationLoaderActor::GetLivePreviewHeightField(
-    const int32 Resolution,
-    TArray<float>& OutHeights,
-    TArray<uint8>& OutValid) const
+bool ACubusWorldGenerationLoaderActor::GetLivePreviewHeightField(const int32 Resolution, TArray<float>& OutHeights,
+																 TArray<uint8>& OutValid) const
 {
-    const int32 SafeResolution = FMath::Clamp(Resolution, 2, 1024);
-    const int32 SampleCount = SafeResolution * SafeResolution;
-    OutHeights.SetNumUninitialized(SampleCount);
-    OutValid.Init(0, SampleCount);
+	const int32 SafeResolution = FMath::Clamp(Resolution, 2, 1024);
+	const int32 SampleCount	   = SafeResolution * SafeResolution;
+	OutHeights.SetNumUninitialized(SampleCount);
+	OutValid.Init(0, SampleCount);
 
-    const FBox2D Bounds = GetGenerationBoundsMeters();
-    const FVector2D Size = Bounds.GetSize();
-    bool bAnyValid = false;
+	const FBox2D	Bounds	  = GetGenerationBoundsMeters();
+	const FVector2D Size	  = Bounds.GetSize();
+	bool			bAnyValid = false;
 
-    for (int32 Y = 0; Y < SafeResolution; ++Y)
-    {
-        const double V = static_cast<double>(Y) / static_cast<double>(SafeResolution - 1);
-        const double WorldY = Bounds.Min.Y + V * Size.Y;
-        for (int32 X = 0; X < SafeResolution; ++X)
-        {
-            const double U = static_cast<double>(X) / static_cast<double>(SafeResolution - 1);
-            const double WorldX = Bounds.Min.X + U * Size.X;
-            const int32 Index = Y * SafeResolution + X;
-            float HeightMeters = 0.0f;
-            if (GetGeneratedHeightMeters(WorldX, WorldY, HeightMeters))
-            {
-                OutHeights[Index] = HeightMeters;
-                OutValid[Index] = 1;
-                bAnyValid = true;
-            }
-            else
-            {
-                OutHeights[Index] = 0.0f;
-            }
-        }
-    }
+	for (int32 Y = 0; Y < SafeResolution; ++Y)
+	{
+		const double V		= static_cast<double>(Y) / static_cast<double>(SafeResolution - 1);
+		const double WorldY = Bounds.Min.Y + V * Size.Y;
+		for (int32 X = 0; X < SafeResolution; ++X)
+		{
+			const double U			  = static_cast<double>(X) / static_cast<double>(SafeResolution - 1);
+			const double WorldX		  = Bounds.Min.X + U * Size.X;
+			const int32	 Index		  = Y * SafeResolution + X;
+			float		 HeightMeters = 0.0f;
+			if (GetGeneratedHeightMeters(WorldX, WorldY, HeightMeters))
+			{
+				OutHeights[Index] = HeightMeters;
+				OutValid[Index]	  = 1;
+				bAnyValid		  = true;
+			}
+			else
+			{
+				OutHeights[Index] = 0.0f;
+			}
+		}
+	}
 
-    return bAnyValid;
+	return bAnyValid;
 }
 
 void ACubusWorldGenerationLoaderActor::ResetSession()
 {
-    if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0))
-    {
-        if (PlayerController->GetPawn() == RuntimeStreamingPawn)
-        {
-            PlayerController->UnPossess();
-        }
-    }
+	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0))
+	{
+		if (PlayerController->GetPawn() == RuntimeStreamingPawn)
+		{
+			PlayerController->UnPossess();
+		}
+	}
 
-    if (IsValid(RuntimeStreamingPawn))
-    {
-        RuntimeStreamingPawn->Destroy();
-    }
-    if (IsValid(RuntimeLodWorld))
-    {
-        RuntimeLodWorld->Destroy();
-    }
-    if (IsValid(RuntimeBlockWorld))
-    {
-        RuntimeBlockWorld->Destroy();
-    }
+	if (IsValid(RuntimeStreamingPawn))
+	{
+		RuntimeStreamingPawn->Destroy();
+	}
+	if (IsValid(RuntimeLodWorld))
+	{
+		RuntimeLodWorld->Destroy();
+	}
+	if (IsValid(RuntimeBlockWorld))
+	{
+		RuntimeBlockWorld->Destroy();
+	}
 
-    RuntimeStreamingPawn = nullptr;
-    RuntimeLodWorld = nullptr;
-    RuntimeBlockWorld = nullptr;
+	RuntimeStreamingPawn = nullptr;
+	RuntimeLodWorld		 = nullptr;
+	RuntimeBlockWorld	 = nullptr;
 
-    Stage = ECubusGenerationLoaderStage::WaitingForSeed;
-    StageProgress = 0.0f;
-    OverallProgress = 0.0f;
-    CurrentWorkIndex = 0;
-    TerrainTileQueue.Reset();
-    DrainageRegionQueue.Reset();
-    TerrainTiles.Reset();
-    DrainageSegments.Reset();
+	Stage			 = ECubusGenerationLoaderStage::WaitingForSeed;
+	StageProgress	 = 0.0f;
+	OverallProgress	 = 0.0f;
+	CurrentWorkIndex = 0;
+	TerrainTileQueue.Reset();
+	DrainageRegionQueue.Reset();
+	TerrainTiles.Reset();
+	DrainageSegments.Reset();
 
-    // PreviewTexture is a UI resource, not generation-session state. The WBP
-    // keeps a brush reference to this exact UTexture2D object after BeginPlay.
-    // Replacing it here when Generate is pressed leaves the widget displaying
-    // the old texture while generation uploads pixels into a newly-created one.
-    // Keep both the texture and its backing arrays alive; ClearPreview() resets
-    // their contents immediately after a new session begins.
+	// PreviewTexture is a UI resource, not generation-session state. The WBP
+	// keeps a brush reference to this exact UTexture2D object after BeginPlay.
+	// Replacing it here when Generate is pressed leaves the widget displaying
+	// the old texture while generation uploads pixels into a newly-created one.
+	// Keep both the texture and its backing arrays alive; ClearPreview() resets
+	// their contents immediately after a new session begins.
 }
 
 void ACubusWorldGenerationLoaderActor::BuildSettings()
 {
-    ErosionSettings = FCubusTerrainErosionSettings();
-    ErosionSettings.Iterations = FMath::Clamp(ErosionIterations, 1, 12);
-    ErosionSettings.TalusAngleDegrees = FMath::Clamp(ErosionTalusAngleDegrees, 5.0f, 60.0f);
-    ErosionSettings.ThermalTransport = 0.23f;
-    ErosionSettings.ConcavityIncision = 0.20f;
-    ErosionSettings.MaxIncisionPerIterationMeters = 0.55f;
-    ErosionSettings.MinimumIncisionSlopeDegrees = 2.5f;
-    ErosionSettings.HillslopeDiffusion = 0.045f;
+	const float GenerationSpanKm = FMath::Max(0.5f, static_cast<float>(FMath::Max(GenerationSizeKm.X, GenerationSizeKm.Y)));
 
-    DepositionSettings = FCubusTerrainDepositionSettings();
-    DepositionSettings.Iterations = FMath::Clamp(DepositionIterations, 1, 8);
+	ErosionSettings								  = FCubusTerrainErosionSettings();
+	ErosionSettings.Iterations					  = FMath::Clamp(ErosionIterations, 1, 12);
+	ErosionSettings.TalusAngleDegrees			  = FMath::Clamp(ErosionTalusAngleDegrees, 5.0f, 60.0f);
+	ErosionSettings.ThermalTransport			  = 0.26f;
+	ErosionSettings.ConcavityIncision			  = 0.03f;
+	ErosionSettings.MaxIncisionPerIterationMeters = 0.08f;
+	ErosionSettings.MinimumIncisionSlopeDegrees	  = 2.5f;
+	ErosionSettings.HillslopeDiffusion			  = 0.045f;
 
-    FineErosionSettings = FCubusTerrainErosionSettings();
-    FineErosionSettings.Iterations = FMath::Clamp(FineErosionIterations, 1, 8);
-    FineErosionSettings.TalusAngleDegrees = 36.0f;
-    FineErosionSettings.ThermalTransport = 0.11f;
-    FineErosionSettings.ConcavityIncision = 0.42f;
-    FineErosionSettings.MaxIncisionPerIterationMeters = 0.38f;
-    FineErosionSettings.MinimumIncisionSlopeDegrees = 1.4f;
-    FineErosionSettings.HillslopeDiffusion = 0.018f;
+	DepositionSettings			  = FCubusTerrainDepositionSettings();
+	DepositionSettings.Iterations = FMath::Clamp(DepositionIterations, 1, 8);
 
-    RasterSettings = FCubusTerrainRasterSettings();
-    RasterSettings.SampleSpacingMeters = FMath::Max(0.25f, DEMSampleSpacingMeters);
-    RasterSettings.TileSizeMeters = FMath::Max(64.0f, DEMTileSizeMeters);
-    RasterSettings.HaloSamples = FMath::Max(
-        2,
-        ErosionSettings.Iterations +
-        DepositionSettings.Iterations +
-        FineErosionSettings.Iterations + 3);
-    RasterSettings.Structure.Seed = WorldSeed;
+	FineErosionSettings								  = FCubusTerrainErosionSettings();
+	FineErosionSettings.Iterations					  = FMath::Clamp(FineErosionIterations, 1, 8);
+	FineErosionSettings.TalusAngleDegrees			  = 36.0f;
+	FineErosionSettings.ThermalTransport			  = 0.05f;
+	FineErosionSettings.ConcavityIncision			  = 0.0f;
+	FineErosionSettings.MaxIncisionPerIterationMeters = 0.0f;
+	FineErosionSettings.MinimumIncisionSlopeDegrees	  = 1.4f;
+	FineErosionSettings.HillslopeDiffusion			  = 0.018f;
 
-    DrainageSettings = FCubusTerrainDrainageSettings();
-    DrainageSettings.Raster = RasterSettings;
-    DrainageSettings.AnalysisCellSizeMeters = FMath::Max(2.0f, DrainageCellSizeMeters);
-    DrainageSettings.StreamSourceAreaSquareKm = FMath::Max(0.001f, StreamSourceAreaSquareKm);
+	RasterSettings					   = FCubusTerrainRasterSettings();
+	RasterSettings.SampleSpacingMeters = FMath::Max(0.25f, DEMSampleSpacingMeters);
+	RasterSettings.TileSizeMeters	   = FMath::Max(64.0f, DEMTileSizeMeters);
+	RasterSettings.HaloSamples =
+		FMath::Max(2, ErosionSettings.Iterations + DepositionSettings.Iterations + FineErosionSettings.Iterations + 3);
+	RasterSettings.Structure.Seed					  = WorldSeed;
+	RasterSettings.Structure.RegionalReliefMeters	  = FMath::Clamp(GenerationSpanKm * 16.0f, 55.0f, 220.0f);
+	RasterSettings.Structure.RegionalScaleKm		  = FMath::Max(8.0f, GenerationSpanKm * 3.0f);
+	RasterSettings.Structure.MountainSystemSpacingKm  = FMath::Max(8.0f, GenerationSpanKm * 2.5f);
+	RasterSettings.Structure.RangeNodeSpacingKm		  = FMath::Max(3.0f, GenerationSpanKm * 0.75f);
+	RasterSettings.Structure.RangeCoreHalfWidthKm	  = FMath::Max(0.45f, GenerationSpanKm * 0.12f);
+	RasterSettings.Structure.RangeShoulderHalfWidthKm = FMath::Max(1.4f, GenerationSpanKm * 0.45f);
+	RasterSettings.Structure.RangeReliefMeters		  = FMath::Clamp(GenerationSpanKm * 90.0f, 240.0f, 900.0f);
+	RasterSettings.Structure.MassifRadiusKm			  = FMath::Max(1.0f, GenerationSpanKm * 0.42f);
+	RasterSettings.Structure.MassifReliefMeters		  = RasterSettings.Structure.RangeReliefMeters * 0.25f;
+	RasterSettings.Structure.PassHalfWidthKm		  = FMath::Max(0.35f, GenerationSpanKm * 0.12f);
+	RasterSettings.Structure.PassDepthMeters		  = RasterSettings.Structure.RangeReliefMeters * 0.20f;
+	RasterSettings.Structure.BasinCellSizeKm		  = FMath::Max(8.0f, GenerationSpanKm * 2.25f);
+	RasterSettings.Structure.BasinRadiusKm			  = FMath::Max(3.0f, GenerationSpanKm * 1.2f);
+	RasterSettings.Structure.BasinDepthMeters		  = FMath::Clamp(GenerationSpanKm * 20.0f, 55.0f, 200.0f);
+	RasterSettings.Structure.HillScaleKm			  = FMath::Max(0.8f, GenerationSpanKm * 0.35f);
+	RasterSettings.Structure.HillReliefMeters		  = FMath::Clamp(GenerationSpanKm * 18.0f, 45.0f, 160.0f);
+	RasterSettings.Structure.SpurScaleKm			  = FMath::Max(0.28f, GenerationSpanKm * 0.12f);
+	RasterSettings.Structure.SpurReliefMeters		  = RasterSettings.Structure.HillReliefMeters * 0.20f;
+	RasterSettings.Structure.SwaleScaleMeters		  = FMath::Max(120.0f, GenerationSpanKm * 45.0f);
+	RasterSettings.Structure.SwaleDepthMeters		  = 0.0f;
+	RasterSettings.Structure.FineScaleMeters		  = FMath::Max(48.0f, GenerationSpanKm * 16.0f);
+	RasterSettings.Structure.FineReliefMeters		  = FMath::Clamp(GenerationSpanKm * 0.75f, 2.0f, 9.0f);
+	RasterSettings.Structure.MorphologyWarpMeters	  = FMath::Max(160.0f, GenerationSpanKm * 65.0f);
 
-    const FBox2D Bounds = GetGenerationBoundsMeters();
-    const FVector2D Size = Bounds.GetSize();
-    const double LongestSideMeters = FMath::Max(Size.X, Size.Y);
-    const int32 RequiredCells = FMath::CeilToInt(
-        LongestSideMeters / static_cast<double>(DrainageSettings.AnalysisCellSizeMeters));
-    DrainageSettings.RegionCellCount = FMath::Clamp(RequiredCells, 32, 512);
-    DrainageSettings.RegionOriginMeters = Bounds.Min;
+	DrainageSettings						  = FCubusTerrainDrainageSettings();
+	DrainageSettings.Raster					  = RasterSettings;
+	DrainageSettings.AnalysisCellSizeMeters	  = FMath::Max(2.0f, DrainageCellSizeMeters);
+	DrainageSettings.StreamSourceAreaSquareKm = FMath::Max(0.45f, StreamSourceAreaSquareKm);
 
-    CarvingSettings = FCubusTerrainCarvingSettings();
-    CarvingSettings.Drainage = DrainageSettings;
-    CarvingSettings.SegmentBucketSizeMeters = 96.0f;
+	const FBox2D	Bounds			  = GetGenerationBoundsMeters();
+	const FVector2D Size			  = Bounds.GetSize();
+	const double	LongestSideMeters = FMath::Max(Size.X, Size.Y);
+	const int32		RequiredCells	  = FMath::CeilToInt(LongestSideMeters / static_cast<double>(DrainageSettings.AnalysisCellSizeMeters));
+	DrainageSettings.RegionCellCount  = FMath::Clamp(RequiredCells, 32, 512);
+	DrainageSettings.RegionOriginMeters = Bounds.Min;
+
+	CarvingSettings									   = FCubusTerrainCarvingSettings();
+	CarvingSettings.Drainage						   = DrainageSettings;
+	CarvingSettings.SegmentBucketSizeMeters			   = 96.0f;
+	CarvingSettings.HeadwaterValleyHalfWidthMeters	   = 12.0f;
+	CarvingSettings.HeadwaterValleyDepthMeters		   = 1.2f;
+	CarvingSettings.HeadwaterFloodplainHalfWidthMeters = 3.5f;
+	CarvingSettings.HeadwaterFloodplainDepthMeters	   = 0.35f;
+	CarvingSettings.HeadwaterChannelDepthMeters		   = 0.45f;
+	CarvingSettings.MajorValleyHalfWidthMeters		   = FMath::Clamp(GenerationSpanKm * 45.0f, 120.0f, 420.0f);
+	CarvingSettings.MajorValleyDepthMeters			   = FMath::Clamp(GenerationSpanKm * 6.0f, 16.0f, 64.0f);
+	CarvingSettings.MajorFloodplainHalfWidthMeters	   = CarvingSettings.MajorValleyHalfWidthMeters * 0.38f;
+	CarvingSettings.MajorFloodplainDepthMeters		   = CarvingSettings.MajorValleyDepthMeters * 0.12f;
+	CarvingSettings.MajorChannelHalfWidthMeters		   = FMath::Clamp(GenerationSpanKm * 3.5f, 8.0f, 32.0f);
+	CarvingSettings.MajorChannelDepthMeters			   = FMath::Clamp(GenerationSpanKm * 0.75f, 2.0f, 8.0f);
+	CarvingSettings.AreaExponent					   = 0.65f;
 }
 
 void ACubusWorldGenerationLoaderActor::BuildWorkQueues()
 {
-    const FBox2D Bounds = GetGenerationBoundsMeters();
-    const double TileSize = FCubusTerrainRasterBuilder::ResolveTileSizeMeters(RasterSettings);
+	const FBox2D Bounds	  = GetGenerationBoundsMeters();
+	const double TileSize = FCubusTerrainRasterBuilder::ResolveTileSizeMeters(RasterSettings);
 
-    const FIntPoint MinimumTile(
-        FMath::FloorToInt(Bounds.Min.X / TileSize),
-        FMath::FloorToInt(Bounds.Min.Y / TileSize));
-    const FIntPoint MaximumTile(
-        FMath::FloorToInt((Bounds.Max.X - UE_SMALL_NUMBER) / TileSize),
-        FMath::FloorToInt((Bounds.Max.Y - UE_SMALL_NUMBER) / TileSize));
+	const FIntPoint MinimumTile(FMath::FloorToInt(Bounds.Min.X / TileSize), FMath::FloorToInt(Bounds.Min.Y / TileSize));
+	const FIntPoint MaximumTile(FMath::FloorToInt((Bounds.Max.X - UE_SMALL_NUMBER) / TileSize),
+								FMath::FloorToInt((Bounds.Max.Y - UE_SMALL_NUMBER) / TileSize));
 
-    for (int32 Y = MinimumTile.Y; Y <= MaximumTile.Y; ++Y)
-    {
-        for (int32 X = MinimumTile.X; X <= MaximumTile.X; ++X)
-        {
-            TerrainTileQueue.Add(FIntPoint(X, Y));
-        }
-    }
+	for (int32 Y = MinimumTile.Y; Y <= MaximumTile.Y; ++Y)
+	{
+		for (int32 X = MinimumTile.X; X <= MaximumTile.X; ++X)
+		{
+			TerrainTileQueue.Add(FIntPoint(X, Y));
+		}
+	}
 
-    const double RegionSize =
-        static_cast<double>(FMath::Clamp(DrainageSettings.RegionCellCount, 32, 512)) *
-        static_cast<double>(DrainageSettings.AnalysisCellSizeMeters);
+	const double RegionSize = static_cast<double>(FMath::Clamp(DrainageSettings.RegionCellCount, 32, 512)) *
+							  static_cast<double>(DrainageSettings.AnalysisCellSizeMeters);
 
-    const FIntPoint MinimumRegion(
-        FMath::FloorToInt((Bounds.Min.X - DrainageSettings.RegionOriginMeters.X) / RegionSize),
-        FMath::FloorToInt((Bounds.Min.Y - DrainageSettings.RegionOriginMeters.Y) / RegionSize));
-    const FIntPoint MaximumRegion(
-        FMath::FloorToInt((Bounds.Max.X - DrainageSettings.RegionOriginMeters.X - UE_SMALL_NUMBER) / RegionSize),
-        FMath::FloorToInt((Bounds.Max.Y - DrainageSettings.RegionOriginMeters.Y - UE_SMALL_NUMBER) / RegionSize));
+	const FIntPoint MinimumRegion(FMath::FloorToInt((Bounds.Min.X - DrainageSettings.RegionOriginMeters.X) / RegionSize),
+								  FMath::FloorToInt((Bounds.Min.Y - DrainageSettings.RegionOriginMeters.Y) / RegionSize));
+	const FIntPoint MaximumRegion(FMath::FloorToInt((Bounds.Max.X - DrainageSettings.RegionOriginMeters.X - UE_SMALL_NUMBER) / RegionSize),
+								  FMath::FloorToInt((Bounds.Max.Y - DrainageSettings.RegionOriginMeters.Y - UE_SMALL_NUMBER) / RegionSize));
 
-    for (int32 Y = MinimumRegion.Y; Y <= MaximumRegion.Y; ++Y)
-    {
-        for (int32 X = MinimumRegion.X; X <= MaximumRegion.X; ++X)
-        {
-            DrainageRegionQueue.Add(FIntPoint(X, Y));
-        }
-    }
+	for (int32 Y = MinimumRegion.Y; Y <= MaximumRegion.Y; ++Y)
+	{
+		for (int32 X = MinimumRegion.X; X <= MaximumRegion.X; ++X)
+		{
+			DrainageRegionQueue.Add(FIntPoint(X, Y));
+		}
+	}
 }
 
 void ACubusWorldGenerationLoaderActor::BeginStage(const ECubusGenerationLoaderStage NewStage)
 {
-    Stage = NewStage;
-    StageProgress = 0.0f;
-    CurrentWorkIndex = 0;
-    OnStageChanged.Broadcast(Stage);
-    OnProgressChanged.Broadcast(Stage, StageProgress);
+	Stage			 = NewStage;
+	StageProgress	 = 0.0f;
+	CurrentWorkIndex = 0;
+	OnStageChanged.Broadcast(Stage);
+	OnProgressChanged.Broadcast(Stage, StageProgress);
 }
 
 void ACubusWorldGenerationLoaderActor::BeginRuntimeTerrainLoading()
 {
-    if (!IsValid(GetWorld()) || GameplayLevelName.IsNone())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	if (!IsValid(GetWorld()) || GameplayLevelName.IsNone())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    // The 2D preview buffer has been maintained live throughout generation.
-    // Rebuild/upload once more here so the runtime handoff gets the final DEM.
-    EnsurePreviewTexture();
-    RebuildTerrainPreview(false);
-    UploadPreview();
-    PublishPreviewSnapshotToRuntime();
+	// The 2D preview buffer has been maintained live throughout generation.
+	// Rebuild/upload once more here so the runtime handoff gets the final DEM.
+	EnsurePreviewTexture();
+	RebuildTerrainPreview(false);
+	UploadPreview();
+	PublishPreviewSnapshotToRuntime();
 
-    FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(FVector2D(0.5, 0.5));
+	FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(FVector2D(0.5, 0.5));
 
-    Stage = ECubusGenerationLoaderStage::Complete;
-    StageProgress = 1.0f;
-    OverallProgress = 1.0f;
-    OnStageChanged.Broadcast(Stage);
-    OnProgressChanged.Broadcast(Stage, 1.0f);
-    OnGenerationFinished.Broadcast();
+	Stage			= ECubusGenerationLoaderStage::Complete;
+	StageProgress	= 1.0f;
+	OverallProgress = 1.0f;
+	OnStageChanged.Broadcast(Stage);
+	OnProgressChanged.Broadcast(Stage, 1.0f);
+	OnGenerationFinished.Broadcast();
 
-    UE_LOG(
-        LogTemp,
-        Display,
-        TEXT("Cubus DEM generation complete: seed=%d tiles=%d; opening gameplay spawn map %s"),
-        WorldSeed,
-        FCubusGeneratedTerrainRuntime::GetTileCount(),
-        *GameplayLevelName.ToString());
+	TArray<float>	HeightSurvey;
+	const int32		PreviewResolution = FMath::Clamp(PreviewTextureResolution, 64, 2048);
+	constexpr int32 SurveyStride	  = 8;
+	HeightSurvey.Reserve((PreviewResolution / SurveyStride + 1) * (PreviewResolution / SurveyStride + 1));
+	double			SlopeDegreesTotal = 0.0;
+	int32			SlopeSampleCount  = 0;
+	int32			SteepSampleCount  = 0;
+	const FVector2D SurveyCellMeters  = GetGenerationBoundsMeters().GetSize() / static_cast<double>(PreviewResolution - 1);
+	for (int32 Y = SurveyStride; Y < PreviewResolution - SurveyStride; Y += SurveyStride)
+	{
+		for (int32 X = SurveyStride; X < PreviewResolution - SurveyStride; X += SurveyStride)
+		{
+			const int32 Index = Y * PreviewResolution + X;
+			if (!PreviewHeightMeters.IsValidIndex(Index) || PreviewHeightMeters[Index] == MAX_flt)
+			{
+				continue;
+			}
 
-    UGameplayStatics::OpenLevel(this, GameplayLevelName);
+			HeightSurvey.Add(PreviewHeightMeters[Index]);
+			const float Left  = PreviewHeightMeters[Index - SurveyStride];
+			const float Right = PreviewHeightMeters[Index + SurveyStride];
+			const float Down  = PreviewHeightMeters[Index - SurveyStride * PreviewResolution];
+			const float Up	  = PreviewHeightMeters[Index + SurveyStride * PreviewResolution];
+			if (Left == MAX_flt || Right == MAX_flt || Down == MAX_flt || Up == MAX_flt)
+			{
+				continue;
+			}
+
+			const double GradientX	  = static_cast<double>(Right - Left) / (2.0 * SurveyStride * SurveyCellMeters.X);
+			const double GradientY	  = static_cast<double>(Up - Down) / (2.0 * SurveyStride * SurveyCellMeters.Y);
+			const double SlopeDegrees = FMath::RadiansToDegrees(FMath::Atan(FMath::Sqrt(GradientX * GradientX + GradientY * GradientY)));
+			SlopeDegreesTotal += SlopeDegrees;
+			++SlopeSampleCount;
+			SteepSampleCount += SlopeDegrees >= 35.0 ? 1 : 0;
+		}
+	}
+
+	HeightSurvey.Sort();
+	if (!HeightSurvey.IsEmpty())
+	{
+		const float	 P05			  = HeightSurvey[FMath::FloorToInt(static_cast<float>(HeightSurvey.Num() - 1) * 0.05f)];
+		const float	 P50			  = HeightSurvey[(HeightSurvey.Num() - 1) / 2];
+		const float	 P95			  = HeightSurvey[FMath::FloorToInt(static_cast<float>(HeightSurvey.Num() - 1) * 0.95f)];
+		const double MeanSlopeDegrees = SlopeSampleCount > 0 ? SlopeDegreesTotal / static_cast<double>(SlopeSampleCount) : 0.0;
+		const double SteepPercent =
+			SlopeSampleCount > 0 ? 100.0 * static_cast<double>(SteepSampleCount) / static_cast<double>(SlopeSampleCount) : 0.0;
+		UE_LOG(LogTemp, Display,
+			   TEXT("Cubus DEM quality: p05=%.1fm median=%.1fm p95=%.1fm robust-relief=%.1fm mean-slope=%.1fdeg steep35=%.1f%% samples=%d"),
+			   P05, P50, P95, P95 - P05, MeanSlopeDegrees, SteepPercent, HeightSurvey.Num());
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("Cubus DEM generation complete: seed=%d tiles=%d; opening gameplay spawn map %s"), WorldSeed,
+		   FCubusGeneratedTerrainRuntime::GetTileCount(), *GameplayLevelName.ToString());
+
+	UGameplayStatics::OpenLevel(this, GameplayLevelName);
 }
 
-void ACubusWorldGenerationLoaderActor::UpdateRuntimeLoadingProgress(
-    const float InStageProgress,
-    const float StageIndex)
+void ACubusWorldGenerationLoaderActor::UpdateRuntimeLoadingProgress(const float InStageProgress, const float StageIndex)
 {
-    StageProgress = FMath::Clamp(InStageProgress, 0.0f, 1.0f);
-    OverallProgress = StageProgress;
-    (void)StageIndex;
-    OnProgressChanged.Broadcast(Stage, StageProgress);
+	StageProgress	= FMath::Clamp(InStageProgress, 0.0f, 1.0f);
+	OverallProgress = StageProgress;
+	(void) StageIndex;
+	OnProgressChanged.Broadcast(Stage, StageProgress);
 }
 
 void ACubusWorldGenerationLoaderActor::ProcessRuntimeTerrainLoading() {}
@@ -375,399 +439,378 @@ void ACubusWorldGenerationLoaderActor::FinishCurrentPipeline() {}
 
 void ACubusWorldGenerationLoaderActor::ProcessStructuralDEM()
 {
-    if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
-    {
-        RebuildTerrainPreview(false);
-        UploadPreview();
-        BeginStage(ECubusGenerationLoaderStage::Drainage);
-        return;
-    }
+	if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
+	{
+		RebuildTerrainPreview(false);
+		UploadPreview();
+		if (bEnableExperimentalTerrainRefinement)
+		{
+			BeginStage(ECubusGenerationLoaderStage::Drainage);
+		}
+		else
+		{
+			BeginRuntimeTerrainLoading();
+		}
+		return;
+	}
 
-    const FIntPoint TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
-    FCubusTerrainRasterTile Tile = FCubusTerrainRasterBuilder::BuildTile(TileCoordinate, RasterSettings);
-    if (!Tile.IsValid())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	const FIntPoint			TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
+	FCubusTerrainRasterTile Tile		   = FCubusTerrainRasterBuilder::BuildTile(TileCoordinate, RasterSettings);
+	if (!Tile.IsValid())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    TerrainTiles.Add(TileCoordinate, Tile);
-    FCubusGeneratedTerrainRuntime::StoreTile(Tile);
-    PaintTileToPreview(Tile);
-    RebuildTerrainPreview(false);
+	TerrainTiles.Add(TileCoordinate, Tile);
+	FCubusGeneratedTerrainRuntime::StoreTile(Tile);
+	PaintTileToPreview(Tile);
+	RebuildTerrainPreview(false);
 
-    ++CurrentWorkIndex;
-    SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
-    UploadPreview();
+	++CurrentWorkIndex;
+	SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
+	UploadPreview();
 }
 
 void ACubusWorldGenerationLoaderActor::ProcessDrainage()
 {
-    if (!DrainageRegionQueue.IsValidIndex(CurrentWorkIndex))
-    {
-        BeginStage(ECubusGenerationLoaderStage::TerrainCarving);
-        return;
-    }
+	if (!DrainageRegionQueue.IsValidIndex(CurrentWorkIndex))
+	{
+		BeginStage(ECubusGenerationLoaderStage::TerrainCarving);
+		return;
+	}
 
-    const FIntPoint RegionCoordinate = DrainageRegionQueue[CurrentWorkIndex];
-    const double RegionSize =
-        static_cast<double>(FMath::Clamp(DrainageSettings.RegionCellCount, 32, 512)) *
-        static_cast<double>(DrainageSettings.AnalysisCellSizeMeters);
+	const FIntPoint RegionCoordinate = DrainageRegionQueue[CurrentWorkIndex];
+	const double	RegionSize		 = static_cast<double>(FMath::Clamp(DrainageSettings.RegionCellCount, 32, 512)) *
+									   static_cast<double>(DrainageSettings.AnalysisCellSizeMeters);
 
-    const FVector2D Minimum = DrainageSettings.RegionOriginMeters + FVector2D(
-        static_cast<double>(RegionCoordinate.X) * RegionSize,
-        static_cast<double>(RegionCoordinate.Y) * RegionSize);
-    const FVector2D Maximum = Minimum + FVector2D(RegionSize, RegionSize);
+	const FVector2D Minimum = DrainageSettings.RegionOriginMeters + FVector2D(static_cast<double>(RegionCoordinate.X) * RegionSize,
+																			  static_cast<double>(RegionCoordinate.Y) * RegionSize);
+	const FVector2D Maximum = Minimum + FVector2D(RegionSize, RegionSize);
 
-    TArray<FCubusTerrainDrainageSegment> Segments;
-    FCubusTerrainDrainage::CollectSegments(FBox2D(Minimum, Maximum), DrainageSettings, Segments);
-    DrainageSegments.Append(Segments);
+	TArray<FCubusTerrainDrainageSegment> Segments;
+	FCubusTerrainDrainage::CollectSegments(FBox2D(Minimum, Maximum), DrainageSettings, Segments);
+	DrainageSegments.Append(Segments);
 
-    ++CurrentWorkIndex;
-    SetWorkProgress(CurrentWorkIndex, DrainageRegionQueue.Num());
+	++CurrentWorkIndex;
+	SetWorkProgress(CurrentWorkIndex, DrainageRegionQueue.Num());
 }
 
 void ACubusWorldGenerationLoaderActor::ProcessTerrainCarving()
 {
-    if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
-    {
-        RebuildTerrainPreview(false);
-        UploadPreview();
-        BeginStage(ECubusGenerationLoaderStage::Erosion);
-        return;
-    }
+	if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
+	{
+		RebuildTerrainPreview(false);
+		UploadPreview();
+		BeginStage(ECubusGenerationLoaderStage::Erosion);
+		return;
+	}
 
-    const FIntPoint TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
-    FCubusTerrainRasterTile* Tile = TerrainTiles.Find(TileCoordinate);
-    if (Tile == nullptr || !Tile->IsValid())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	const FIntPoint			 TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
+	FCubusTerrainRasterTile* Tile			= TerrainTiles.Find(TileCoordinate);
+	if (Tile == nullptr || !Tile->IsValid())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    FCubusTerrainRasterTile Carved = FCubusTerrainCarving::CarveTile(*Tile, CarvingSettings);
-    if (!Carved.IsValid())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	FCubusTerrainRasterTile Carved = FCubusTerrainCarving::CarveTile(*Tile, CarvingSettings);
+	if (!Carved.IsValid())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    *Tile = MoveTemp(Carved);
-    FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
-    PaintTileToPreview(*Tile);
-    RebuildTerrainPreview(false);
+	*Tile = MoveTemp(Carved);
+	FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
+	PaintTileToPreview(*Tile);
+	RebuildTerrainPreview(false);
 
-    ++CurrentWorkIndex;
-    SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
-    UploadPreview();
+	++CurrentWorkIndex;
+	SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
+	UploadPreview();
 }
 
 void ACubusWorldGenerationLoaderActor::ProcessErosion()
 {
-    if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
-    {
-        RebuildTerrainPreview(false);
-        UploadPreview();
-        BeginStage(ECubusGenerationLoaderStage::Deposition);
-        return;
-    }
+	if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
+	{
+		RebuildTerrainPreview(false);
+		UploadPreview();
+		BeginStage(ECubusGenerationLoaderStage::Deposition);
+		return;
+	}
 
-    const FIntPoint TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
-    FCubusTerrainRasterTile* Tile = TerrainTiles.Find(TileCoordinate);
-    if (Tile == nullptr || !Tile->IsValid())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	const FIntPoint			 TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
+	FCubusTerrainRasterTile* Tile			= TerrainTiles.Find(TileCoordinate);
+	if (Tile == nullptr || !Tile->IsValid())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    FCubusTerrainRasterTile Eroded = FCubusTerrainErosion::ErodeTile(*Tile, ErosionSettings);
-    if (!Eroded.IsValid())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	FCubusTerrainRasterTile Eroded = FCubusTerrainErosion::ErodeTile(*Tile, ErosionSettings);
+	if (!Eroded.IsValid())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    *Tile = MoveTemp(Eroded);
-    FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
-    PaintTileToPreview(*Tile);
-    RebuildTerrainPreview(false);
+	*Tile = MoveTemp(Eroded);
+	FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
+	PaintTileToPreview(*Tile);
+	RebuildTerrainPreview(false);
 
-    ++CurrentWorkIndex;
-    SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
-    UploadPreview();
+	++CurrentWorkIndex;
+	SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
+	UploadPreview();
 }
 
 void ACubusWorldGenerationLoaderActor::ProcessDeposition()
 {
-    if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
-    {
-        RebuildTerrainPreview(false);
-        UploadPreview();
-        BeginStage(ECubusGenerationLoaderStage::FineErosion);
-        return;
-    }
+	if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
+	{
+		RebuildTerrainPreview(false);
+		UploadPreview();
+		BeginStage(ECubusGenerationLoaderStage::FineErosion);
+		return;
+	}
 
-    const FIntPoint TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
-    FCubusTerrainRasterTile* Tile = TerrainTiles.Find(TileCoordinate);
-    if (Tile == nullptr || !Tile->IsValid())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	const FIntPoint			 TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
+	FCubusTerrainRasterTile* Tile			= TerrainTiles.Find(TileCoordinate);
+	if (Tile == nullptr || !Tile->IsValid())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    FCubusTerrainRasterTile Deposited = FCubusTerrainDeposition::DepositTile(
-        *Tile,
-        DepositionSettings,
-        CarvingSettings,
-        DrainageSegments);
-    if (!Deposited.IsValid())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	FCubusTerrainRasterTile Deposited = FCubusTerrainDeposition::DepositTile(*Tile, DepositionSettings, CarvingSettings, DrainageSegments);
+	if (!Deposited.IsValid())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    *Tile = MoveTemp(Deposited);
-    FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
-    PaintTileToPreview(*Tile);
-    RebuildTerrainPreview(false);
+	*Tile = MoveTemp(Deposited);
+	FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
+	PaintTileToPreview(*Tile);
+	RebuildTerrainPreview(false);
 
-    ++CurrentWorkIndex;
-    SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
-    UploadPreview();
+	++CurrentWorkIndex;
+	SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
+	UploadPreview();
 }
 
 void ACubusWorldGenerationLoaderActor::ProcessFineErosion()
 {
-    if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
-    {
-        RebuildTerrainPreview(false);
-        UploadPreview();
-        BeginRuntimeTerrainLoading();
-        return;
-    }
+	if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
+	{
+		RebuildTerrainPreview(false);
+		UploadPreview();
+		BeginRuntimeTerrainLoading();
+		return;
+	}
 
-    const FIntPoint TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
-    FCubusTerrainRasterTile* Tile = TerrainTiles.Find(TileCoordinate);
-    if (Tile == nullptr || !Tile->IsValid())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	const FIntPoint			 TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
+	FCubusTerrainRasterTile* Tile			= TerrainTiles.Find(TileCoordinate);
+	if (Tile == nullptr || !Tile->IsValid())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    FCubusTerrainRasterTile Refined = FCubusTerrainErosion::ErodeTile(*Tile, FineErosionSettings);
-    if (!Refined.IsValid())
-    {
-        BeginStage(ECubusGenerationLoaderStage::Failed);
-        return;
-    }
+	FCubusTerrainRasterTile Refined = FCubusTerrainErosion::ErodeTile(*Tile, FineErosionSettings);
+	if (!Refined.IsValid())
+	{
+		BeginStage(ECubusGenerationLoaderStage::Failed);
+		return;
+	}
 
-    *Tile = MoveTemp(Refined);
-    FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
-    PaintTileToPreview(*Tile);
-    RebuildTerrainPreview(false);
+	*Tile = MoveTemp(Refined);
+	FCubusGeneratedTerrainRuntime::StoreTileIfActive(*Tile);
+	PaintTileToPreview(*Tile);
+	RebuildTerrainPreview(false);
 
-    ++CurrentWorkIndex;
-    SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
-    UploadPreview();
+	++CurrentWorkIndex;
+	SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
+	UploadPreview();
 }
 
 FBox2D ACubusWorldGenerationLoaderActor::GetGenerationBoundsMeters() const
 {
-    const FVector2D HalfExtent(
-        FMath::Max(500.0, GenerationSizeKm.X * 500.0),
-        FMath::Max(500.0, GenerationSizeKm.Y * 500.0));
-    return FBox2D(-HalfExtent, HalfExtent);
+	const FVector2D HalfExtent(FMath::Max(500.0, GenerationSizeKm.X * 500.0), FMath::Max(500.0, GenerationSizeKm.Y * 500.0));
+	return FBox2D(-HalfExtent, HalfExtent);
 }
 
-void ACubusWorldGenerationLoaderActor::SetWorkProgress(
-    const int32 CompletedItems,
-    const int32 TotalItems)
+void ACubusWorldGenerationLoaderActor::SetWorkProgress(const int32 CompletedItems, const int32 TotalItems)
 {
-    StageProgress = TotalItems > 0
-        ? FMath::Clamp(static_cast<float>(CompletedItems) / static_cast<float>(TotalItems), 0.0f, 1.0f)
-        : 1.0f;
+	StageProgress = TotalItems > 0 ? FMath::Clamp(static_cast<float>(CompletedItems) / static_cast<float>(TotalItems), 0.0f, 1.0f) : 1.0f;
 
-    constexpr float TotalStageCount = 6.0f;
-    float StageIndex = 0.0f;
-    switch (Stage)
-    {
-    case ECubusGenerationLoaderStage::StructuralDEM:
-        StageIndex = 0.0f;
-        break;
-    case ECubusGenerationLoaderStage::Drainage:
-        StageIndex = 1.0f;
-        break;
-    case ECubusGenerationLoaderStage::TerrainCarving:
-        StageIndex = 2.0f;
-        break;
-    case ECubusGenerationLoaderStage::Erosion:
-        StageIndex = 3.0f;
-        break;
-    case ECubusGenerationLoaderStage::Deposition:
-        StageIndex = 4.0f;
-        break;
-    case ECubusGenerationLoaderStage::FineErosion:
-        StageIndex = 5.0f;
-        break;
-    default:
-        break;
-    }
+	constexpr float TotalStageCount = 6.0f;
+	float			StageIndex		= 0.0f;
+	switch (Stage)
+	{
+	case ECubusGenerationLoaderStage::StructuralDEM:
+		StageIndex = 0.0f;
+		break;
+	case ECubusGenerationLoaderStage::Drainage:
+		StageIndex = 1.0f;
+		break;
+	case ECubusGenerationLoaderStage::TerrainCarving:
+		StageIndex = 2.0f;
+		break;
+	case ECubusGenerationLoaderStage::Erosion:
+		StageIndex = 3.0f;
+		break;
+	case ECubusGenerationLoaderStage::Deposition:
+		StageIndex = 4.0f;
+		break;
+	case ECubusGenerationLoaderStage::FineErosion:
+		StageIndex = 5.0f;
+		break;
+	default:
+		break;
+	}
 
-    OverallProgress = FMath::Clamp((StageIndex + StageProgress) / TotalStageCount, 0.0f, 0.999f);
-    OnProgressChanged.Broadcast(Stage, StageProgress);
+	OverallProgress = FMath::Clamp((StageIndex + StageProgress) / TotalStageCount, 0.0f, 0.999f);
+	OnProgressChanged.Broadcast(Stage, StageProgress);
 }
 
 void ACubusWorldGenerationLoaderActor::EnsurePreviewTexture()
 {
-    const int32 Resolution = FMath::Clamp(PreviewTextureResolution, 64, 2048);
-    if (PreviewTexture != nullptr &&
-        PreviewTexture->GetSizeX() == Resolution &&
-        PreviewTexture->GetSizeY() == Resolution)
-    {
-        if (PreviewHeightMeters.Num() != Resolution * Resolution)
-        {
-            PreviewHeightMeters.Init(MAX_flt, Resolution * Resolution);
-        }
-        if (PreviewPixels.Num() != Resolution * Resolution)
-        {
-            PreviewPixels.SetNumZeroed(Resolution * Resolution);
-        }
-        return;
-    }
+	const int32 Resolution = FMath::Clamp(PreviewTextureResolution, 64, 2048);
+	if (PreviewTexture != nullptr && PreviewTexture->GetSizeX() == Resolution && PreviewTexture->GetSizeY() == Resolution)
+	{
+		if (PreviewHeightMeters.Num() != Resolution * Resolution)
+		{
+			PreviewHeightMeters.Init(MAX_flt, Resolution * Resolution);
+		}
+		if (PreviewPixels.Num() != Resolution * Resolution)
+		{
+			PreviewPixels.SetNumZeroed(Resolution * Resolution);
+		}
+		return;
+	}
 
-    PreviewTexture = UTexture2D::CreateTransient(Resolution, Resolution, PF_B8G8R8A8);
-    if (PreviewTexture != nullptr)
-    {
-        PreviewTexture->SRGB = true;
-        PreviewTexture->Filter = TF_Bilinear;
-        PreviewTexture->NeverStream = true;
-        PreviewTexture->UpdateResource();
-    }
+	PreviewTexture = UTexture2D::CreateTransient(Resolution, Resolution, PF_B8G8R8A8);
+	if (PreviewTexture != nullptr)
+	{
+		PreviewTexture->SRGB		= true;
+		PreviewTexture->Filter		= TF_Bilinear;
+		PreviewTexture->NeverStream = true;
+		PreviewTexture->UpdateResource();
+	}
 
-    PreviewHeightMeters.Init(MAX_flt, Resolution * Resolution);
-    PreviewPixels.SetNumZeroed(Resolution * Resolution);
+	PreviewHeightMeters.Init(MAX_flt, Resolution * Resolution);
+	PreviewPixels.SetNumZeroed(Resolution * Resolution);
 }
 
 void ACubusWorldGenerationLoaderActor::ClearPreview()
 {
-    EnsurePreviewTexture();
-    PreviewHeightMeters.Init(MAX_flt, PreviewPixels.Num());
-    for (FColor& Pixel : PreviewPixels)
-    {
-        Pixel = FColor(8, 8, 8, 255);
-    }
+	EnsurePreviewTexture();
+	PreviewHeightMeters.Init(MAX_flt, PreviewPixels.Num());
+	for (FColor& Pixel : PreviewPixels)
+	{
+		Pixel = FColor(8, 8, 8, 255);
+	}
 }
 
 void ACubusWorldGenerationLoaderActor::UploadPreview()
 {
-    if (PreviewTexture == nullptr ||
-        PreviewPixels.IsEmpty() ||
-        PreviewTexture->GetPlatformData() == nullptr)
-    {
-        return;
-    }
+	if (PreviewTexture == nullptr || PreviewPixels.IsEmpty() || PreviewTexture->GetPlatformData() == nullptr)
+	{
+		return;
+	}
 
-    FTexture2DMipMap& Mip = PreviewTexture->GetPlatformData()->Mips[0];
-    void* TextureData = Mip.BulkData.Lock(LOCK_READ_WRITE);
-    FMemory::Memcpy(
-        TextureData,
-        PreviewPixels.GetData(),
-        PreviewPixels.Num() * sizeof(FColor));
-    Mip.BulkData.Unlock();
-    PreviewTexture->UpdateResource();
+	FTexture2DMipMap& Mip		  = PreviewTexture->GetPlatformData()->Mips[0];
+	void*			  TextureData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+	FMemory::Memcpy(TextureData, PreviewPixels.GetData(), PreviewPixels.Num() * sizeof(FColor));
+	Mip.BulkData.Unlock();
+	PreviewTexture->UpdateResource();
 }
 
 void ACubusWorldGenerationLoaderActor::PaintTileToPreview(const FCubusTerrainRasterTile& Tile)
 {
-    if (!Tile.IsValid() || PreviewHeightMeters.IsEmpty())
-    {
-        return;
-    }
+	if (!Tile.IsValid() || PreviewHeightMeters.IsEmpty())
+	{
+		return;
+	}
 
-    const int32 Resolution = FMath::Clamp(PreviewTextureResolution, 64, 2048);
-    const FBox2D WorldBounds = GetGenerationBoundsMeters();
-    const FVector2D WorldSize = WorldBounds.GetSize();
-    const FVector2D TileMin = Tile.GetWorldMinimumMeters();
-    const FVector2D TileMax = Tile.GetWorldMaximumMeters();
+	const int32		Resolution	= FMath::Clamp(PreviewTextureResolution, 64, 2048);
+	const FBox2D	WorldBounds = GetGenerationBoundsMeters();
+	const FVector2D WorldSize	= WorldBounds.GetSize();
+	const FVector2D TileMin		= Tile.GetWorldMinimumMeters();
+	const FVector2D TileMax		= Tile.GetWorldMaximumMeters();
 
-    const auto WorldToX = [&](const double WorldX)
-    {
-        const double U = (WorldX - WorldBounds.Min.X) / FMath::Max(1.0, WorldSize.X);
-        return FMath::Clamp(
-            FMath::FloorToInt(U * static_cast<double>(Resolution - 1)),
-            0,
-            Resolution - 1);
-    };
-    const auto WorldToY = [&](const double WorldY)
-    {
-        const double V = (WorldY - WorldBounds.Min.Y) / FMath::Max(1.0, WorldSize.Y);
-        return FMath::Clamp(
-            FMath::FloorToInt(V * static_cast<double>(Resolution - 1)),
-            0,
-            Resolution - 1);
-    };
+	const auto WorldToX = [&](const double WorldX)
+	{
+		const double U = (WorldX - WorldBounds.Min.X) / FMath::Max(1.0, WorldSize.X);
+		return FMath::Clamp(FMath::FloorToInt(U * static_cast<double>(Resolution - 1)), 0, Resolution - 1);
+	};
+	const auto WorldToY = [&](const double WorldY)
+	{
+		const double V = (WorldY - WorldBounds.Min.Y) / FMath::Max(1.0, WorldSize.Y);
+		return FMath::Clamp(FMath::FloorToInt(V * static_cast<double>(Resolution - 1)), 0, Resolution - 1);
+	};
 
-    const int32 MinX = WorldToX(TileMin.X);
-    const int32 MaxX = WorldToX(TileMax.X);
-    const int32 MinY = WorldToY(TileMin.Y);
-    const int32 MaxY = WorldToY(TileMax.Y);
+	const int32 MinX = WorldToX(TileMin.X);
+	const int32 MaxX = WorldToX(TileMax.X);
+	const int32 MinY = WorldToY(TileMin.Y);
+	const int32 MaxY = WorldToY(TileMax.Y);
 
-    for (int32 Y = MinY; Y <= MaxY; ++Y)
-    {
-        const double V = static_cast<double>(Y) / static_cast<double>(Resolution - 1);
-        const double WorldY = WorldBounds.Min.Y + V * WorldSize.Y;
-        for (int32 X = MinX; X <= MaxX; ++X)
-        {
-            const double U = static_cast<double>(X) / static_cast<double>(Resolution - 1);
-            const double WorldX = WorldBounds.Min.X + U * WorldSize.X;
-            PreviewHeightMeters[Y * Resolution + X] = Tile.SampleHeightMeters(WorldX, WorldY);
-        }
-    }
+	for (int32 Y = MinY; Y <= MaxY; ++Y)
+	{
+		const double V		= static_cast<double>(Y) / static_cast<double>(Resolution - 1);
+		const double WorldY = WorldBounds.Min.Y + V * WorldSize.Y;
+		for (int32 X = MinX; X <= MaxX; ++X)
+		{
+			const double U							= static_cast<double>(X) / static_cast<double>(Resolution - 1);
+			const double WorldX						= WorldBounds.Min.X + U * WorldSize.X;
+			PreviewHeightMeters[Y * Resolution + X] = Tile.SampleHeightMeters(WorldX, WorldY);
+		}
+	}
 }
 
 void ACubusWorldGenerationLoaderActor::RebuildTerrainPreview(const bool bOverlayDrainage)
 {
-    (void)bOverlayDrainage;
-    const int32 Resolution = FMath::Clamp(PreviewTextureResolution, 64, 2048);
-    if (PreviewHeightMeters.Num() != Resolution * Resolution ||
-        PreviewPixels.Num() != Resolution * Resolution)
-    {
-        return;
-    }
+	(void) bOverlayDrainage;
+	const int32 Resolution = FMath::Clamp(PreviewTextureResolution, 64, 2048);
+	if (PreviewHeightMeters.Num() != Resolution * Resolution || PreviewPixels.Num() != Resolution * Resolution)
+	{
+		return;
+	}
 
-    float MinHeight = MAX_flt;
-    float MaxHeight = -MAX_flt;
-    for (const float Height : PreviewHeightMeters)
-    {
-        if (Height != MAX_flt)
-        {
-            MinHeight = FMath::Min(MinHeight, Height);
-            MaxHeight = FMath::Max(MaxHeight, Height);
-        }
-    }
+	float MinHeight = MAX_flt;
+	float MaxHeight = -MAX_flt;
+	for (const float Height : PreviewHeightMeters)
+	{
+		if (Height != MAX_flt)
+		{
+			MinHeight = FMath::Min(MinHeight, Height);
+			MaxHeight = FMath::Max(MaxHeight, Height);
+		}
+	}
 
-    if (MinHeight == MAX_flt)
-    {
-        return;
-    }
+	if (MinHeight == MAX_flt)
+	{
+		return;
+	}
 
-    const float Span = FMath::Max(1.0f, MaxHeight - MinHeight);
-    for (int32 Index = 0; Index < PreviewHeightMeters.Num(); ++Index)
-    {
-        const float Height = PreviewHeightMeters[Index];
-        if (Height == MAX_flt)
-        {
-            PreviewPixels[Index] = FColor(8, 8, 8, 255);
-            continue;
-        }
+	const float Span = FMath::Max(1.0f, MaxHeight - MinHeight);
+	for (int32 Index = 0; Index < PreviewHeightMeters.Num(); ++Index)
+	{
+		const float Height = PreviewHeightMeters[Index];
+		if (Height == MAX_flt)
+		{
+			PreviewPixels[Index] = FColor(8, 8, 8, 255);
+			continue;
+		}
 
-        const float T = FMath::Clamp((Height - MinHeight) / Span, 0.0f, 1.0f);
-        const FLinearColor Low(0.055f, 0.12f, 0.07f, 1.0f);
-        const FLinearColor Mid(0.42f, 0.36f, 0.22f, 1.0f);
-        const FLinearColor High(0.93f, 0.95f, 0.96f, 1.0f);
-        const FLinearColor Color = T < 0.6f
-            ? FMath::Lerp(Low, Mid, T / 0.6f)
-            : FMath::Lerp(Mid, High, (T - 0.6f) / 0.4f);
-        PreviewPixels[Index] = Color.ToFColorSRGB();
-    }
+		const float		   T = FMath::Clamp((Height - MinHeight) / Span, 0.0f, 1.0f);
+		const FLinearColor Low(0.055f, 0.12f, 0.07f, 1.0f);
+		const FLinearColor Mid(0.42f, 0.36f, 0.22f, 1.0f);
+		const FLinearColor High(0.93f, 0.95f, 0.96f, 1.0f);
+		const FLinearColor Color = T < 0.6f ? FMath::Lerp(Low, Mid, T / 0.6f) : FMath::Lerp(Mid, High, (T - 0.6f) / 0.4f);
+		PreviewPixels[Index]	 = Color.ToFColorSRGB();
+	}
 }

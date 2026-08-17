@@ -7,8 +7,8 @@ namespace CubusLandscapeEvolution
 {
 namespace
 {
-constexpr int32 D8X[8] = {1, 1, 0, -1, -1, -1, 0, 1};
-constexpr int32 D8Y[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+constexpr int32	 D8X[8]			  = {1, 1, 0, -1, -1, -1, 0, 1};
+constexpr int32	 D8Y[8]			  = {0, 1, 1, 1, 0, -1, -1, -1};
 constexpr double LandscapeSqrtTwo = 1.4142135623730950488;
 
 float Hash01(uint32 V)
@@ -45,25 +45,19 @@ float ValueNoise2D(const FVector2D& P, const int32 Seed)
 
 float LongWaveField(const FVector2D& WorldMeters, const FSettings& Settings)
 {
-	const double MidWavelength = 0.5 * (Settings.LongWaveMinM + Settings.LongWaveMaxM);
-	const double Scale = FMath::Max(1.0, MidWavelength);
-	const FVector2D P = WorldMeters / Scale;
-	return 0.65f * ValueNoise2D(P, Settings.Seed + 911) +
-		0.35f * ValueNoise2D(P * 0.47, Settings.Seed + 2719);
+	const double	MidWavelength = 0.5 * (Settings.LongWaveMinM + Settings.LongWaveMaxM);
+	const double	Scale		  = FMath::Max(1.0, MidWavelength);
+	const FVector2D P			  = WorldMeters / Scale;
+	return 0.65f * ValueNoise2D(P, Settings.Seed + 911) + 0.35f * ValueNoise2D(P * 0.47, Settings.Seed + 2719);
 }
 
-EBoundaryType ClassifyBoundary(
-	const FPlate& A,
-	const FPlate& B,
-	const FVector2D& FromAToB,
-	float& OutNormal,
-	float& OutTangent)
+EBoundaryType ClassifyBoundary(const FPlate& A, const FPlate& B, const FVector2D& FromAToB, float& OutNormal, float& OutTangent)
 {
 	const FVector2D N = FromAToB.GetSafeNormal();
 	const FVector2D T(-N.Y, N.X);
 	const FVector2D Relative = B.Velocity - A.Velocity;
-	OutNormal = FVector2D::DotProduct(Relative, N);
-	OutTangent = FMath::Abs(FVector2D::DotProduct(Relative, T));
+	OutNormal				 = FVector2D::DotProduct(Relative, N);
+	OutTangent				 = FMath::Abs(FVector2D::DotProduct(Relative, T));
 
 	if (OutTangent > FMath::Abs(OutNormal) * 1.35f && OutTangent > 0.08f)
 	{
@@ -83,8 +77,8 @@ EBoundaryType ClassifyBoundary(
 float BoundaryContribution(const EBoundaryType Type, const float DistanceM, const FSettings& Settings)
 {
 	const float Width = FMath::Max(1000.0f, Settings.BoundaryWidthM);
-	const float X = DistanceM / Width;
-	const float W = FMath::Exp(-X * X * 2.0f);
+	const float X	  = DistanceM / Width;
+	const float W	  = FMath::Exp(-X * X * 2.0f);
 
 	switch (Type)
 	{
@@ -101,14 +95,11 @@ float BoundaryContribution(const EBoundaryType Type, const float DistanceM, cons
 
 float EdgeOceanMask(const FVector2D& WorldMeters, const FSettings& Settings)
 {
-	const double Half = Settings.WorldSizeMeters * 0.5;
-	const double Dx = Half - FMath::Abs(WorldMeters.X);
-	const double Dy = Half - FMath::Abs(WorldMeters.Y);
+	const double Half		  = Settings.WorldSizeMeters * 0.5;
+	const double Dx			  = Half - FMath::Abs(WorldMeters.X);
+	const double Dy			  = Half - FMath::Abs(WorldMeters.Y);
 	const double EdgeDistance = FMath::Min(Dx, Dy);
-	return 1.0f - FMath::Clamp(
-		static_cast<float>(EdgeDistance / FMath::Max(1.0f, Settings.CoastalMarginM)),
-		0.0f,
-		1.0f);
+	return 1.0f - FMath::Clamp(static_cast<float>(EdgeDistance / FMath::Max(1.0f, Settings.CoastalMarginM)), 0.0f, 1.0f);
 }
 
 uint64 PairKey(const uint8 A, const uint8 B)
@@ -131,7 +122,7 @@ double ReceiverDistanceMeters(const FGlobalDem& Dem, const int32 Cell, const int
 	const FIntPoint B = Dem.Coordinates(Receiver);
 	return Dem.CellSizeMeters * ((A.X != B.X && A.Y != B.Y) ? LandscapeSqrtTwo : 1.0);
 }
-}
+} // namespace
 
 void FGlobalDem::Reset()
 {
@@ -145,10 +136,8 @@ bool FGlobalDem::IsValid() const
 
 bool FGlobalDem::HasHydrology() const
 {
-	return IsValid() &&
-		Receiver.Num() == ElevationM.Num() &&
-		DrainageAreaKm2.Num() == ElevationM.Num() &&
-		FlowOrder.Num() == ElevationM.Num();
+	return IsValid() && Receiver.Num() == ElevationM.Num() && DrainageAreaKm2.Num() == ElevationM.Num() &&
+		   FlowOrder.Num() == ElevationM.Num();
 }
 
 int32 FGlobalDem::NumCells() const
@@ -179,16 +168,16 @@ float FGlobalDem::SampleHeightBilinearM(const FVector2D& WorldMeters) const
 	}
 
 	const double Half = WorldSizeMeters * 0.5;
-	const double U = FMath::Clamp((WorldMeters.X + Half) / WorldSizeMeters, 0.0, 1.0) * (Resolution - 1);
-	const double V = FMath::Clamp((WorldMeters.Y + Half) / WorldSizeMeters, 0.0, 1.0) * (Resolution - 1);
-	const int32 X0 = FMath::Clamp(FMath::FloorToInt(U), 0, Resolution - 1);
-	const int32 Y0 = FMath::Clamp(FMath::FloorToInt(V), 0, Resolution - 1);
-	const int32 X1 = FMath::Min(X0 + 1, Resolution - 1);
-	const int32 Y1 = FMath::Min(Y0 + 1, Resolution - 1);
-	const float Fx = static_cast<float>(U - X0);
-	const float Fy = static_cast<float>(V - Y0);
-	const float A = FMath::Lerp(ElevationM[Index(X0, Y0)], ElevationM[Index(X1, Y0)], Fx);
-	const float B = FMath::Lerp(ElevationM[Index(X0, Y1)], ElevationM[Index(X1, Y1)], Fx);
+	const double U	  = FMath::Clamp((WorldMeters.X + Half) / WorldSizeMeters, 0.0, 1.0) * (Resolution - 1);
+	const double V	  = FMath::Clamp((WorldMeters.Y + Half) / WorldSizeMeters, 0.0, 1.0) * (Resolution - 1);
+	const int32	 X0	  = FMath::Clamp(FMath::FloorToInt(U), 0, Resolution - 1);
+	const int32	 Y0	  = FMath::Clamp(FMath::FloorToInt(V), 0, Resolution - 1);
+	const int32	 X1	  = FMath::Min(X0 + 1, Resolution - 1);
+	const int32	 Y1	  = FMath::Min(Y0 + 1, Resolution - 1);
+	const float	 Fx	  = static_cast<float>(U - X0);
+	const float	 Fy	  = static_cast<float>(V - Y0);
+	const float	 A	  = FMath::Lerp(ElevationM[Index(X0, Y0)], ElevationM[Index(X1, Y0)], Fx);
+	const float	 B	  = FMath::Lerp(ElevationM[Index(X0, Y1)], ElevationM[Index(X1, Y1)], Fx);
 	return FMath::Lerp(A, B, Fy);
 }
 
@@ -215,6 +204,9 @@ FProvinceParameters FGenerator::GetDefaultProvinceParameters(const EProvinceType
 	case EProvinceType::VolcanicProvince:
 		Result = {0.7f, 0.55f, 0.85f, 0.18f};
 		break;
+	case EProvinceType::OceanicBasin:
+		Result = {0.45f, 0.35f, 0.80f, 0.65f};
+		break;
 	case EProvinceType::CoastalShelf:
 		Result = {1.4f, 2.2f, 0.25f, 0.9f};
 		break;
@@ -222,14 +214,10 @@ FProvinceParameters FGenerator::GetDefaultProvinceParameters(const EProvinceType
 	return Result;
 }
 
-bool FGenerator::GenerateSkeleton(
-	const FSettings& Settings,
-	FGlobalDem& OutDem,
-	FGenerationStats* OutStats,
-	FString* OutError)
+bool FGenerator::GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem, FGenerationStats* OutStats, FString* OutError)
 {
-	if (Settings.Resolution < 17 || Settings.PlateCount < 2 || Settings.PlateCount > 255 ||
-		Settings.WorldSizeMeters <= 0.0 || Settings.CrustBlendScaleM <= 0.0f)
+	if (Settings.Resolution < 17 || Settings.PlateCount < 2 || Settings.PlateCount > 255 || Settings.WorldSizeMeters <= 0.0 ||
+		Settings.CrustBlendScaleM <= 0.0f)
 	{
 		if (OutError)
 		{
@@ -240,30 +228,33 @@ bool FGenerator::GenerateSkeleton(
 
 	const double Start = FPlatformTime::Seconds();
 	OutDem.Reset();
-	OutDem.Resolution = Settings.Resolution;
+	OutDem.Resolution	   = Settings.Resolution;
 	OutDem.WorldSizeMeters = Settings.WorldSizeMeters;
-	OutDem.CellSizeMeters = Settings.WorldSizeMeters / static_cast<double>(Settings.Resolution - 1);
-	OutDem.OceanLevelM = Settings.OceanLevelM;
+	OutDem.CellSizeMeters  = Settings.WorldSizeMeters / static_cast<double>(Settings.Resolution - 1);
+	OutDem.OceanLevelM	   = Settings.OceanLevelM;
 
 	FRandomStream Random(Settings.Seed);
 	OutDem.Plates.Reserve(Settings.PlateCount);
 	for (int32 I = 0; I < Settings.PlateCount; ++I)
 	{
 		FPlate Plate;
-		Plate.Center01 = FVector2D(Random.FRand(), Random.FRand());
-		const float Angle = Random.FRandRange(-PI, PI);
-		const float Speed = Random.FRandRange(0.06f, 0.28f);
-		Plate.Velocity = FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Speed;
-		Plate.BaseElevationM = Random.FRandRange(120.0f, 650.0f);
-		Plate.CrustStrength = Random.FRandRange(0.65f, 1.4f);
-		Plate.Age01 = Random.FRand();
-		Plate.bVolcanic = Random.FRand() < 0.12f;
+		Plate.Center01			 = FVector2D(Random.FRand(), Random.FRand());
+		const float Angle		 = Random.FRandRange(-PI, PI);
+		const float Speed		 = Random.FRandRange(0.06f, 0.28f);
+		Plate.Velocity			 = FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Speed;
+		Plate.bOceanic			 = I == 1 || (I > 1 && Random.FRand() < 0.34f);
+		Plate.BaseElevationM	 = Plate.bOceanic ? Random.FRandRange(-2200.0f, -450.0f) : Random.FRandRange(120.0f, 650.0f);
+		Plate.CrustStrength		 = Random.FRandRange(0.65f, 1.4f);
+		Plate.Age01				 = Random.FRand();
+		Plate.bVolcanic			 = Random.FRand() < (Plate.bOceanic ? 0.18f : 0.10f);
 		const float ProvinceRoll = Random.FRand();
-		Plate.InteriorProvince = ProvinceRoll < 0.30f ? EProvinceType::StablePlain :
-			ProvinceRoll < 0.48f ? EProvinceType::SedimentaryBasin :
-			ProvinceRoll < 0.68f ? EProvinceType::UpliftedPlateau :
-			ProvinceRoll < 0.80f ? EProvinceType::RiftValley :
-			Plate.bVolcanic ? EProvinceType::VolcanicProvince : EProvinceType::StablePlain;
+		Plate.InteriorProvince	 = Plate.bOceanic		  ? EProvinceType::OceanicBasin
+								   : ProvinceRoll < 0.30f ? EProvinceType::StablePlain
+								   : ProvinceRoll < 0.48f ? EProvinceType::SedimentaryBasin
+								   : ProvinceRoll < 0.68f ? EProvinceType::UpliftedPlateau
+								   : ProvinceRoll < 0.80f ? EProvinceType::RiftValley
+								   : Plate.bVolcanic	  ? EProvinceType::VolcanicProvince
+														  : EProvinceType::StablePlain;
 		OutDem.Plates.Add(Plate);
 	}
 
@@ -274,113 +265,166 @@ bool FGenerator::GenerateSkeleton(
 	OutDem.ProvinceId.SetNumUninitialized(CellCount);
 	OutDem.BoundaryType.SetNumUninitialized(CellCount);
 
-	const int32 R = Settings.Resolution;
-	const double Half = Settings.WorldSizeMeters * 0.5;
-	const double InvIntervals = 1.0 / static_cast<double>(R - 1);
-	const double CrustSigma01 = FMath::Max(1.0, static_cast<double>(Settings.CrustBlendScaleM)) /
-		Settings.WorldSizeMeters;
+	const int32	 R					= Settings.Resolution;
+	const double Half				= Settings.WorldSizeMeters * 0.5;
+	const double InvIntervals		= 1.0 / static_cast<double>(R - 1);
+	const double CrustSigma01		= FMath::Max(1.0, static_cast<double>(Settings.CrustBlendScaleM)) / Settings.WorldSizeMeters;
 	const double InvTwoCrustSigmaSq = 1.0 / (2.0 * CrustSigma01 * CrustSigma01);
 
-	ParallelFor(CellCount, [&OutDem, &Settings, R, Half, InvIntervals, InvTwoCrustSigmaSq](const int32 Cell)
-	{
-		const int32 X = Cell % R;
-		const int32 Y = Cell / R;
-		const double U = static_cast<double>(X) * InvIntervals;
-		const double V = static_cast<double>(Y) * InvIntervals;
-		const double WorldX = -Half + U * Settings.WorldSizeMeters;
-		const double WorldY = -Half + V * Settings.WorldSizeMeters;
-		const FVector2D WorldMeters(WorldX, WorldY);
-		const FVector2D P01(U, V);
+	ParallelFor(CellCount,
+				[&OutDem, &Settings, R, Half, InvIntervals, InvTwoCrustSigmaSq](const int32 Cell)
+				{
+					const int32		X	   = Cell % R;
+					const int32		Y	   = Cell / R;
+					const double	U	   = static_cast<double>(X) * InvIntervals;
+					const double	V	   = static_cast<double>(Y) * InvIntervals;
+					const double	WorldX = -Half + U * Settings.WorldSizeMeters;
+					const double	WorldY = -Half + V * Settings.WorldSizeMeters;
+					const FVector2D WorldMeters(WorldX, WorldY);
+					const FVector2D P01(U, V);
 
-		int32 Closest = INDEX_NONE;
-		int32 Second = INDEX_NONE;
-		double ClosestD2 = TNumericLimits<double>::Max();
-		double SecondD2 = TNumericLimits<double>::Max();
-		double CrustWeightSum = 0.0;
-		double CrustElevationWeighted = 0.0;
+					int32  Closest				  = INDEX_NONE;
+					int32  Second				  = INDEX_NONE;
+					double ClosestD2			  = TNumericLimits<double>::Max();
+					double SecondD2				  = TNumericLimits<double>::Max();
+					double CrustWeightSum		  = 0.0;
+					double CrustElevationWeighted = 0.0;
+					double PlateDistancesSquared[256];
 
-		for (int32 P = 0; P < OutDem.Plates.Num(); ++P)
-		{
-			const FPlate& Candidate = OutDem.Plates[P];
-			const double D2 = FVector2D::DistSquared(P01, Candidate.Center01);
+					for (int32 P = 0; P < OutDem.Plates.Num(); ++P)
+					{
+						const FPlate& Candidate	 = OutDem.Plates[P];
+						const double  D2		 = FVector2D::DistSquared(P01, Candidate.Center01);
+						PlateDistancesSquared[P] = D2;
 
-			// Plate ownership remains categorical for geology/province identity, but
-			// crustal base elevation is explicitly continuous across every boundary.
-			const double Weight = FMath::Exp(-D2 * InvTwoCrustSigmaSq);
-			CrustWeightSum += Weight;
-			CrustElevationWeighted += Weight * static_cast<double>(Candidate.BaseElevationM);
+						// Plate ownership remains categorical for geology/province identity, but
+						// crustal base elevation is explicitly continuous across every boundary.
+						const double Weight = FMath::Exp(-D2 * InvTwoCrustSigmaSq);
+						CrustWeightSum += Weight;
+						CrustElevationWeighted += Weight * static_cast<double>(Candidate.BaseElevationM);
 
-			if (D2 < ClosestD2)
-			{
-				SecondD2 = ClosestD2;
-				Second = Closest;
-				ClosestD2 = D2;
-				Closest = P;
-			}
-			else if (D2 < SecondD2)
-			{
-				SecondD2 = D2;
-				Second = P;
-			}
-		}
+						if (D2 < ClosestD2)
+						{
+							SecondD2  = ClosestD2;
+							Second	  = Closest;
+							ClosestD2 = D2;
+							Closest	  = P;
+						}
+						else if (D2 < SecondD2)
+						{
+							SecondD2 = D2;
+							Second	 = P;
+						}
+					}
 
-		check(Closest != INDEX_NONE && Second != INDEX_NONE);
-		const FPlate& Plate = OutDem.Plates[Closest];
-		const FPlate& Other = OutDem.Plates[Second];
-		const FVector2D PairAxis = (Other.Center01 - Plate.Center01) * Settings.WorldSizeMeters;
-		float NormalSpeed = 0.0f;
-		float TangentSpeed = 0.0f;
-		const EBoundaryType Type = ClassifyBoundary(Plate, Other, PairAxis, NormalSpeed, TangentSpeed);
+					check(Closest != INDEX_NONE && Second != INDEX_NONE);
+					const FPlate&		Plate		 = OutDem.Plates[Closest];
+					const FPlate&		Other		 = OutDem.Plates[Second];
+					const FVector2D		PairAxis	 = (Other.Center01 - Plate.Center01) * Settings.WorldSizeMeters;
+					float				NormalSpeed	 = 0.0f;
+					float				TangentSpeed = 0.0f;
+					const EBoundaryType Type		 = ClassifyBoundary(Plate, Other, PairAxis, NormalSpeed, TangentSpeed);
 
-		const double ClosestD = FMath::Sqrt(ClosestD2) * Settings.WorldSizeMeters;
-		const double SecondD = FMath::Sqrt(SecondD2) * Settings.WorldSizeMeters;
-		float BoundaryDistanceM = static_cast<float>(0.5 * FMath::Abs(SecondD - ClosestD));
+					const double ClosestD		   = FMath::Sqrt(ClosestD2) * Settings.WorldSizeMeters;
+					const double SecondD		   = FMath::Sqrt(SecondD2) * Settings.WorldSizeMeters;
+					float		 BoundaryDistanceM = static_cast<float>(0.5 * FMath::Abs(SecondD - ClosestD));
 
-		// The same physical plate pair must receive the same warp from either side
-		// of its ownership boundary. Ordering the IDs prevents a seam here.
-		const float Warp = ValueNoise2D(
-			WorldMeters / 35000.0,
-			SymmetricBoundarySeed(Settings, Closest, Second));
-		BoundaryDistanceM = FMath::Max(
-			0.0f,
-			BoundaryDistanceM + Warp * Settings.BoundaryWarpAmplitudeM);
+					// The same physical plate pair must receive the same warp from either side
+					// of its ownership boundary. Ordering the IDs prevents a seam here.
+					const float Warp  = ValueNoise2D(WorldMeters / 35000.0, SymmetricBoundarySeed(Settings, Closest, Second));
+					BoundaryDistanceM = FMath::Max(0.0f, BoundaryDistanceM + Warp * Settings.BoundaryWarpAmplitudeM);
 
-		float Uplift = BoundaryContribution(Type, BoundaryDistanceM, Settings);
-		if (Type == EBoundaryType::Convergent)
-		{
-			Uplift *= FMath::Clamp((FMath::Abs(NormalSpeed) + 0.05f) * 3.0f, 0.45f, 1.5f);
-		}
+					auto SamplePairUplift = [&OutDem, &Settings, &WorldMeters](const int32 PlateAId, const double PlateAD2,
+																			   const int32 PlateBId, const double PlateBD2)
+					{
+						const FPlate&		PlateA			 = OutDem.Plates[PlateAId];
+						const FPlate&		PlateB			 = OutDem.Plates[PlateBId];
+						const FVector2D		Axis			 = (PlateB.Center01 - PlateA.Center01) * Settings.WorldSizeMeters;
+						float				PairNormalSpeed	 = 0.0f;
+						float				PairTangentSpeed = 0.0f;
+						const EBoundaryType PairType		 = ClassifyBoundary(PlateA, PlateB, Axis, PairNormalSpeed, PairTangentSpeed);
+						const double		PlateADistanceM	 = FMath::Sqrt(PlateAD2) * Settings.WorldSizeMeters;
+						const double		PlateBDistanceM	 = FMath::Sqrt(PlateBD2) * Settings.WorldSizeMeters;
+						float				PairDistanceM	 = static_cast<float>(0.5 * FMath::Abs(PlateBDistanceM - PlateADistanceM));
+						const float PairWarp = ValueNoise2D(WorldMeters / 35000.0, SymmetricBoundarySeed(Settings, PlateAId, PlateBId));
+						PairDistanceM		 = FMath::Max(0.0f, PairDistanceM + PairWarp * Settings.BoundaryWarpAmplitudeM);
+						float PairUplift	 = BoundaryContribution(PairType, PairDistanceM, Settings);
+						if (PairType == EBoundaryType::Convergent)
+						{
+							PairUplift *= FMath::Clamp((FMath::Abs(PairNormalSpeed) + 0.05f) * 3.0f, 0.45f, 1.5f);
+						}
+						return PairUplift;
+					};
 
-		EProvinceType Province = Plate.InteriorProvince;
-		if (BoundaryDistanceM < Settings.BoundaryWidthM * 0.9f)
-		{
-			Province = Type == EBoundaryType::Convergent ? EProvinceType::FoldMountainBelt :
-				Type == EBoundaryType::Divergent ? EProvinceType::RiftValley : Province;
-		}
-		if (Plate.bVolcanic && BoundaryDistanceM < Settings.BoundaryWidthM * 0.55f)
-		{
-			Province = EProvinceType::VolcanicProvince;
-		}
+					constexpr int32 RelevantPlateCount				= 4;
+					int32			RelevantIds[RelevantPlateCount] = {INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE};
+					double			RelevantD2[RelevantPlateCount]	= {TNumericLimits<double>::Max(), TNumericLimits<double>::Max(),
+																	   TNumericLimits<double>::Max(), TNumericLimits<double>::Max()};
+					for (int32 CandidateId = 0; CandidateId < OutDem.Plates.Num(); ++CandidateId)
+					{
+						const double CandidateD2 = PlateDistancesSquared[CandidateId];
+						for (int32 Slot = 0; Slot < RelevantPlateCount; ++Slot)
+						{
+							if (CandidateD2 < RelevantD2[Slot])
+							{
+								for (int32 Move = RelevantPlateCount - 1; Move > Slot; --Move)
+								{
+									RelevantD2[Move]  = RelevantD2[Move - 1];
+									RelevantIds[Move] = RelevantIds[Move - 1];
+								}
+								RelevantD2[Slot]  = CandidateD2;
+								RelevantIds[Slot] = CandidateId;
+								break;
+							}
+						}
+					}
 
-		const float OceanMask = EdgeOceanMask(WorldMeters, Settings);
-		if (OceanMask > 0.3f)
-		{
-			Province = EProvinceType::CoastalShelf;
-		}
+					const double ClosestDistanceM = FMath::Sqrt(ClosestD2) * Settings.WorldSizeMeters;
+					float		 UpliftWeighted	  = 0.0f;
+					float		 UpliftWeightSum  = 0.0f;
+					for (int32 A = 0; A < RelevantPlateCount - 1 && RelevantIds[A] != INDEX_NONE; ++A)
+					{
+						for (int32 B = A + 1; B < RelevantPlateCount && RelevantIds[B] != INDEX_NONE; ++B)
+						{
+							const double PairMeanDistanceM =
+								0.5 * (FMath::Sqrt(RelevantD2[A]) + FMath::Sqrt(RelevantD2[B])) * Settings.WorldSizeMeters;
+							const float PairWeight = FMath::Exp(-static_cast<float>(FMath::Max(0.0, PairMeanDistanceM - ClosestDistanceM)) /
+																FMath::Max(1000.0f, Settings.BoundaryWidthM));
+							UpliftWeighted += SamplePairUplift(RelevantIds[A], RelevantD2[A], RelevantIds[B], RelevantD2[B]) * PairWeight;
+							UpliftWeightSum += PairWeight;
+						}
+					}
+					const float Uplift = UpliftWeightSum > SMALL_NUMBER ? UpliftWeighted / UpliftWeightSum : 0.0f;
 
-		const float WeakRelief = LongWaveField(WorldMeters, Settings) * Settings.LongWaveAmplitudeM;
-		const float ContinuousBaseElevation = CrustWeightSum > SMALL_NUMBER
-			? static_cast<float>(CrustElevationWeighted / CrustWeightSum)
-			: 250.0f;
-		float Elevation = ContinuousBaseElevation + Uplift + WeakRelief;
-		Elevation = FMath::Lerp(Elevation, Settings.OceanFloorM, OceanMask * OceanMask);
+					EProvinceType Province = Plate.InteriorProvince;
+					if (BoundaryDistanceM < Settings.BoundaryWidthM * 0.9f)
+					{
+						Province = Type == EBoundaryType::Convergent  ? EProvinceType::FoldMountainBelt
+								   : Type == EBoundaryType::Divergent ? EProvinceType::RiftValley
+																	  : Province;
+					}
+					if (Plate.bVolcanic && BoundaryDistanceM < Settings.BoundaryWidthM * 0.55f)
+					{
+						Province = EProvinceType::VolcanicProvince;
+					}
 
-		OutDem.ElevationM[Cell] = Elevation;
-		OutDem.UpliftM[Cell] = Uplift;
-		OutDem.PlateId[Cell] = static_cast<uint8>(Closest);
-		OutDem.ProvinceId[Cell] = static_cast<uint8>(Province);
-		OutDem.BoundaryType[Cell] = static_cast<uint8>(Type);
-	});
+					const float OceanMask  = EdgeOceanMask(WorldMeters, Settings);
+					const float WeakRelief = LongWaveField(WorldMeters, Settings) * Settings.LongWaveAmplitudeM;
+					const float ContinuousBaseElevation =
+						CrustWeightSum > SMALL_NUMBER ? static_cast<float>(CrustElevationWeighted / CrustWeightSum) : 250.0f;
+					float Elevation = ContinuousBaseElevation + Uplift + WeakRelief;
+					Elevation		= FMath::Lerp(Elevation, Settings.OceanFloorM, OceanMask * OceanMask);
+					if (Elevation <= Settings.OceanLevelM && Elevation >= Settings.OceanLevelM - 500.0f)
+					{
+						Province = EProvinceType::CoastalShelf;
+					}
+
+					OutDem.ElevationM[Cell]	  = Elevation;
+					OutDem.UpliftM[Cell]	  = Uplift;
+					OutDem.PlateId[Cell]	  = static_cast<uint8>(Closest);
+					OutDem.ProvinceId[Cell]	  = static_cast<uint8>(Province);
+					OutDem.BoundaryType[Cell] = static_cast<uint8>(Type);
+				});
 
 	float MinElevation = TNumericLimits<float>::Max();
 	float MaxElevation = TNumericLimits<float>::Lowest();
@@ -391,7 +435,7 @@ bool FGenerator::GenerateSkeleton(
 	}
 
 	TMap<uint64, FPlateBoundary> BoundaryMap;
-	auto AddBoundaryPair = [&OutDem, &Settings, &BoundaryMap](const uint8 PlateAId, const uint8 PlateBId)
+	auto						 AddBoundaryPair = [&OutDem, &Settings, &BoundaryMap](const uint8 PlateAId, const uint8 PlateBId)
 	{
 		if (PlateAId == PlateBId)
 		{
@@ -403,19 +447,19 @@ bool FGenerator::GenerateSkeleton(
 			return;
 		}
 
-		const uint8 Lo = FMath::Min(PlateAId, PlateBId);
-		const uint8 Hi = FMath::Max(PlateAId, PlateBId);
-		const FPlate& A = OutDem.Plates[Lo];
-		const FPlate& B = OutDem.Plates[Hi];
-		const FVector2D PairAxis = (B.Center01 - A.Center01) * Settings.WorldSizeMeters;
-		float NormalSpeed = 0.0f;
-		float TangentSpeed = 0.0f;
+		const uint8		Lo			 = FMath::Min(PlateAId, PlateBId);
+		const uint8		Hi			 = FMath::Max(PlateAId, PlateBId);
+		const FPlate&	A			 = OutDem.Plates[Lo];
+		const FPlate&	B			 = OutDem.Plates[Hi];
+		const FVector2D PairAxis	 = (B.Center01 - A.Center01) * Settings.WorldSizeMeters;
+		float			NormalSpeed	 = 0.0f;
+		float			TangentSpeed = 0.0f;
 
 		FPlateBoundary Boundary;
-		Boundary.PlateA = Lo;
-		Boundary.PlateB = Hi;
-		Boundary.Type = ClassifyBoundary(A, B, PairAxis, NormalSpeed, TangentSpeed);
-		Boundary.RelativeNormalSpeed = NormalSpeed;
+		Boundary.PlateA					 = Lo;
+		Boundary.PlateB					 = Hi;
+		Boundary.Type					 = ClassifyBoundary(A, B, PairAxis, NormalSpeed, TangentSpeed);
+		Boundary.RelativeNormalSpeed	 = NormalSpeed;
 		Boundary.RelativeTangentialSpeed = TangentSpeed;
 		BoundaryMap.Add(Key, Boundary);
 	};
@@ -439,19 +483,59 @@ bool FGenerator::GenerateSkeleton(
 
 	if (OutStats)
 	{
-		OutStats->CellCount = CellCount;
+		OutStats->CellCount			= CellCount;
 		OutStats->MinimumElevationM = MinElevation;
 		OutStats->MaximumElevationM = MaxElevation;
-		OutStats->SkeletonSeconds = FPlatformTime::Seconds() - Start;
+		OutStats->SkeletonSeconds	= FPlatformTime::Seconds() - Start;
+		MeasureQuality(OutDem, *OutStats);
 	}
 	return true;
 }
 
-bool FGenerator::SolveHydrology(
-	const FSettings& Settings,
-	FGlobalDem& InOutDem,
-	FGenerationStats* OutStats,
-	FString* OutError)
+void FGenerator::MeasureQuality(const FGlobalDem& Dem, FGenerationStats& OutStats)
+{
+	if (!Dem.IsValid())
+	{
+		return;
+	}
+
+	int64		 LandCells			   = 0;
+	int64		 SteepLandCells		   = 0;
+	double		 TotalSlopeDegrees	   = 0.0;
+	float		 MaximumNeighbourStepM = 0.0f;
+	const int32	 R					   = Dem.Resolution;
+	const double CellSize			   = FMath::Max(1.0, Dem.CellSizeMeters);
+	for (int32 Y = 1; Y < R - 1; ++Y)
+	{
+		for (int32 X = 1; X < R - 1; ++X)
+		{
+			const int32 Cell	  = Dem.Index(X, Y);
+			MaximumNeighbourStepM = FMath::Max(MaximumNeighbourStepM, FMath::Abs(Dem.ElevationM[Cell] - Dem.ElevationM[Cell + 1]));
+			MaximumNeighbourStepM = FMath::Max(MaximumNeighbourStepM, FMath::Abs(Dem.ElevationM[Cell] - Dem.ElevationM[Cell + R]));
+			if (Dem.ElevationM[Cell] <= Dem.OceanLevelM)
+			{
+				continue;
+			}
+
+			const double GradientX	  = (Dem.ElevationM[Cell + 1] - Dem.ElevationM[Cell - 1]) / (2.0 * CellSize);
+			const double GradientY	  = (Dem.ElevationM[Cell + R] - Dem.ElevationM[Cell - R]) / (2.0 * CellSize);
+			const double SlopeDegrees = FMath::RadiansToDegrees(FMath::Atan(FMath::Sqrt(GradientX * GradientX + GradientY * GradientY)));
+			TotalSlopeDegrees += SlopeDegrees;
+			++LandCells;
+			SteepLandCells += SlopeDegrees >= 35.0 ? 1 : 0;
+		}
+	}
+
+	const int64 InteriorCells = static_cast<int64>(FMath::Max(0, R - 2)) * static_cast<int64>(FMath::Max(0, R - 2));
+	OutStats.LandFraction =
+		InteriorCells > 0 ? static_cast<float>(static_cast<double>(LandCells) / static_cast<double>(InteriorCells)) : 0.0f;
+	OutStats.MeanLandSlopeDegrees = LandCells > 0 ? static_cast<float>(TotalSlopeDegrees / static_cast<double>(LandCells)) : 0.0f;
+	OutStats.SteepLandFraction =
+		LandCells > 0 ? static_cast<float>(static_cast<double>(SteepLandCells) / static_cast<double>(LandCells)) : 0.0f;
+	OutStats.MaximumNeighbourStepM = MaximumNeighbourStepM;
+}
+
+bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem, FGenerationStats* OutStats, FString* OutError)
 {
 	if (!InOutDem.IsValid() || InOutDem.Resolution != Settings.Resolution)
 	{
@@ -462,11 +546,10 @@ bool FGenerator::SolveHydrology(
 		return false;
 	}
 
-	const double Start = FPlatformTime::Seconds();
-	const int32 N = InOutDem.NumCells();
-	const int32 R = InOutDem.Resolution;
-	const float CellAreaKm2 = static_cast<float>(
-		(InOutDem.CellSizeMeters * InOutDem.CellSizeMeters) / 1000000.0);
+	const double Start		 = FPlatformTime::Seconds();
+	const int32	 N			 = InOutDem.NumCells();
+	const int32	 R			 = InOutDem.Resolution;
+	const float	 CellAreaKm2 = static_cast<float>((InOutDem.CellSizeMeters * InOutDem.CellSizeMeters) / 1000000.0);
 
 	InOutDem.HydrologyElevationM = InOutDem.ElevationM;
 	InOutDem.Receiver.Init(INDEX_NONE, N);
@@ -479,8 +562,8 @@ bool FGenerator::SolveHydrology(
 	struct FHeapNode
 	{
 		float Elevation = 0.0f;
-		int32 Cell = INDEX_NONE;
-		bool operator<(const FHeapNode& Other) const { return Elevation > Other.Elevation; }
+		int32 Cell		= INDEX_NONE;
+		bool  operator<(const FHeapNode& Other) const { return Elevation > Other.Elevation; }
 	};
 
 	TArray<FHeapNode> Heap;
@@ -528,38 +611,37 @@ bool FGenerator::SolveHydrology(
 			{
 				continue;
 			}
-			Visited[Neighbor] = true;
-			const float Raised = FMath::Max(
-				InOutDem.HydrologyElevationM[Neighbor],
-				Node.Elevation + Settings.PriorityFloodEpsilonM);
+			Visited[Neighbor]  = true;
+			const float Raised = FMath::Max(InOutDem.HydrologyElevationM[Neighbor], Node.Elevation + Settings.PriorityFloodEpsilonM);
 			InOutDem.HydrologyElevationM[Neighbor] = Raised;
 			Heap.HeapPush({Raised, Neighbor});
 		}
 	}
 
-	ParallelFor(N, [&InOutDem, R](const int32 Cell)
-	{
-		const int32 X = Cell % R;
-		const int32 Y = Cell / R;
-		if (X == 0 || Y == 0 || X == R - 1 || Y == R - 1)
-		{
-			return;
-		}
+	ParallelFor(N,
+				[&InOutDem, R](const int32 Cell)
+				{
+					const int32 X = Cell % R;
+					const int32 Y = Cell / R;
+					if (X == 0 || Y == 0 || X == R - 1 || Y == R - 1)
+					{
+						return;
+					}
 
-		float BestElevation = InOutDem.HydrologyElevationM[Cell];
-		int32 Best = INDEX_NONE;
-		for (int32 Dir = 0; Dir < 8; ++Dir)
-		{
-			const int32 Neighbor = InOutDem.Index(X + D8X[Dir], Y + D8Y[Dir]);
-			const float E = InOutDem.HydrologyElevationM[Neighbor];
-			if (E < BestElevation)
-			{
-				BestElevation = E;
-				Best = Neighbor;
-			}
-		}
-		InOutDem.Receiver[Cell] = Best;
-	});
+					float BestElevation = InOutDem.HydrologyElevationM[Cell];
+					int32 Best			= INDEX_NONE;
+					for (int32 Dir = 0; Dir < 8; ++Dir)
+					{
+						const int32 Neighbor = InOutDem.Index(X + D8X[Dir], Y + D8Y[Dir]);
+						const float E		 = InOutDem.HydrologyElevationM[Neighbor];
+						if (E < BestElevation)
+						{
+							BestElevation = E;
+							Best		  = Neighbor;
+						}
+					}
+					InOutDem.Receiver[Cell] = Best;
+				});
 
 	TArray<uint8> UpstreamCount;
 	UpstreamCount.Init(0, N);
@@ -584,7 +666,7 @@ bool FGenerator::SolveHydrology(
 	int32 ReadIndex = 0;
 	while (ReadIndex < InOutDem.FlowOrder.Num())
 	{
-		const int32 Cell = InOutDem.FlowOrder[ReadIndex++];
+		const int32 Cell	 = InOutDem.FlowOrder[ReadIndex++];
 		const int32 Receiver = InOutDem.Receiver[Cell];
 		if (Receiver == INDEX_NONE)
 		{
@@ -604,20 +686,18 @@ bool FGenerator::SolveHydrology(
 	{
 		if (OutError)
 		{
-			*OutError = FString::Printf(
-				TEXT("Hydrology receiver graph is not acyclic: ordered %d of %d cells."),
-				InOutDem.FlowOrder.Num(),
-				N);
+			*OutError =
+				FString::Printf(TEXT("Hydrology receiver graph is not acyclic: ordered %d of %d cells."), InOutDem.FlowOrder.Num(), N);
 		}
 		return false;
 	}
 
-	float MaxArea = 0.0f;
+	float MaxArea	 = 0.0f;
 	int32 RiverCells = 0;
 	for (int32 Cell = 0; Cell < N; ++Cell)
 	{
 		const float Area = InOutDem.DrainageAreaKm2[Cell];
-		MaxArea = FMath::Max(MaxArea, Area);
+		MaxArea			 = FMath::Max(MaxArea, Area);
 		if (Area >= Settings.RiverSourceAreaKm2 && InOutDem.ElevationM[Cell] > Settings.OceanLevelM)
 		{
 			InOutDem.RiverMask[Cell] = 1;
@@ -628,27 +708,28 @@ bool FGenerator::SolveHydrology(
 	int32 BasinCounter = 0;
 	for (int32 OrderIndex = InOutDem.FlowOrder.Num() - 1; OrderIndex >= 0; --OrderIndex)
 	{
-		const int32 Cell = InOutDem.FlowOrder[OrderIndex];
+		const int32 Cell	 = InOutDem.FlowOrder[OrderIndex];
 		const int32 Receiver = InOutDem.Receiver[Cell];
 		if (Receiver == INDEX_NONE)
 		{
-			InOutDem.BasinId[Cell] = BasinCounter++;
+			InOutDem.BasinId[Cell]			  = BasinCounter++;
 			InOutDem.DistanceToOutletKm[Cell] = 0.0f;
 			continue;
 		}
 
 		check(InOutDem.BasinId[Receiver] != INDEX_NONE);
 		InOutDem.BasinId[Cell] = InOutDem.BasinId[Receiver];
-		InOutDem.DistanceToOutletKm[Cell] = InOutDem.DistanceToOutletKm[Receiver] +
-			static_cast<float>(ReceiverDistanceMeters(InOutDem, Cell, Receiver) / 1000.0);
+		InOutDem.DistanceToOutletKm[Cell] =
+			InOutDem.DistanceToOutletKm[Receiver] + static_cast<float>(ReceiverDistanceMeters(InOutDem, Cell, Receiver) / 1000.0);
 	}
 
 	if (OutStats)
 	{
-		OutStats->BasinCount = BasinCounter;
-		OutStats->RiverCellCount = RiverCells;
+		OutStats->BasinCount			 = BasinCounter;
+		OutStats->RiverCellCount		 = RiverCells;
 		OutStats->MaximumDrainageAreaKm2 = MaxArea;
-		OutStats->HydrologySeconds = FPlatformTime::Seconds() - Start;
+		OutStats->HydrologySeconds		 = FPlatformTime::Seconds() - Start;
+		MeasureQuality(InOutDem, *OutStats);
 	}
 	return true;
 }

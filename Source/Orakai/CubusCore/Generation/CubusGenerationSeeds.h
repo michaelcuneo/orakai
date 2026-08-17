@@ -11,10 +11,10 @@
  */
 struct ORAKAI_API FCubusGenerationSeeds
 {
-	// Bumped to 39: runtime density can now consume the loader-authored physical
-	// DEM directly, so v38 density buffers/meshes must never be reused for a
-	// generated-world session with the same seed.
-	static constexpr uint32 CurrentGenerationVersion = 39;
+	// Bumped to 41: production generation now uses the clean structural DEM;
+	// the destructive experimental refinement stack and ridged morphology are
+	// excluded by default, so older generated terrain must not be reused.
+	static constexpr uint32 CurrentGenerationVersion = 41;
 
 	int64 World		 = 1;
 	int32 Terrain	 = 0;

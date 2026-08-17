@@ -8,6 +8,7 @@
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "CubusCore/Generation/CubusBlockTerrainGenerator.h"
 #include "CubusCore/Generation/CubusDensityEditField.h"
+#include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
 #include "CubusCore/Generation/CubusLandmarkField.h"
 #include "CubusCore/Generation/CubusGenerationSeeds.h"
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
@@ -643,7 +644,8 @@ FCubusTerrainDensitySettings ACubusVoxelVolumeActor::BuildDensitySettings() cons
 {
 	FCubusTerrainDensitySettings DensitySettings;
 
-	DensitySettings.bUseHeightTerrain = bUseHeightTerrain;
+	DensitySettings.bUseHeightTerrain			 = bUseHeightTerrain;
+	DensitySettings.bPreserveAuthoredHeightfield = FCubusGeneratedTerrainRuntime::IsActive();
 
 	DensitySettings.FlatSurfaceWorldZ = static_cast<float>(TerrainSurfaceWorldZ);
 

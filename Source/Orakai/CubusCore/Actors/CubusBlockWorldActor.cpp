@@ -1470,7 +1470,7 @@ void ACubusBlockWorldActor::BuildDensitySurfaceRequiredCoordinates(const FCubusD
 	}
 
 	const int32		SafePadding			  = FMath::Clamp(VerticalPadding, 0, 2);
-	constexpr int32 SurfaceSamplesPerAxis = 3;
+	constexpr int32 SurfaceSamplesPerAxis = 9;
 	const float		ChunkSizeVoxels		  = static_cast<float>(Cubus::ChunkSize);
 
 	/*
@@ -1484,7 +1484,7 @@ void ACubusBlockWorldActor::BuildDensitySurfaceRequiredCoordinates(const FCubusD
 		IsValid(GeologyProfile) && GeologyProfile->bGenerateRivers
 			? FMath::Max(0.0f, GeologyProfile->RiverValleyDepth) + static_cast<float>(FMath::Max(0, GeologyProfile->RiverChannelDepth))
 			: 0.0f;
-	const float GeneralSurfaceSafety = 2.0f + static_cast<float>(SafePadding) * 2.0f;
+	const float GeneralSurfaceSafety = 8.0f + static_cast<float>(SafePadding) * 2.0f;
 	const float DownwardSafety		 = GeneralSurfaceSafety + RiverDownwardSafety;
 	const float UpwardSafety		 = GeneralSurfaceSafety;
 
