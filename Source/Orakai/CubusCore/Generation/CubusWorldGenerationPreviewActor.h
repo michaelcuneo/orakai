@@ -40,9 +40,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="32", ClampMax="256"))
     int32 PreviewMeshResolution = 160;
 
-    /** Number of visual-only smoothing passes applied to sampled preview heights. */
+    /** Optional visual-only smoothing passes. Smooth vertex normals are always generated. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0", ClampMax="3"))
-    int32 PreviewSmoothingPasses = 1;
+    int32 PreviewSmoothingPasses = 0;
 
     /** Render target size used by the UMG image. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="256", ClampMax="2048"))
@@ -56,20 +56,24 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="25.0", ClampMax="1000.0"))
     float PreviewVerticalRelief = 260.0f;
 
-    /**
-     * Margin around the COMPLETE terrain footprint. The implementation also
-     * enforces a generous minimum so stale serialized actor values cannot put
-     * the camera back into a close centre crop.
-     */
+    /** Margin around the complete terrain footprint. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="1.0", ClampMax="4.0"))
     float PreviewFramingMargin = 1.75f;
 
-    /** Minimum delay between DEM vertex updates while the generator is changing. */
+    /** Minimum delay between high-resolution vertex updates while generation changes. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0.02", ClampMax="2.0", Units="s"))
-    float PreviewRefreshInterval = 0.10f;
+    float PreviewRefreshInterval = 0.15f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview")
     float OrbitDegreesPerPixel = 0.22f;
+
+    /** Fixed elevation around which limited vertical drag is allowed. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="10.0", ClampMax="80.0"))
+    float PreviewBaseElevationDegrees = 38.0f;
+
+    /** Vertical orbit is deliberately limited; horizontal orbit remains unrestricted 360 degrees. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0.0", ClampMax="30.0"))
+    float PreviewPitchLimitDegrees = 10.0f;
 
     /** Optional override. By default an Engine vertex-colour debug material is used. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview")
@@ -82,7 +86,7 @@ public:
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|3D Preview", meta=(DisplayName="Apply Generated Terrain 3D Preview To Image"))
     bool ApplyPreviewToImage(UImage* TargetImage);
 
-    /** Orbit the displayed model. Intended to receive a UMG pointer CursorDelta. */
+    /** Horizontal drag spins through full 360 degrees; vertical drag is tightly capped. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|3D Preview", meta=(DisplayName="Rotate Generated Terrain 3D Preview"))
     void AddOrbitInput(FVector2D PointerDelta);
 
@@ -135,7 +139,7 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UTextureRenderTarget2D> PreviewRenderTarget = nullptr;
 
-    float PreviewYawDegrees = 0.0f;
+    float PreviewYawDegrees = -45.0f;
     float PreviewPitchDegrees = 0.0f;
     float RefreshCountdown = 0.0f;
     float LastObservedOverallProgress = -1.0f;
