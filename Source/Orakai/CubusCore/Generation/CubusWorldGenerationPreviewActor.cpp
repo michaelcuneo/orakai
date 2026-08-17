@@ -77,7 +77,9 @@ ACubusWorldGenerationPreviewActor::ACubusWorldGenerationPreviewActor()
     PreviewMesh->SetupAttachment(MeshPivot);
     PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     PreviewMesh->SetGenerateOverlapEvents(false);
-    PreviewMesh->CastShadow = true;
+    PreviewMesh->CastShadow = false;
+    PreviewMesh->bCastDynamicShadow = false;
+    PreviewMesh->bCastStaticShadow = false;
 
     PreviewCapture = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("PreviewCapture"));
     PreviewCapture->SetupAttachment(Root);
@@ -86,11 +88,20 @@ ACubusWorldGenerationPreviewActor::ACubusWorldGenerationPreviewActor()
     PreviewCapture->bCaptureEveryFrame = false;
     PreviewCapture->bCaptureOnMovement = false;
     PreviewCapture->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+    PreviewCapture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+    PreviewCapture->ShowFlags.SetAtmosphere(false);
+    PreviewCapture->ShowFlags.SetCloud(false);
+    PreviewCapture->ShowFlags.SetFog(false);
+    PreviewCapture->ShowFlags.SetMotionBlur(false);
+    PreviewCapture->ShowFlags.SetBloom(false);
+    PreviewCapture->ShowFlags.SetAmbientOcclusion(false);
+    PreviewCapture->ShowFlags.SetAntiAliasing(true);
 
     PreviewLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("PreviewLight"));
     PreviewLight->SetupAttachment(Root);
     PreviewLight->SetRelativeRotation(FRotator(-52.0, -36.0, 0.0));
     PreviewLight->Intensity = 5.0f;
+    PreviewLight->CastShadows = false;
 
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> VertexMaterial(
         TEXT("/Engine/EngineDebugMaterials/VertexColorMaterial.VertexColorMaterial"));
@@ -105,6 +116,10 @@ void ACubusWorldGenerationPreviewActor::BeginPlay()
     Super::BeginPlay();
     ResolveLoader();
     EnsureRenderTarget();
+    if (IsValid(PreviewCapture) && IsValid(PreviewMesh))
+    {
+        PreviewCapture->ShowOnlyComponent(PreviewMesh);
+    }
     ResetOrbit();
     RefreshPreviewNow();
 }
@@ -128,7 +143,7 @@ void ACubusWorldGenerationPreviewActor::Tick(const float DeltaSeconds)
 
     const float CurrentProgress = TargetLoader->GetOverallProgress();
     const uint8 CurrentStage = static_cast<uint8>(TargetLoader->GetGenerationStage());
-    if (!FMath::IsNearlyEqual(CurrentProgress, LastObservedOverallProgress, KINDA_SMALL_NUMBER) || CurrentStage != LastObservedStage)
+    if (!FMath::IsNearlyEqual(CurrentProgress, LastObservedOverallProgress, 0.0025f) || CurrentStage != LastObservedStage)
     {
         RefreshPreviewNow();
     }
@@ -190,17 +205,23 @@ bool ACubusWorldGenerationPreviewActor::ApplyPreviewToImage(UImage* TargetImage)
 void ACubusWorldGenerationPreviewActor::AddOrbitInput(const FVector2D PointerDelta)
 {
     PreviewYawDegrees = FMath::Fmod(PreviewYawDegrees + static_cast<float>(PointerDelta.X) * OrbitDegreesPerPixel, 360.0f);
+    if (PreviewYawDegrees < 0.0f)
+    {
+        PreviewYawDegrees += 360.0f;
+    }
+
+    const float PitchLimit = FMath::Max(0.0f, PreviewPitchLimitDegrees);
     PreviewPitchDegrees = FMath::Clamp(
         PreviewPitchDegrees - static_cast<float>(PointerDelta.Y) * OrbitDegreesPerPixel,
-        -18.0f,
-        28.0f);
+        -PitchLimit,
+        PitchLimit);
     ApplyOrbitTransform();
     CapturePreview();
 }
 
 void ACubusWorldGenerationPreviewActor::ResetOrbit()
 {
-    PreviewYawDegrees = 0.0f;
+    PreviewYawDegrees = -45.0f;
     PreviewPitchDegrees = 0.0f;
     ApplyOrbitTransform();
     CapturePreview();
@@ -208,32 +229,34 @@ void ACubusWorldGenerationPreviewActor::ResetOrbit()
 
 void ACubusWorldGenerationPreviewActor::ApplyOrbitTransform()
 {
-    if (IsValid(MeshPivot))
+    if (!IsValid(PreviewCapture))
     {
-        MeshPivot->SetRelativeRotation(FRotator(PreviewPitchDegrees, PreviewYawDegrees, 0.0f));
+        return;
     }
 
-    if (IsValid(PreviewCapture))
-    {
-        const float HalfX = static_cast<float>(BuiltMeshDimensions.X) * 0.5f;
-        const float HalfY = static_cast<float>(BuiltMeshDimensions.Y) * 0.5f;
-        const float HalfZ = PreviewVerticalRelief * 0.5f;
-        const float BoundingRadius = FMath::Sqrt(HalfX * HalfX + HalfY * HalfY + HalfZ * HalfZ);
+    const float HalfX = static_cast<float>(BuiltMeshDimensions.X) * 0.5f;
+    const float HalfY = static_cast<float>(BuiltMeshDimensions.Y) * 0.5f;
+    const float HalfZ = PreviewVerticalRelief * 0.5f;
+    const float BoundingRadius = FMath::Sqrt(HalfX * HalfX + HalfY * HalfY + HalfZ * HalfZ);
 
-        // Enforce a large whole-domain frame even if an old placed actor has a stale serialized value.
-        const float EffectiveMargin = FMath::Max(1.75f, PreviewFramingMargin);
-        const float FullDiameter = FMath::Max(PreviewHorizontalSize, BoundingRadius * 2.0f);
+    const float EffectiveMargin = FMath::Max(1.75f, PreviewFramingMargin);
+    const float FullDiameter = FMath::Max(PreviewHorizontalSize, BoundingRadius * 2.0f);
+    PreviewCapture->ProjectionType = ECameraProjectionMode::Orthographic;
+    PreviewCapture->OrthoWidth = FullDiameter * EffectiveMargin;
 
-        PreviewCapture->ProjectionType = ECameraProjectionMode::Orthographic;
-        PreviewCapture->OrthoWidth = FullDiameter * EffectiveMargin;
+    const float Distance = FMath::Max(FullDiameter * 1.6f, 1800.0f);
+    const float ElevationDegrees = PreviewBaseElevationDegrees + PreviewPitchDegrees;
+    const float ElevationRadians = FMath::DegreesToRadians(ElevationDegrees);
+    const float YawRadians = FMath::DegreesToRadians(PreviewYawDegrees);
+    const float HorizontalRadius = Distance * FMath::Cos(ElevationRadians);
 
-        // Proper off-axis isometric camera. This is deliberately NOT on the X axis
-        // and therefore no longer reads as a camera sitting in the terrain centre.
-        const float Distance = FMath::Max(FullDiameter * 1.6f, 1800.0f);
-        const FVector CameraLocation(Distance, -Distance, Distance * 0.95f);
-        PreviewCapture->SetRelativeLocation(CameraLocation);
-        PreviewCapture->SetRelativeRotation(UKismetMathLibrary::FindLookAtRotation(CameraLocation, FVector::ZeroVector));
-    }
+    const FVector CameraLocation(
+        HorizontalRadius * FMath::Cos(YawRadians),
+        HorizontalRadius * FMath::Sin(YawRadians),
+        Distance * FMath::Sin(ElevationRadians));
+
+    PreviewCapture->SetRelativeLocation(CameraLocation);
+    PreviewCapture->SetRelativeRotation(UKismetMathLibrary::FindLookAtRotation(CameraLocation, FVector::ZeroVector));
 }
 
 void ACubusWorldGenerationPreviewActor::RefreshPreviewNow()
@@ -378,72 +401,58 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
     TArray<FLinearColor> Colors;
     TArray<FProcMeshTangent> Tangents;
 
-    Vertices.Reserve(Resolution * Resolution);
-    Normals.Reserve(Resolution * Resolution);
-    UVs.Reserve(Resolution * Resolution);
-    Colors.Reserve(Resolution * Resolution);
-    Triangles.Reserve((Resolution - 1) * (Resolution - 1) * 6);
+    Vertices.SetNumUninitialized(Resolution * Resolution);
+    Normals.Init(FVector::UpVector, Resolution * Resolution);
+    UVs.SetNumUninitialized(Resolution * Resolution);
+    Colors.SetNumUninitialized(Resolution * Resolution);
 
     for (int32 Y = 0; Y < Resolution; ++Y)
     {
         const float V = static_cast<float>(Y) / static_cast<float>(Resolution - 1);
         for (int32 X = 0; X < Resolution; ++X)
         {
-            const int32 SourceIndex = Y * Resolution + X;
+            const int32 Index = Y * Resolution + X;
             const float U = static_cast<float>(X) / static_cast<float>(Resolution - 1);
             const float LocalX = (U - 0.5f) * static_cast<float>(BuiltMeshDimensions.X);
             const float LocalY = (V - 0.5f) * static_cast<float>(BuiltMeshDimensions.Y);
-            const float LocalZ = HasHeight[SourceIndex]
-                ? (Heights[SourceIndex] - MidHeight) * VerticalScale
+            const float LocalZ = HasHeight[Index]
+                ? (Heights[Index] - MidHeight) * VerticalScale
                 : 0.0f;
 
-            Vertices.Add(FVector(LocalX, LocalY, LocalZ));
-            UVs.Add(FVector2D(U, 1.0f - V));
-            Colors.Add(HasHeight[SourceIndex]
-                ? HeightColor(FMath::Clamp((Heights[SourceIndex] - MinHeight) / HeightSpan, 0.0f, 1.0f))
-                : FLinearColor(0.055f, 0.075f, 0.06f, 1.0f));
-            Normals.Add(FVector::UpVector);
+            Vertices[Index] = FVector(LocalX, LocalY, LocalZ);
+            UVs[Index] = FVector2D(U, 1.0f - V);
+            Colors[Index] = HasHeight[Index]
+                ? HeightColor(FMath::Clamp((Heights[Index] - MinHeight) / HeightSpan, 0.0f, 1.0f))
+                : FLinearColor(0.055f, 0.075f, 0.06f, 1.0f);
         }
     }
 
-    for (int32 Y = 0; Y < Resolution - 1; ++Y)
+    // Smooth normals from adjacent height samples in O(vertices), rather than
+    // accumulating every triangle face normal on every live refresh.
+    const float StepX = static_cast<float>(BuiltMeshDimensions.X) / FMath::Max(1, Resolution - 1);
+    const float StepY = static_cast<float>(BuiltMeshDimensions.Y) / FMath::Max(1, Resolution - 1);
+    for (int32 Y = 0; Y < Resolution; ++Y)
     {
-        for (int32 X = 0; X < Resolution - 1; ++X)
+        for (int32 X = 0; X < Resolution; ++X)
         {
-            const int32 I00 = Y * Resolution + X;
-            const int32 I10 = I00 + 1;
-            const int32 I01 = (Y + 1) * Resolution + X;
-            const int32 I11 = I01 + 1;
-
-            Triangles.Add(I00);
-            Triangles.Add(I11);
-            Triangles.Add(I10);
-            Triangles.Add(I00);
-            Triangles.Add(I01);
-            Triangles.Add(I11);
+            const int32 XL = FMath::Max(0, X - 1);
+            const int32 XR = FMath::Min(Resolution - 1, X + 1);
+            const int32 YD = FMath::Max(0, Y - 1);
+            const int32 YU = FMath::Min(Resolution - 1, Y + 1);
+            const float ZL = Vertices[Y * Resolution + XL].Z;
+            const float ZR = Vertices[Y * Resolution + XR].Z;
+            const float ZD = Vertices[YD * Resolution + X].Z;
+            const float ZU = Vertices[YU * Resolution + X].Z;
+            const FVector DX(FMath::Max(StepX * static_cast<float>(XR - XL), UE_SMALL_NUMBER), 0.0f, ZR - ZL);
+            const FVector DY(0.0f, FMath::Max(StepY * static_cast<float>(YU - YD), UE_SMALL_NUMBER), ZU - ZD);
+            Normals[Y * Resolution + X] = FVector::CrossProduct(DX, DY).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
         }
-    }
-
-    Normals.Init(FVector::ZeroVector, Vertices.Num());
-    for (int32 Index = 0; Index + 2 < Triangles.Num(); Index += 3)
-    {
-        const int32 A = Triangles[Index];
-        const int32 B = Triangles[Index + 1];
-        const int32 C = Triangles[Index + 2];
-        const FVector FaceNormal = FVector::CrossProduct(Vertices[B] - Vertices[A], Vertices[C] - Vertices[A]).GetSafeNormal();
-        Normals[A] += FaceNormal;
-        Normals[B] += FaceNormal;
-        Normals[C] += FaceNormal;
-    }
-    for (FVector& Normal : Normals)
-    {
-        Normal = Normal.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
     }
 
     const bool bTopologyMatches =
         PreviewMesh->GetNumSections() > 0 &&
         CachedPickVertices.Num() == Vertices.Num() &&
-        CachedPickTriangles.Num() == Triangles.Num();
+        CachedPickTriangles.Num() == (Resolution - 1) * (Resolution - 1) * 6;
 
     if (bTopologyMatches)
     {
@@ -451,16 +460,34 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
     }
     else
     {
+        Triangles.Reserve((Resolution - 1) * (Resolution - 1) * 6);
+        for (int32 Y = 0; Y < Resolution - 1; ++Y)
+        {
+            for (int32 X = 0; X < Resolution - 1; ++X)
+            {
+                const int32 I00 = Y * Resolution + X;
+                const int32 I10 = I00 + 1;
+                const int32 I01 = (Y + 1) * Resolution + X;
+                const int32 I11 = I01 + 1;
+                Triangles.Add(I00);
+                Triangles.Add(I11);
+                Triangles.Add(I10);
+                Triangles.Add(I00);
+                Triangles.Add(I01);
+                Triangles.Add(I11);
+            }
+        }
+
         PreviewMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, Colors, Tangents, false);
         PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         if (IsValid(PreviewMaterial))
         {
             PreviewMesh->SetMaterial(0, PreviewMaterial);
         }
+        CachedPickTriangles = MoveTemp(Triangles);
     }
 
     CachedPickVertices = MoveTemp(Vertices);
-    CachedPickTriangles = MoveTemp(Triangles);
     bHasRenderableTerrain = true;
 }
 
