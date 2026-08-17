@@ -5,5 +5,4 @@ ACubusSpawnStreamingPawn::ACubusSpawnStreamingPawn()
     PrimaryActorTick.bCanEverTick = false;
     SetActorHiddenInGame(true);
     SetActorEnableCollision(false);
-    bAddDefaultMovementBindings = false;
 }
