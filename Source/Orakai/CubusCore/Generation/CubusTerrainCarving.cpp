@@ -2,12 +2,10 @@
 
 namespace CubusTerrainCarving
 {
-    struct FSegmentInfluence
+    struct FSegmentIndex
     {
-        float DistanceMeters = MAX_flt;
-        float AreaSquareKm = 0.0f;
-        float ProfileHeightMeters = 0.0f;
-        int32 StreamOrder = 0;
+        float BucketSizeMeters = 96.0f;
+        TMap<FIntPoint, TArray<int32>> Buckets;
     };
 
     float Smooth01(const float Value)
@@ -61,19 +59,108 @@ namespace CubusTerrainCarving
         return FMath::Pow(Normalized, FMath::Max(0.05f, Settings.AreaExponent));
     }
 
-    FSegmentInfluence FindBestInfluence(
-        const FVector2D& Point,
+    float MatureStrength(
+        const FCubusTerrainDrainageSegment& Segment,
+        const FCubusTerrainCarvingSettings& Settings
+    )
+    {
+        const float Strength = AreaStrength(Segment.ContributingAreaSquareKm, Settings);
+        const float OrderBoost = FMath::Clamp(
+            (static_cast<float>(Segment.StrahlerOrder) - 1.0f) * 0.08f,
+            0.0f,
+            0.28f
+        );
+        return FMath::Clamp(Strength + OrderBoost, 0.0f, 1.0f);
+    }
+
+    float ValleyWidthForSegment(
+        const FCubusTerrainDrainageSegment& Segment,
+        const FCubusTerrainCarvingSettings& Settings
+    )
+    {
+        return FMath::Lerp(
+            Settings.HeadwaterValleyHalfWidthMeters,
+            Settings.MajorValleyHalfWidthMeters,
+            MatureStrength(Segment, Settings)
+        );
+    }
+
+    FIntPoint BucketCoordinate(const FVector2D& Point, const float BucketSizeMeters)
+    {
+        const double SafeBucket = FMath::Max(16.0, static_cast<double>(BucketSizeMeters));
+        return FIntPoint(
+            FMath::FloorToInt(Point.X / SafeBucket),
+            FMath::FloorToInt(Point.Y / SafeBucket)
+        );
+    }
+
+    FSegmentIndex BuildSegmentIndex(
         const TArray<FCubusTerrainDrainageSegment>& Segments,
         const FCubusTerrainCarvingSettings& Settings
     )
     {
-        FSegmentInfluence Best;
-        float BestNormalizedDistance = MAX_flt;
-        int32 Considered = 0;
+        FSegmentIndex Index;
+        Index.BucketSizeMeters = FMath::Max(32.0f, Settings.SegmentBucketSizeMeters);
 
-        for (const FCubusTerrainDrainageSegment& Segment : Segments)
+        for (int32 SegmentIndex = 0; SegmentIndex < Segments.Num(); ++SegmentIndex)
         {
-            const float Strength = AreaStrength(Segment.ContributingAreaSquareKm, Settings);
+            const FCubusTerrainDrainageSegment& Segment = Segments[SegmentIndex];
+            const float Radius = ValleyWidthForSegment(Segment, Settings);
+            const FVector2D Minimum(
+                FMath::Min(Segment.StartMeters.X, Segment.EndMeters.X) - Radius,
+                FMath::Min(Segment.StartMeters.Y, Segment.EndMeters.Y) - Radius
+            );
+            const FVector2D Maximum(
+                FMath::Max(Segment.StartMeters.X, Segment.EndMeters.X) + Radius,
+                FMath::Max(Segment.StartMeters.Y, Segment.EndMeters.Y) + Radius
+            );
+
+            const FIntPoint MinBucket = BucketCoordinate(Minimum, Index.BucketSizeMeters);
+            const FIntPoint MaxBucket = BucketCoordinate(Maximum, Index.BucketSizeMeters);
+            for (int32 Y = MinBucket.Y; Y <= MaxBucket.Y; ++Y)
+            {
+                for (int32 X = MinBucket.X; X <= MaxBucket.X; ++X)
+                {
+                    Index.Buckets.FindOrAdd(FIntPoint(X, Y)).Add(SegmentIndex);
+                }
+            }
+        }
+
+        return Index;
+    }
+
+    FCubusTerrainCarvingSample Evaluate(
+        const FVector2D& Point,
+        const float OriginalHeightMeters,
+        const TArray<FCubusTerrainDrainageSegment>& Segments,
+        const FSegmentIndex& SegmentIndex,
+        const FCubusTerrainCarvingSettings& Settings
+    )
+    {
+        FCubusTerrainCarvingSample Result;
+        Result.OriginalHeightMeters = OriginalHeightMeters;
+        Result.CarvedHeightMeters = OriginalHeightMeters;
+
+        const TArray<int32>* CandidateIndices = SegmentIndex.Buckets.Find(
+            BucketCoordinate(Point, SegmentIndex.BucketSizeMeters)
+        );
+        if (CandidateIndices == nullptr)
+        {
+            return Result;
+        }
+
+        float BestArea = 0.0f;
+        int32 BestOrder = 0;
+
+        for (const int32 Index : *CandidateIndices)
+        {
+            if (!Segments.IsValidIndex(Index))
+            {
+                continue;
+            }
+
+            const FCubusTerrainDrainageSegment& Segment = Segments[Index];
+            const float Strength = MatureStrength(Segment, Settings);
             const float ValleyWidth = FMath::Lerp(
                 Settings.HeadwaterValleyHalfWidthMeters,
                 Settings.MajorValleyHalfWidthMeters,
@@ -82,104 +169,107 @@ namespace CubusTerrainCarving
 
             float Alpha = 0.0f;
             const float Distance = DistanceToSegment(Point, Segment.StartMeters, Segment.EndMeters, Alpha);
-            if (Distance > ValleyWidth)
+            if (Distance >= ValleyWidth)
             {
                 continue;
             }
 
-            const float NormalizedDistance = Distance / FMath::Max(1.0f, ValleyWidth);
-            if (NormalizedDistance < BestNormalizedDistance)
+            const float FloodplainWidth = FMath::Min(
+                ValleyWidth * 0.82f,
+                FMath::Lerp(
+                    Settings.HeadwaterFloodplainHalfWidthMeters,
+                    Settings.MajorFloodplainHalfWidthMeters,
+                    Strength
+                )
+            );
+            const float ChannelWidth = FMath::Min(
+                FloodplainWidth * 0.55f,
+                FMath::Lerp(
+                    Settings.HeadwaterChannelHalfWidthMeters,
+                    Settings.MajorChannelHalfWidthMeters,
+                    Strength
+                )
+            );
+            const float BankWidth = FMath::Min(
+                FloodplainWidth,
+                ChannelWidth * FMath::Max(1.1f, Settings.BankWidthScale)
+            );
+
+            const float ValleyWeight = Falloff(Distance, ValleyWidth);
+            const float FloodplainWeight = Falloff(Distance, FloodplainWidth);
+            const float BankWeight = Falloff(Distance, BankWidth);
+            const float ChannelWeight = Falloff(Distance, ChannelWidth);
+
+            const float ValleyDepth = FMath::Lerp(
+                Settings.HeadwaterValleyDepthMeters,
+                Settings.MajorValleyDepthMeters,
+                Strength
+            );
+            const float FloodplainDepth = FMath::Lerp(
+                Settings.HeadwaterFloodplainDepthMeters,
+                Settings.MajorFloodplainDepthMeters,
+                Strength
+            );
+            const float ChannelDepth = FMath::Lerp(
+                Settings.HeadwaterChannelDepthMeters,
+                Settings.MajorChannelDepthMeters,
+                Strength
+            );
+            const float ProfileHeight = FMath::Lerp(
+                Segment.StartElevationMeters,
+                Segment.EndElevationMeters,
+                Alpha
+            );
+
+            float CandidateHeight = OriginalHeightMeters - ValleyDepth * ValleyWeight;
+            if (FloodplainWeight > 0.0f)
             {
-                BestNormalizedDistance = NormalizedDistance;
-                Best.DistanceMeters = Distance;
-                Best.AreaSquareKm = Segment.ContributingAreaSquareKm;
-                Best.ProfileHeightMeters = FMath::Lerp(
-                    Segment.StartElevationMeters,
-                    Segment.EndElevationMeters,
-                    Alpha
+                const float FloodplainTarget = ProfileHeight - FloodplainDepth;
+                CandidateHeight = FMath::Lerp(
+                    CandidateHeight,
+                    FMath::Min(CandidateHeight, FloodplainTarget),
+                    FloodplainWeight
                 );
-                Best.StreamOrder = Segment.StrahlerOrder;
             }
-
-            ++Considered;
-            if (Considered >= FMath::Max(1, Settings.MaxNearbySegments))
+            if (BankWeight > 0.0f)
             {
-                break;
+                const float BankTarget = ProfileHeight - FloodplainDepth - ChannelDepth * 0.35f;
+                CandidateHeight = FMath::Lerp(
+                    CandidateHeight,
+                    FMath::Min(CandidateHeight, BankTarget),
+                    BankWeight * BankWeight
+                );
+            }
+            if (ChannelWeight > 0.0f)
+            {
+                const float ChannelTarget = ProfileHeight - FloodplainDepth - ChannelDepth;
+                CandidateHeight = FMath::Lerp(
+                    CandidateHeight,
+                    FMath::Min(CandidateHeight, ChannelTarget),
+                    ChannelWeight
+                );
+            }
+
+            // Union all overlapping valley cross-sections. Taking the minimum is
+            // commutative, so results no longer depend on segment collection order.
+            Result.CarvedHeightMeters = FMath::Min(Result.CarvedHeightMeters, CandidateHeight);
+            Result.ValleyWeight = FMath::Max(Result.ValleyWeight, ValleyWeight);
+            Result.FloodplainWeight = FMath::Max(Result.FloodplainWeight, FloodplainWeight);
+            Result.BankWeight = FMath::Max(Result.BankWeight, BankWeight);
+            Result.ChannelWeight = FMath::Max(Result.ChannelWeight, ChannelWeight);
+
+            if (Segment.ContributingAreaSquareKm > BestArea ||
+                (FMath::IsNearlyEqual(Segment.ContributingAreaSquareKm, BestArea) && Segment.StrahlerOrder > BestOrder))
+            {
+                BestArea = Segment.ContributingAreaSquareKm;
+                BestOrder = Segment.StrahlerOrder;
             }
         }
 
-        return Best;
-    }
-
-    FCubusTerrainCarvingSample Evaluate(
-        const FVector2D& Point,
-        const float OriginalHeightMeters,
-        const TArray<FCubusTerrainDrainageSegment>& Segments,
-        const FCubusTerrainCarvingSettings& Settings
-    )
-    {
-        FCubusTerrainCarvingSample Result;
-        Result.OriginalHeightMeters = OriginalHeightMeters;
-        Result.CarvedHeightMeters = OriginalHeightMeters;
-
-        const FSegmentInfluence Influence = FindBestInfluence(Point, Segments, Settings);
-        if (Influence.DistanceMeters == MAX_flt)
-        {
-            return Result;
-        }
-
-        const float Strength = AreaStrength(Influence.AreaSquareKm, Settings);
-        const float OrderBoost = FMath::Clamp((static_cast<float>(Influence.StreamOrder) - 1.0f) * 0.08f, 0.0f, 0.28f);
-        const float MatureStrength = FMath::Clamp(Strength + OrderBoost, 0.0f, 1.0f);
-
-        const float ValleyWidth = FMath::Lerp(Settings.HeadwaterValleyHalfWidthMeters, Settings.MajorValleyHalfWidthMeters, MatureStrength);
-        const float FloodplainWidth = FMath::Min(
-            ValleyWidth * 0.82f,
-            FMath::Lerp(Settings.HeadwaterFloodplainHalfWidthMeters, Settings.MajorFloodplainHalfWidthMeters, MatureStrength)
-        );
-        const float ChannelWidth = FMath::Min(
-            FloodplainWidth * 0.55f,
-            FMath::Lerp(Settings.HeadwaterChannelHalfWidthMeters, Settings.MajorChannelHalfWidthMeters, MatureStrength)
-        );
-        const float BankWidth = FMath::Min(FloodplainWidth, ChannelWidth * FMath::Max(1.1f, Settings.BankWidthScale));
-
-        Result.ValleyWeight = Falloff(Influence.DistanceMeters, ValleyWidth);
-        Result.FloodplainWeight = Falloff(Influence.DistanceMeters, FloodplainWidth);
-        Result.BankWeight = Falloff(Influence.DistanceMeters, BankWidth);
-        Result.ChannelWeight = Falloff(Influence.DistanceMeters, ChannelWidth);
-        Result.ContributingAreaSquareKm = Influence.AreaSquareKm;
-        Result.StrahlerOrder = Influence.StreamOrder;
-
-        const float ValleyDepth = FMath::Lerp(Settings.HeadwaterValleyDepthMeters, Settings.MajorValleyDepthMeters, MatureStrength);
-        const float FloodplainDepth = FMath::Lerp(Settings.HeadwaterFloodplainDepthMeters, Settings.MajorFloodplainDepthMeters, MatureStrength);
-        const float ChannelDepth = FMath::Lerp(Settings.HeadwaterChannelDepthMeters, Settings.MajorChannelDepthMeters, MatureStrength);
-
-        // The broad valley is a smooth incision into the existing landscape.
-        // Floodplain and channel then converge on the monotonically routed
-        // hydraulic profile, preventing disconnected line/lump/line cuts.
-        float Carved = OriginalHeightMeters - ValleyDepth * Result.ValleyWeight;
-
-        if (Result.FloodplainWeight > 0.0f)
-        {
-            const float FloodplainTarget = Influence.ProfileHeightMeters - FloodplainDepth;
-            Carved = FMath::Lerp(Carved, FMath::Min(Carved, FloodplainTarget), Result.FloodplainWeight);
-        }
-
-        if (Result.BankWeight > 0.0f)
-        {
-            const float BankT = Result.BankWeight * Result.BankWeight;
-            const float BankTarget = Influence.ProfileHeightMeters - FloodplainDepth - ChannelDepth * 0.35f;
-            Carved = FMath::Lerp(Carved, FMath::Min(Carved, BankTarget), BankT);
-        }
-
-        if (Result.ChannelWeight > 0.0f)
-        {
-            const float ChannelTarget = Influence.ProfileHeightMeters - FloodplainDepth - ChannelDepth;
-            Carved = FMath::Lerp(Carved, FMath::Min(Carved, ChannelTarget), Result.ChannelWeight);
-        }
-
-        Result.CarvedHeightMeters = FMath::Min(OriginalHeightMeters, Carved);
+        Result.CarvedHeightMeters = FMath::Min(OriginalHeightMeters, Result.CarvedHeightMeters);
         Result.TotalIncisionMeters = OriginalHeightMeters - Result.CarvedHeightMeters;
+        Result.ContributingAreaSquareKm = BestArea;
+        Result.StrahlerOrder = BestOrder;
         return Result;
     }
 
@@ -212,6 +302,7 @@ FCubusTerrainRasterTile FCubusTerrainCarving::CarveTile(
         Settings.Drainage,
         Segments
     );
+    const FSegmentIndex SegmentIndex = BuildSegmentIndex(Segments, Settings);
 
     for (int32 StorageY = 0; StorageY < Result.StorageSampleCount; ++StorageY)
     {
@@ -222,9 +313,15 @@ FCubusTerrainRasterTile FCubusTerrainCarving::CarveTile(
         {
             const int32 GridX = StorageX - Result.HaloSamples;
             const double WorldX = Minimum.X + static_cast<double>(GridX) * Result.SampleSpacingMeters;
-            const int32 Index = StorageY * Result.StorageSampleCount + StorageX;
-            const float Original = StructuralTile.HeightMeters[Index];
-            Result.HeightMeters[Index] = Evaluate(FVector2D(WorldX, WorldY), Original, Segments, Settings).CarvedHeightMeters;
+            const int32 StorageIndex = StorageY * Result.StorageSampleCount + StorageX;
+            const float Original = StructuralTile.HeightMeters[StorageIndex];
+            Result.HeightMeters[StorageIndex] = Evaluate(
+                FVector2D(WorldX, WorldY),
+                Original,
+                Segments,
+                SegmentIndex,
+                Settings
+            ).CarvedHeightMeters;
         }
     }
 
@@ -255,6 +352,13 @@ FCubusTerrainCarvingSample FCubusTerrainCarving::Sample(
         Settings.Drainage,
         Segments
     );
+    const FSegmentIndex SegmentIndex = BuildSegmentIndex(Segments, Settings);
 
-    return Evaluate(FVector2D(WorldXmeters, WorldYmeters), Original, Segments, Settings);
+    return Evaluate(
+        FVector2D(WorldXmeters, WorldYmeters),
+        Original,
+        Segments,
+        SegmentIndex,
+        Settings
+    );
 }
