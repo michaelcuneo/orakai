@@ -49,15 +49,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCubusGenerationFinished);
 
-/**
- * Blueprint-facing orchestrator for the world-generation loader level.
- *
- * The existing WBP owns the loading UI, the spawn marker and the SPAWN button.
- * This actor owns only the authoritative generation/loading state exposed to
- * that Blueprint. Generation is not considered complete until the generated
- * DEM has also completed the support-chunk pass, full gameplay chunk pass and
- * LOD1-LOD6 visual pass in this same world.
- */
 UCLASS(BlueprintType, Blueprintable)
 class ORAKAI_API ACubusWorldGenerationLoaderActor : public AActor
 {
@@ -89,7 +80,6 @@ public:
     UFUNCTION(BlueprintPure, Category="Cubus|Generation")
     FText GetStageDisplayName() const;
 
-    /** True only after DEM generation + support chunks + gameplay chunks + LOD1-LOD6 are resident. */
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Spawn", meta=(DisplayName="Is Generated Spawn Selection Ready"))
     bool IsGeneratedSpawnSelectionReady() const
     {
@@ -99,7 +89,6 @@ public:
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Preview")
     UTexture2D* GetPreviewTexture() const { return PreviewTexture; }
 
-    /** Existing WBP integration point for the interactive 3D preview. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|3D Preview",
         meta=(DisplayName="Get Or Create Generated Terrain 3D Preview"))
     ACubusWorldGenerationPreviewActor* GetOrCreateGeneratedTerrain3DPreview()
@@ -191,12 +180,6 @@ public:
         return FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(OutWorldMeters);
     }
 
-    /**
-     * Final SPAWN action used by the existing WBP. Once the proposed position is
-     * confirmed, retain the generated DEM handoff and open Lvl_ThirdPerson.
-     * The gameplay GameMode then holds the real character until that map's
-     * actual density chunks and terrain LODs are resident at the selected point.
-     */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Confirm Generated Spawn"))
     bool ConfirmGeneratedSpawn(FVector2D& OutWorldMeters)
     {
@@ -233,7 +216,6 @@ public:
         return FCubusGeneratedTerrainRuntime::TryGetConfirmedSpawnSurfaceHeightMeters(OutHeightMeters);
     }
 
-    /** Compatibility node: travel is now performed by Confirm Generated Spawn. */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Enter Generated World"))
     bool EnterGeneratedWorld()
     {
@@ -250,6 +232,13 @@ public:
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Diagnostics")
     bool GetGeneratedHeightMeters(double WorldXmeters, double WorldYmeters, float& OutHeightMeters) const;
 
+    /**
+     * Fast live-preview path. Resamples the already-maintained preview height
+     * raster directly from memory, avoiding thousands of tile-map lookups and
+     * terrain interpolation calls from the 3D preview every refresh.
+     */
+    bool GetLivePreviewHeightField(int32 Resolution, TArray<float>& OutHeights, TArray<uint8>& OutValid) const;
+
     UPROPERTY(BlueprintAssignable, Category="Cubus|Generation|Events")
     FCubusGenerationStageChanged OnStageChanged;
 
@@ -259,11 +248,9 @@ public:
     UPROPERTY(BlueprintAssignable, Category="Cubus|Generation|Events")
     FCubusGenerationFinished OnGenerationFinished;
 
-    /** Legacy setting retained for serialized placed actors. Completion itself never travels. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation")
     bool bTravelToGameplayWhenComplete = false;
 
-    /** Gameplay map opened only when the player presses SPAWN and confirmation succeeds. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation")
     FName GameplayLevelName = TEXT("Lvl_ThirdPerson");
 
