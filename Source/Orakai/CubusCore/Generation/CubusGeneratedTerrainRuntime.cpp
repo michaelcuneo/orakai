@@ -13,10 +13,6 @@ void FCubusGeneratedTerrainRuntime::Configure(
 {
     FWriteScopeLock Lock(StateLock);
 
-    // A loader generation is a complete replacement world snapshot, even when
-    // the player deliberately regenerates the same seed with different tuning.
-    // Never let tiles from an older run survive until their coordinates happen
-    // to be overwritten by the new run.
     State = FState();
     State.WorldSeed = WorldSeed;
     State.RasterSettings = RasterSettings;
@@ -57,6 +53,126 @@ void FCubusGeneratedTerrainRuntime::StoreTileIfActive(const FCubusTerrainRasterT
     State.Tiles.Add(Tile.GetTileCoordinate(), Tile);
 }
 
+void FCubusGeneratedTerrainRuntime::StorePreviewSnapshot(
+    const int32 Resolution,
+    const FBox2D& BoundsMeters,
+    const TArray<FColor>& Pixels
+)
+{
+    if (Resolution <= 0 || Pixels.Num() != Resolution * Resolution || !BoundsMeters.bIsValid)
+    {
+        return;
+    }
+
+    FWriteScopeLock Lock(StateLock);
+    if (!State.bActive)
+    {
+        return;
+    }
+
+    State.PreviewResolution = Resolution;
+    State.PreviewBoundsMeters = BoundsMeters;
+    State.PreviewPixels = Pixels;
+}
+
+bool FCubusGeneratedTerrainRuntime::GetPreviewSnapshot(
+    int32& OutResolution,
+    FBox2D& OutBoundsMeters,
+    TArray<FColor>& OutPixels
+)
+{
+    FReadScopeLock Lock(StateLock);
+    if (!State.bActive || State.PreviewResolution <= 0 || State.PreviewPixels.IsEmpty())
+    {
+        return false;
+    }
+
+    OutResolution = State.PreviewResolution;
+    OutBoundsMeters = State.PreviewBoundsMeters;
+    OutPixels = State.PreviewPixels;
+    return true;
+}
+
+void FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(const FVector2D& PreviewUV)
+{
+    FWriteScopeLock Lock(StateLock);
+    if (!State.bActive || !State.PreviewBoundsMeters.bIsValid)
+    {
+        return;
+    }
+
+    const double U = FMath::Clamp(PreviewUV.X, 0.0, 1.0);
+    const double V = FMath::Clamp(PreviewUV.Y, 0.0, 1.0);
+    const FVector2D Size = State.PreviewBoundsMeters.GetSize();
+
+    State.ProposedSpawnWorldMeters = FVector2D(
+        State.PreviewBoundsMeters.Min.X + U * Size.X,
+        State.PreviewBoundsMeters.Min.Y + (1.0 - V) * Size.Y
+    );
+    State.bHasProposedSpawn = true;
+    State.bHasConfirmedSpawn = false;
+}
+
+bool FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(FVector2D& OutWorldMeters)
+{
+    FReadScopeLock Lock(StateLock);
+    if (!State.bActive || !State.bHasProposedSpawn)
+    {
+        return false;
+    }
+
+    OutWorldMeters = State.ProposedSpawnWorldMeters;
+    return true;
+}
+
+bool FCubusGeneratedTerrainRuntime::ConfirmProposedSpawn()
+{
+    FWriteScopeLock Lock(StateLock);
+    if (!State.bActive || !State.bHasProposedSpawn)
+    {
+        return false;
+    }
+
+    float HeightMeters = 0.0f;
+    if (!TrySampleHeightMetersLocked(State.ProposedSpawnWorldMeters, HeightMeters))
+    {
+        return false;
+    }
+
+    State.ConfirmedSpawnWorldMeters = State.ProposedSpawnWorldMeters;
+    State.bHasConfirmedSpawn = true;
+    return true;
+}
+
+bool FCubusGeneratedTerrainRuntime::HasConfirmedSpawn()
+{
+    FReadScopeLock Lock(StateLock);
+    return State.bActive && State.bHasConfirmedSpawn;
+}
+
+bool FCubusGeneratedTerrainRuntime::GetConfirmedSpawnWorldMeters(FVector2D& OutWorldMeters)
+{
+    FReadScopeLock Lock(StateLock);
+    if (!State.bActive || !State.bHasConfirmedSpawn)
+    {
+        return false;
+    }
+
+    OutWorldMeters = State.ConfirmedSpawnWorldMeters;
+    return true;
+}
+
+bool FCubusGeneratedTerrainRuntime::TryGetConfirmedSpawnSurfaceHeightMeters(float& OutHeightMeters)
+{
+    FReadScopeLock Lock(StateLock);
+    if (!State.bActive || !State.bHasConfirmedSpawn)
+    {
+        return false;
+    }
+
+    return TrySampleHeightMetersLocked(State.ConfirmedSpawnWorldMeters, OutHeightMeters);
+}
+
 void FCubusGeneratedTerrainRuntime::Reset()
 {
     FWriteScopeLock Lock(StateLock);
@@ -81,6 +197,26 @@ int32 FCubusGeneratedTerrainRuntime::GetTileCount()
     return State.Tiles.Num();
 }
 
+bool FCubusGeneratedTerrainRuntime::TrySampleHeightMetersLocked(
+    const FVector2D& WorldMeters,
+    float& OutHeightMeters
+)
+{
+    const FIntPoint TileCoordinate = FCubusTerrainRasterBuilder::WorldToTileCoordinate(
+        WorldMeters.X,
+        WorldMeters.Y,
+        State.RasterSettings
+    );
+    const FCubusTerrainRasterTile* Tile = State.Tiles.Find(TileCoordinate);
+    if (Tile == nullptr || !Tile->IsValid())
+    {
+        return false;
+    }
+
+    OutHeightMeters = Tile->SampleHeightMeters(WorldMeters.X, WorldMeters.Y);
+    return true;
+}
+
 bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
     const float WorldX,
     const float WorldY,
@@ -100,6 +236,12 @@ bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
     const double WorldMetersX = CanonicalVoxelX * VoxelSizeMeters;
     const double WorldMetersY = CanonicalVoxelY * VoxelSizeMeters;
 
+    float HeightMeters = 0.0f;
+    if (!TrySampleHeightMetersLocked(FVector2D(WorldMetersX, WorldMetersY), HeightMeters))
+    {
+        return false;
+    }
+
     const FIntPoint TileCoordinate = FCubusTerrainRasterBuilder::WorldToTileCoordinate(
         WorldMetersX,
         WorldMetersY,
@@ -111,7 +253,6 @@ bool FCubusGeneratedTerrainRuntime::TrySampleTerrainForm(
         return false;
     }
 
-    const float HeightMeters = Tile->SampleHeightMeters(WorldMetersX, WorldMetersY);
     const float HeightVoxels = HeightMeters / static_cast<float>(VoxelSizeMeters);
 
     OutSample = FCubusTerrainFormSample();
