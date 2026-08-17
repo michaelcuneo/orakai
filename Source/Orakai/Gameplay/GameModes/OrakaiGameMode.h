@@ -10,13 +10,13 @@ class APlayerController;
 class ACubusSpawnStreamingPawn;
 
 /**
- * Third-person game mode with an explicit generated-world spawn lifecycle.
+ * Third-person GameMode with an explicit generated-world spawn lifecycle.
  *
- * Ordinary authored levels retain the standard GameMode spawn path. When a
- * generated DEM handoff is active, the controller enters the gameplay map
- * without its character. A hidden streaming-focus pawn is created only after
- * the player confirms a DEM position; the real character is created with
- * RestartPlayerAtTransform after that location's density coverage is resident.
+ * When the world-generation Loader is present, the real player character is
+ * withheld from map entry. The Loader remains in the current world, performs
+ * DEM generation followed by support chunks, the full gameplay chunk pass and
+ * LOD1-LOD6, and only then lets the existing WBP unlock spawn selection.
+ * Confirming the WBP's SPAWN action creates and possesses the real character.
  */
 UCLASS()
 class AOrakaiGameMode : public AGameModeBase
@@ -35,6 +35,9 @@ private:
     void TickGeneratedWorldSpawn();
 
     TWeakObjectPtr<APlayerController> PendingGeneratedPlayer;
+
+    // Retained for source compatibility with the earlier promotion path. The
+    // Loader now owns the temporary streaming-focus pawn used before SPAWN.
     TWeakObjectPtr<ACubusSpawnStreamingPawn> SpawnStreamingPawn;
     bool bGeneratedSpawnCompleted = false;
 };
