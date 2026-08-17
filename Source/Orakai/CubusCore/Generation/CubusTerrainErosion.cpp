@@ -1,22 +1,10 @@
 #include "CubusCore/Generation/CubusTerrainErosion.h"
 
-namespace CubusTerrainErosion
-{
-    float HeightAt(const TArray<float>& Heights, const int32 Size, const int32 X, const int32 Y)
-    {
-        const int32 SafeX = FMath::Clamp(X, 0, Size - 1);
-        const int32 SafeY = FMath::Clamp(Y, 0, Size - 1);
-        return Heights[SafeY * Size + SafeX];
-    }
-}
-
 FCubusTerrainRasterTile FCubusTerrainErosion::ErodeTile(
     const FCubusTerrainRasterTile& CarvedTile,
     const FCubusTerrainErosionSettings& InSettings
 )
 {
-    using namespace CubusTerrainErosion;
-
     if (!CarvedTile.IsValid())
     {
         return CarvedTile;
@@ -38,24 +26,33 @@ FCubusTerrainRasterTile FCubusTerrainErosion::ErodeTile(
     const float MinimumIncisionRise = FMath::Tan(FMath::DegreesToRadians(Settings.MinimumIncisionSlopeDegrees)) * CellSize;
 
     TArray<float> Current = Result.HeightMeters;
-    TArray<float> Next;
-    Next.SetNumUninitialized(Current.Num());
+
+    // Both buffers start from the same source. Each successive iteration processes
+    // a larger interior region as Margin shrinks, so every value that can be stale
+    // in the alternate buffer is overwritten before it becomes observable. This
+    // avoids copying the entire DEM once per iteration while preserving the halo.
+    TArray<float> Next = Current;
 
     for (int32 Iteration = 0; Iteration < Settings.Iterations; ++Iteration)
     {
-        Next = Current;
         const int32 Margin = Settings.Iterations - Iteration;
+        const float* CurrentData = Current.GetData();
+        float* NextData = Next.GetData();
 
         for (int32 Y = Margin; Y < Size - Margin; ++Y)
         {
+            const int32 Row = Y * Size;
+            const int32 PreviousRow = Row - Size;
+            const int32 FollowingRow = Row + Size;
+
             for (int32 X = Margin; X < Size - Margin; ++X)
             {
-                const int32 Index = Y * Size + X;
-                const float Centre = Current[Index];
-                const float Left = HeightAt(Current, Size, X - 1, Y);
-                const float Right = HeightAt(Current, Size, X + 1, Y);
-                const float Up = HeightAt(Current, Size, X, Y - 1);
-                const float Down = HeightAt(Current, Size, X, Y + 1);
+                const int32 Index = Row + X;
+                const float Centre = CurrentData[Index];
+                const float Left = CurrentData[Index - 1];
+                const float Right = CurrentData[Index + 1];
+                const float Up = CurrentData[PreviousRow + X];
+                const float Down = CurrentData[FollowingRow + X];
 
                 const float MinimumNeighbour = FMath::Min(FMath::Min(Left, Right), FMath::Min(Up, Down));
                 const float MaximumNeighbour = FMath::Max(FMath::Max(Left, Right), FMath::Max(Up, Down));
@@ -89,7 +86,7 @@ FCubusTerrainRasterTile FCubusTerrainErosion::ErodeTile(
                     NewHeight = FMath::Lerp(NewHeight, MeanNeighbour, Settings.HillslopeDiffusion);
                 }
 
-                Next[Index] = NewHeight;
+                NextData[Index] = NewHeight;
             }
         }
 
