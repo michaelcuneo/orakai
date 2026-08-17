@@ -81,8 +81,8 @@ ACubusWorldGenerationPreviewActor::ACubusWorldGenerationPreviewActor()
 
     PreviewCapture = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("PreviewCapture"));
     PreviewCapture->SetupAttachment(Root);
-    PreviewCapture->ProjectionType = ECameraProjectionMode::Perspective;
-    PreviewCapture->FOVAngle = 38.0f;
+    PreviewCapture->ProjectionType = ECameraProjectionMode::Orthographic;
+    PreviewCapture->OrthoWidth = PreviewHorizontalSize * 1.5f;
     PreviewCapture->bCaptureEveryFrame = false;
     PreviewCapture->bCaptureOnMovement = false;
     PreviewCapture->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
@@ -215,7 +215,16 @@ void ACubusWorldGenerationPreviewActor::ApplyOrbitTransform()
 
     if (IsValid(PreviewCapture))
     {
-        const float Distance = FMath::Max(PreviewHorizontalSize * PreviewCameraDistanceMultiplier, 900.0f);
+        const float HalfX = static_cast<float>(BuiltMeshDimensions.X) * 0.5f;
+        const float HalfY = static_cast<float>(BuiltMeshDimensions.Y) * 0.5f;
+        const float HalfZ = PreviewVerticalRelief * 0.5f;
+        const float BoundingRadius = FMath::Sqrt(HalfX * HalfX + HalfY * HalfY + HalfZ * HalfZ);
+        const float FramingDiameter = FMath::Max(PreviewHorizontalSize, BoundingRadius * 2.0f) * FMath::Max(1.0f, PreviewFramingMargin);
+
+        PreviewCapture->ProjectionType = ECameraProjectionMode::Orthographic;
+        PreviewCapture->OrthoWidth = FramingDiameter;
+
+        const float Distance = FMath::Max(BoundingRadius * 3.0f, PreviewHorizontalSize * 1.5f);
         const FVector CameraLocation(Distance, 0.0f, Distance * 0.72f);
         PreviewCapture->SetRelativeLocation(CameraLocation);
         PreviewCapture->SetRelativeRotation(UKismetMathLibrary::FindLookAtRotation(CameraLocation, FVector::ZeroVector));
@@ -232,6 +241,7 @@ void ACubusWorldGenerationPreviewActor::RefreshPreviewNow()
     }
 
     RebuildPreviewMesh();
+    ApplyOrbitTransform();
     if (IsValid(TargetLoader))
     {
         LastObservedOverallProgress = TargetLoader->GetOverallProgress();
@@ -306,8 +316,51 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         }
     }
 
-    // The entire preview grid always exists. Before generation starts it is a
-    // flat terrain table; as DEM samples arrive, only those vertices deform.
+    for (int32 Pass = 0; Pass < FMath::Clamp(PreviewSmoothingPasses, 0, 3); ++Pass)
+    {
+        TArray<float> Smoothed = Heights;
+        for (int32 Y = 1; Y < Resolution - 1; ++Y)
+        {
+            for (int32 X = 1; X < Resolution - 1; ++X)
+            {
+                const int32 Index = Y * Resolution + X;
+                if (!HasHeight[Index])
+                {
+                    continue;
+                }
+
+                float Sum = Heights[Index] * 4.0f;
+                float Weight = 4.0f;
+                const int32 Neighbors[4] = {Index - 1, Index + 1, Index - Resolution, Index + Resolution};
+                for (const int32 Neighbor : Neighbors)
+                {
+                    if (HasHeight[Neighbor])
+                    {
+                        Sum += Heights[Neighbor];
+                        Weight += 1.0f;
+                    }
+                }
+                Smoothed[Index] = Sum / Weight;
+            }
+        }
+        Heights = MoveTemp(Smoothed);
+    }
+
+    if (KnownSampleCount > 0)
+    {
+        MinHeight = MAX_flt;
+        MaxHeight = -MAX_flt;
+        for (int32 Index = 0; Index < Heights.Num(); ++Index)
+        {
+            if (!HasHeight[Index])
+            {
+                continue;
+            }
+            MinHeight = FMath::Min(MinHeight, Heights[Index]);
+            MaxHeight = FMath::Max(MaxHeight, Heights[Index]);
+        }
+    }
+
     const bool bHasKnownTerrain = KnownSampleCount > 0;
     const float HeightSpan = bHasKnownTerrain ? FMath::Max(1.0f, MaxHeight - MinHeight) : 1.0f;
     const float MidHeight = bHasKnownTerrain ? (MinHeight + MaxHeight) * 0.5f : 0.0f;
@@ -430,11 +483,21 @@ bool ACubusWorldGenerationPreviewActor::BuildCaptureRay(
         return false;
     }
 
+    const FTransform CaptureTransform = PreviewCapture->GetComponentTransform();
+    if (PreviewCapture->ProjectionType == ECameraProjectionMode::Orthographic)
+    {
+        const float NdcX = static_cast<float>(PreviewUV.X * 2.0 - 1.0);
+        const float NdcY = static_cast<float>(1.0 - PreviewUV.Y * 2.0);
+        const float HalfWidth = PreviewCapture->OrthoWidth * 0.5f;
+        const FVector LocalOrigin(0.0f, NdcX * HalfWidth, NdcY * HalfWidth);
+        OutOrigin = CaptureTransform.TransformPosition(LocalOrigin);
+        OutDirection = CaptureTransform.GetUnitAxis(EAxis::X);
+        return true;
+    }
+
     const float TanHalfFov = FMath::Tan(FMath::DegreesToRadians(PreviewCapture->FOVAngle * 0.5f));
     const float NdcX = static_cast<float>(PreviewUV.X * 2.0 - 1.0);
     const float NdcY = static_cast<float>(1.0 - PreviewUV.Y * 2.0);
-
-    const FTransform CaptureTransform = PreviewCapture->GetComponentTransform();
     const FVector LocalDirection(1.0f, NdcX * TanHalfFov, NdcY * TanHalfFov);
     OutOrigin = CaptureTransform.GetLocation();
     OutDirection = CaptureTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
