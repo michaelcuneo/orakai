@@ -16,10 +16,10 @@ class UTextureRenderTarget2D;
 /**
  * Lightweight interactive 3D preview of the generated DEM.
  *
- * This actor never builds gameplay voxels or physics collision. It samples the
- * authoritative DEM into a visual-only heightfield, captures that mesh to a
- * render target for UMG, and performs spawn picking directly against cached
- * preview triangles instead of invoking Unreal collision/cooking.
+ * This actor never builds gameplay voxels or physics collision. The preview
+ * topology is created once, then only vertex data is updated as generation
+ * progresses. Spawn picking is performed directly against cached preview
+ * triangles, so no physics cooking is required.
  */
 UCLASS(BlueprintType, Blueprintable, ClassGroup="Cubus", meta=(DisplayName="Cubus World Generation 3D Preview"))
 class ORAKAI_API ACubusWorldGenerationPreviewActor : public AActor
@@ -38,7 +38,7 @@ public:
 
     /** Live preview resolution. Independent of the DEM and gameplay voxel resolution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="32", ClampMax="256"))
-    int32 PreviewMeshResolution = 72;
+    int32 PreviewMeshResolution = 160;
 
     /** Number of visual-only smoothing passes applied to sampled preview heights. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0", ClampMax="3"))
@@ -46,7 +46,7 @@ public:
 
     /** Render target size used by the UMG image. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="256", ClampMax="2048"))
-    int32 PreviewRenderResolution = 384;
+    int32 PreviewRenderResolution = 512;
 
     /** Maximum horizontal extent of the normalized preview model in Unreal units. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="100.0", ClampMax="5000.0"))
@@ -57,16 +57,16 @@ public:
     float PreviewVerticalRelief = 260.0f;
 
     /**
-     * Margin around the complete terrain bounding sphere. Orthographic framing
-     * uses the whole terrain diagonal, so every corner remains visible even when
-     * the preview is rotated.
+     * Margin around the COMPLETE terrain footprint. The implementation also
+     * enforces a generous minimum so stale serialized actor values cannot put
+     * the camera back into a close centre crop.
      */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="1.0", ClampMax="2.0"))
-    float PreviewFramingMargin = 1.18f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="1.0", ClampMax="4.0"))
+    float PreviewFramingMargin = 1.75f;
 
-    /** Minimum delay between DEM resamples while the generator is changing. */
+    /** Minimum delay between DEM vertex updates while the generator is changing. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0.02", ClampMax="2.0", Units="s"))
-    float PreviewRefreshInterval = 0.50f;
+    float PreviewRefreshInterval = 0.10f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview")
     float OrbitDegreesPerPixel = 0.22f;
@@ -135,7 +135,7 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UTextureRenderTarget2D> PreviewRenderTarget = nullptr;
 
-    float PreviewYawDegrees = -28.0f;
+    float PreviewYawDegrees = 0.0f;
     float PreviewPitchDegrees = 0.0f;
     float RefreshCountdown = 0.0f;
     float LastObservedOverallProgress = -1.0f;
