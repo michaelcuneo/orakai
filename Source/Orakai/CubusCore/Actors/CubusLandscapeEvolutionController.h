@@ -189,8 +189,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.0001"))
 	float PreviewHorizontalScale = 0.001f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.01"))
-	float PreviewVerticalScale = 1.0f;
+	/** Display-only vertical exaggeration. A 500 km overview needs exaggeration or even kilometre-high mountains look almost planar. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.01", ClampMax = "100.0", DisplayName = "Preview Vertical Exaggeration"))
+	float PreviewVerticalScale = 12.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview")
 	ECubusLandscapeDebugView DebugView = ECubusLandscapeDebugView::Elevation;
@@ -230,5 +231,6 @@ private:
 	FLinearColor DebugColorForCell(int32 Cell) const;
 	FString BuildViewportDiagnosticsText() const;
 	void UpdateDiagnostics(const CubusLandscapeEvolution::FGenerationStats& Stats);
+
 	CubusLandscapeEvolution::FGlobalDem GlobalDem;
 };
