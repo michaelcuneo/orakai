@@ -35,6 +35,10 @@ public:
         TArray<FColor>& OutPixels
     );
 
+    /** Lightweight access for the gameplay spawn page and 3D DEM preview. */
+    static bool GetPreviewBoundsMeters(FBox2D& OutBoundsMeters);
+    static bool TrySampleHeightMeters(const FVector2D& WorldMeters, float& OutHeightMeters);
+
     static void SetProposedSpawnFromPreviewUV(const FVector2D& PreviewUV);
     static bool GetProposedSpawnWorldMeters(FVector2D& OutWorldMeters);
     static bool ConfirmProposedSpawn();
