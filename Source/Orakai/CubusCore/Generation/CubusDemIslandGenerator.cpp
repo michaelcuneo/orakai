@@ -374,6 +374,12 @@ bool FGenerator::LoadIndex(const FSettings& Settings, TArray<FIndexedPatch>& Out
 		Entry.RelativePath = ReadString(Object, TEXT("path"));
 		Entry.SourceKey = ReadString(Object, TEXT("source_key"));
 		Entry.TerrainClass = ReadString(Object, TEXT("terrain_class"));
+		Entry.MinimumElevationM = ReadNumber(Object, TEXT("minimum_elevation_m"), 0.0f);
+		Entry.MaximumElevationM = ReadNumber(Object, TEXT("maximum_elevation_m"), 0.0f);
+		Entry.MeanElevationM = ReadNumber(Object, TEXT("mean_elevation_m"), 0.0f);
+		Entry.MedianElevationM = ReadNumber(Object, TEXT("median_elevation_m"), Entry.MeanElevationM);
+		Entry.ElevationP05M = ReadNumber(Object, TEXT("elevation_p05_m"), Entry.MinimumElevationM);
+		Entry.ElevationP95M = ReadNumber(Object, TEXT("elevation_p95_m"), Entry.MaximumElevationM);
 		Entry.ReliefP90M = ReadNumber(Object, TEXT("relief_p90_m"), 0.0f);
 		Entry.MeanSlopeDeg = ReadNumber(Object, TEXT("mean_slope_deg"), 0.0f);
 		Entry.DominantStructureAngleDeg = ReadNumber(Object, TEXT("dominant_structure_angle_deg"), 0.0f);
@@ -445,9 +451,10 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 		float Elevation = Settings.OceanFloorM;
 		if (CoastDistanceM >= 0.0f)
 		{
-			const float InteriorHeight = FMath::Max(
-				Settings.OceanLevelM + 2.0f,
-				Settings.BaseLandElevationM + Pyramid.ReliefM[Cell]);
+			// Pyramid.ReliefM is now a real broad land surface above a robust lowland
+			// reference, not a signed mean-centred residual. Do not clamp negative
+			// residuals to sea level; that clamp created the enormous flat shelves.
+			const float InteriorHeight = Settings.BaseLandElevationM + Pyramid.ReliefM[Cell];
 			const float InlandT = Smooth01(CoastDistanceM / CoastTransitionM);
 			Elevation = FMath::Lerp(Settings.OceanLevelM + 0.5f, InteriorHeight, InlandT);
 		}
