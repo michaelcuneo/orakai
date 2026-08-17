@@ -193,7 +193,14 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 	Tangents.Init(FProcMeshTangent(1.0f, 0.0f, 0.0f), VertexCount);
 	Triangles.Reserve((R - 1) * (R - 1) * 6);
 
+	// The DEM is stored in metres; Unreal geometry is centimetres. Apply that
+	// conversion uniformly before the optional preview down-scale. VerticalScale
+	// is only a relative exaggeration, not an independent unit conversion.
+	constexpr double CentimetersPerMeter = 100.0;
+	const double PreviewWorldScale = CentimetersPerMeter * PreviewHorizontalScale;
+	const double PreviewHeightScale = PreviewWorldScale * PreviewVerticalScale;
 	const double Half = GlobalDem.WorldSizeMeters * 0.5;
+
 	for (int32 Y = 0; Y < R; ++Y)
 	{
 		const double V = static_cast<double>(Y) / static_cast<double>(R - 1);
@@ -206,8 +213,10 @@ void ACubusLandscapeEvolutionController::RebuildPreview()
 			const int32 I = Y * R + X;
 			const double WorldX = -Half + U * GlobalDem.WorldSizeMeters;
 			const double WorldY = -Half + V * GlobalDem.WorldSizeMeters;
-			Vertices[I] = FVector(WorldX * PreviewHorizontalScale, WorldY * PreviewHorizontalScale,
-				GlobalDem.ElevationM[SourceCell] * PreviewVerticalScale);
+			Vertices[I] = FVector(
+				WorldX * PreviewWorldScale,
+				WorldY * PreviewWorldScale,
+				GlobalDem.ElevationM[SourceCell] * PreviewHeightScale);
 			UV0[I] = FVector2D(U, V);
 			Colors[I] = DebugColorForCell(SourceCell);
 		}
