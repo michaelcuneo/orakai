@@ -99,10 +99,10 @@ def prepare_macro_tile(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--patch-count", type=int, default=24)
+    parser.add_argument("--patch-count", type=int, default=96)
     parser.add_argument("--source-window-pixels", type=int, default=2048)
     parser.add_argument("--target-cell-m", type=float, default=128.0)
-    parser.add_argument("--patches-per-tile", type=int, default=2)
+    parser.add_argument("--patches-per-tile", type=int, default=4)
     parser.add_argument("--min-valid-fraction", type=float, default=0.98)
     parser.add_argument(
         "--output",
@@ -142,13 +142,11 @@ def main() -> int:
             min(1.0, max(0.80, args.min_valid_fraction)),
         )
         total += count
-        records.append(
-            {
-                "item": candidate.item.json_url,
-                "tiff": candidate.tiff_url,
-                "prepared_patches": count,
-            }
-        )
+        records.append({
+            "item": candidate.item.json_url,
+            "tiff": candidate.tiff_url,
+            "prepared_patches": count,
+        })
 
     source_record = {
         "key": "macro_nz_8m",
