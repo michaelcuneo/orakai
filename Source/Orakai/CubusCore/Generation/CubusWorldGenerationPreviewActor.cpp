@@ -285,9 +285,13 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         return;
     }
 
-    FBox2D RuntimeBounds;
+    FBox2D PreviewBounds;
     const bool bUseLoader = IsValid(TargetLoader);
-    if (!bUseLoader && !FCubusGeneratedTerrainRuntime::GetPreviewBoundsMeters(RuntimeBounds))
+    if (bUseLoader)
+    {
+        PreviewBounds = TargetLoader->GetGenerationPreviewBoundsMeters();
+    }
+    else if (!FCubusGeneratedTerrainRuntime::GetPreviewBoundsMeters(PreviewBounds))
     {
         PreviewMesh->ClearAllMeshSections();
         CachedPickVertices.Reset();
@@ -296,13 +300,17 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         return;
     }
 
-    const FVector2D WorldSizeMeters = bUseLoader
-        ? FVector2D(
-            FMath::Max(1.0, TargetLoader->GenerationSizeKm.X * 1000.0),
-            FMath::Max(1.0, TargetLoader->GenerationSizeKm.Y * 1000.0))
-        : RuntimeBounds.GetSize();
-    const FVector2D WorldMinimum = bUseLoader ? WorldSizeMeters * -0.5 : RuntimeBounds.Min;
+    if (!PreviewBounds.bIsValid)
+    {
+        PreviewMesh->ClearAllMeshSections();
+        CachedPickVertices.Reset();
+        CachedPickTriangles.Reset();
+        bHasRenderableTerrain = false;
+        return;
+    }
 
+    const FVector2D WorldSizeMeters = PreviewBounds.GetSize();
+    const FVector2D WorldMinimum = PreviewBounds.Min;
     const int32 Resolution = FMath::Clamp(PreviewMeshResolution, 32, 256);
     const float MaxDimensionMeters = static_cast<float>(FMath::Max(WorldSizeMeters.X, WorldSizeMeters.Y));
     const float HorizontalScale = PreviewHorizontalSize / FMath::Max(1.0f, MaxDimensionMeters);
@@ -344,6 +352,17 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         }
     }
 
+    // Production mode must never display a legacy/fake flat mesh while the
+    // real 500 km DEM is still being built. Empty means "still generating".
+    if (KnownSampleCount <= 0)
+    {
+        PreviewMesh->ClearAllMeshSections();
+        CachedPickVertices.Reset();
+        CachedPickTriangles.Reset();
+        bHasRenderableTerrain = false;
+        return;
+    }
+
     for (int32 Pass = 0; Pass < FMath::Clamp(PreviewSmoothingPasses, 0, 3); ++Pass)
     {
         TArray<float> Smoothed = Heights;
@@ -374,24 +393,20 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         Heights = MoveTemp(Smoothed);
     }
 
-    if (KnownSampleCount > 0)
+    MinHeight = MAX_flt;
+    MaxHeight = -MAX_flt;
+    for (int32 Index = 0; Index < Heights.Num(); ++Index)
     {
-        MinHeight = MAX_flt;
-        MaxHeight = -MAX_flt;
-        for (int32 Index = 0; Index < Heights.Num(); ++Index)
+        if (!HasHeight[Index])
         {
-            if (!HasHeight[Index])
-            {
-                continue;
-            }
-            MinHeight = FMath::Min(MinHeight, Heights[Index]);
-            MaxHeight = FMath::Max(MaxHeight, Heights[Index]);
+            continue;
         }
+        MinHeight = FMath::Min(MinHeight, Heights[Index]);
+        MaxHeight = FMath::Max(MaxHeight, Heights[Index]);
     }
 
-    const bool bHasKnownTerrain = KnownSampleCount > 0;
-    const float HeightSpan = bHasKnownTerrain ? FMath::Max(1.0f, MaxHeight - MinHeight) : 1.0f;
-    const float MidHeight = bHasKnownTerrain ? (MinHeight + MaxHeight) * 0.5f : 0.0f;
+    const float HeightSpan = FMath::Max(1.0f, MaxHeight - MinHeight);
+    const float MidHeight = (MinHeight + MaxHeight) * 0.5f;
     const float VerticalScale = PreviewVerticalRelief / HeightSpan;
 
     TArray<FVector> Vertices;
@@ -427,8 +442,6 @@ void ACubusWorldGenerationPreviewActor::RebuildPreviewMesh()
         }
     }
 
-    // Smooth normals from adjacent height samples in O(vertices), rather than
-    // accumulating every triangle face normal on every live refresh.
     const float StepX = static_cast<float>(BuiltMeshDimensions.X) / FMath::Max(1, Resolution - 1);
     const float StepY = static_cast<float>(BuiltMeshDimensions.Y) / FMath::Max(1, Resolution - 1);
     for (int32 Y = 0; Y < Resolution; ++Y)
