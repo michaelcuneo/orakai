@@ -17,8 +17,8 @@ class UTextureRenderTarget2D;
  * Lightweight interactive 3D preview of the generated DEM.
  *
  * This actor never builds gameplay voxels or physics collision. It samples the
- * authoritative DEM into a small visual-only heightfield, captures that mesh to
- * a render target for UMG, and performs spawn picking directly against its cached
+ * authoritative DEM into a visual-only heightfield, captures that mesh to a
+ * render target for UMG, and performs spawn picking directly against cached
  * preview triangles instead of invoking Unreal collision/cooking.
  */
 UCLASS(BlueprintType, Blueprintable, ClassGroup="Cubus", meta=(DisplayName="Cubus World Generation 3D Preview"))
@@ -36,9 +36,13 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview")
     TObjectPtr<ACubusWorldGenerationLoaderActor> TargetLoader = nullptr;
 
-    /** Coarse live visualization resolution; completely independent of gameplay terrain. */
+    /** Live preview resolution. Independent of the DEM and gameplay voxel resolution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="32", ClampMax="256"))
-    int32 PreviewMeshResolution = 40;
+    int32 PreviewMeshResolution = 72;
+
+    /** Number of visual-only smoothing passes applied to sampled preview heights. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0", ClampMax="3"))
+    int32 PreviewSmoothingPasses = 1;
 
     /** Render target size used by the UMG image. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="256", ClampMax="2048"))
@@ -52,9 +56,13 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="25.0", ClampMax="1000.0"))
     float PreviewVerticalRelief = 260.0f;
 
-    /** Camera distance relative to PreviewHorizontalSize. Larger values show more empty margin around the whole model. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="1.0", ClampMax="5.0"))
-    float PreviewCameraDistanceMultiplier = 2.35f;
+    /**
+     * Margin around the complete terrain bounding sphere. Orthographic framing
+     * uses the whole terrain diagonal, so every corner remains visible even when
+     * the preview is rotated.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="1.0", ClampMax="2.0"))
+    float PreviewFramingMargin = 1.18f;
 
     /** Minimum delay between DEM resamples while the generator is changing. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0.02", ClampMax="2.0", Units="s"))
