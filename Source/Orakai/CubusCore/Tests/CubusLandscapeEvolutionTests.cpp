@@ -86,9 +86,17 @@ bool FCubusLandscapeEvolutionHydrologyTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("Hydrology buffers exist"), Dem.HasHydrology());
 	TestTrue(TEXT("At least one basin exists"), Stats.BasinCount > 0);
+	TestEqual(TEXT("Flow order contains every cell"), Dem.FlowOrder.Num(), Dem.NumCells());
+
+	TArray<int32> OrderPosition;
+	OrderPosition.SetNumUninitialized(Dem.NumCells());
+	for (int32 I = 0; I < Dem.FlowOrder.Num(); ++I)
+	{
+		OrderPosition[Dem.FlowOrder[I]] = I;
+	}
 
 	const float CellAreaKm2 = static_cast<float>((Dem.CellSizeMeters * Dem.CellSizeMeters) / 1000000.0);
-	for (int32 Cell = 0; Cell < Dem.NumCells(); Cell += 31)
+	for (int32 Cell = 0; Cell < Dem.NumCells(); ++Cell)
 	{
 		TestTrue(TEXT("Accumulation contains at least the local cell area"), Dem.DrainageAreaKm2[Cell] + KINDA_SMALL_NUMBER >= CellAreaKm2);
 		const int32 Receiver = Dem.Receiver[Cell];
@@ -96,6 +104,12 @@ bool FCubusLandscapeEvolutionHydrologyTest::RunTest(const FString& Parameters)
 		{
 			TestTrue(TEXT("Receiver is hydrologically downhill"),
 				Dem.HydrologyElevationM[Receiver] < Dem.HydrologyElevationM[Cell]);
+			TestTrue(TEXT("Donor appears before receiver in flow order"), OrderPosition[Cell] < OrderPosition[Receiver]);
+			TestTrue(TEXT("Receiver drainage area includes donor area"),
+				Dem.DrainageAreaKm2[Receiver] + KINDA_SMALL_NUMBER >= Dem.DrainageAreaKm2[Cell]);
+			TestEqual(TEXT("Donor and receiver share basin"), Dem.BasinId[Cell], Dem.BasinId[Receiver]);
+			TestTrue(TEXT("Distance to outlet decreases downstream"),
+				Dem.DistanceToOutletKm[Cell] > Dem.DistanceToOutletKm[Receiver]);
 		}
 	}
 	return true;
