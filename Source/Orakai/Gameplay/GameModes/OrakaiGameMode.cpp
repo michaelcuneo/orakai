@@ -8,12 +8,16 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "Gameplay/Characters/OrakaiCharacter.h"
+#include "Gameplay/Controllers/OrakaiPlayerController.h"
 #include "Gameplay/WorldObjects/CubusSpawnStreamingPawn.h"
 
 AOrakaiGameMode::AOrakaiGameMode()
 {
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.bStartWithTickEnabled = true;
+    DefaultPawnClass = AOrakaiCharacter::StaticClass();
+    PlayerControllerClass = AOrakaiPlayerController::StaticClass();
 }
 
 void AOrakaiGameMode::StartPlay()
