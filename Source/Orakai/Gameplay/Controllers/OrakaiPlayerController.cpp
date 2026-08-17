@@ -19,6 +19,7 @@
 #include "InputMappingContext.h"
 #include "Orakai.h"
 #include "ProceduralMeshComponent.h"
+#include "UObject/ConstructorHelpers.h"
 #include "UObject/UObjectIterator.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
@@ -67,8 +68,8 @@ bool ResolveSectionAndFace(UProceduralMeshComponent* ProceduralMesh, const FHitR
 				OutSectionIndex = SectionIndex;
 				return true;
 			}
-			RemainingFaceIndex -= TriangleCount;
-		}
+		RemainingFaceIndex -= TriangleCount;
+	}
 	return false;
 }
 
@@ -101,6 +102,20 @@ AOrakaiPlayerController::AOrakaiPlayerController()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
+
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> DefaultContext(
+		TEXT("/Game/Cubus/Input/IMC_Default.IMC_Default"));
+	if (DefaultContext.Succeeded())
+	{
+		DefaultMappingContexts.Add(DefaultContext.Object);
+	}
+
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> MouseLookContext(
+		TEXT("/Game/Cubus/Input/IMC_MouseLook.IMC_MouseLook"));
+	if (MouseLookContext.Succeeded())
+	{
+		MobileExcludedMappingContexts.Add(MouseLookContext.Object);
+	}
 }
 
 void AOrakaiPlayerController::Tick(const float DeltaSeconds)
@@ -123,9 +138,6 @@ void AOrakaiPlayerController::BeginPlay()
 		return;
 	}
 
-	// The generation level is a UI-driven staging screen. Do not force the
-	// controller back into GameOnly here, because that immediately hides the
-	// cursor after WBP_WorldGenerationLoader enables it.
 	if (IsLocalPlayerController() && IsValid(GetWorld()))
 	{
 		for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(GetWorld()); Iterator; ++Iterator)
