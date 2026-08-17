@@ -25,6 +25,7 @@ class AOrakaiGameMode : public AGameModeBase
 
 public:
     AOrakaiGameMode();
+    virtual void StartPlay() override;
     virtual void Tick(float DeltaSeconds) override;
 
 protected:
