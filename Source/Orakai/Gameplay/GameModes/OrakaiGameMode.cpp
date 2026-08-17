@@ -47,7 +47,8 @@ void AOrakaiGameMode::HandleStartingNewPlayer_Implementation(APlayerController* 
     UWorld* World = GetWorld();
     if (IsValid(World))
     {
-        // Never create the real character underneath the generation WBP.
+        // Lvl_Generator owns only the DEM pipeline and its WBP. Never create a
+        // gameplay character underneath that screen.
         for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(World); Iterator; ++Iterator)
         {
             if (IsValid(*Iterator))
@@ -59,8 +60,9 @@ void AOrakaiGameMode::HandleStartingNewPlayer_Implementation(APlayerController* 
         }
     }
 
-    // After SPAWN opens Lvl_ThirdPerson, keep the real character withheld while
-    // that gameplay map builds its own density chunks and LODs at the selected XY.
+    // In Lvl_ThirdPerson a generated runtime means the spawn/loading page owns
+    // entry. Hold the real character while a transient streaming pawn builds the
+    // actual gameplay chunks around the currently proposed marker position.
     if (FCubusGeneratedTerrainRuntime::IsActive())
     {
         PendingGeneratedPlayer = NewPlayer;
@@ -92,8 +94,7 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         return;
     }
 
-    // While still in Lvl_Generator, the WBP owns the flow. Confirm Generated
-    // Spawn immediately opens Lvl_ThirdPerson, so never create a character here.
+    // The generator map never creates gameplay chunks or the real character.
     for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(World); Iterator; ++Iterator)
     {
         if (IsValid(*Iterator))
@@ -102,20 +103,18 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         }
     }
 
-    FVector2D SelectedWorldMeters;
-    float SelectedHeightMeters = 0.0f;
-    if (!FCubusGeneratedTerrainRuntime::HasConfirmedSpawn() ||
-        !FCubusGeneratedTerrainRuntime::GetConfirmedSpawnWorldMeters(SelectedWorldMeters) ||
-        !FCubusGeneratedTerrainRuntime::TryGetConfirmedSpawnSurfaceHeightMeters(SelectedHeightMeters))
+    FVector2D ProposedWorldMeters;
+    float ProposedHeightMeters = 0.0f;
+    if (!FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(ProposedWorldMeters) ||
+        !FCubusGeneratedTerrainRuntime::TrySampleHeightMeters(ProposedWorldMeters, ProposedHeightMeters))
     {
         return;
     }
 
-    const FVector StreamingFocusLocation(
-        SelectedWorldMeters.X * 100.0,
-        SelectedWorldMeters.Y * 100.0,
-        static_cast<double>(SelectedHeightMeters) * 100.0 + 500.0
-    );
+    const FVector ProposedFocusLocation(
+        ProposedWorldMeters.X * 100.0,
+        ProposedWorldMeters.Y * 100.0,
+        static_cast<double>(ProposedHeightMeters) * 100.0 + 500.0);
 
     ACubusSpawnStreamingPawn* StreamingPawn = SpawnStreamingPawn.Get();
     if (!IsValid(StreamingPawn))
@@ -126,10 +125,9 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
 
         StreamingPawn = World->SpawnActor<ACubusSpawnStreamingPawn>(
             ACubusSpawnStreamingPawn::StaticClass(),
-            StreamingFocusLocation,
+            ProposedFocusLocation,
             FRotator::ZeroRotator,
-            SpawnParameters
-        );
+            SpawnParameters);
 
         if (!IsValid(StreamingPawn))
         {
@@ -140,12 +138,40 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         PlayerController->Possess(StreamingPawn);
 
         UE_LOG(LogTemp, Display,
-            TEXT("Cubus Lvl_ThirdPerson preload focus at generated spawn %.1fm, %.1fm"),
-            SelectedWorldMeters.X,
-            SelectedWorldMeters.Y);
+            TEXT("Cubus gameplay preload focus created at proposed spawn %.1fm, %.1fm"),
+            ProposedWorldMeters.X,
+            ProposedWorldMeters.Y);
         return;
     }
 
+    // Moving the marker retargets the same hidden focus pawn. BlockWorld then
+    // recomputes its real streaming window around the newly proposed location.
+    if (!StreamingPawn->GetActorLocation().Equals(ProposedFocusLocation, 1.0))
+    {
+        StreamingPawn->SetActorLocation(ProposedFocusLocation, false, nullptr, ETeleportType::TeleportPhysics);
+    }
+
+    // Selection drives streaming; confirmation alone authorizes character spawn.
+    if (!FCubusGeneratedTerrainRuntime::HasConfirmedSpawn())
+    {
+        return;
+    }
+
+    FVector2D ConfirmedWorldMeters;
+    float ConfirmedHeightMeters = 0.0f;
+    if (!FCubusGeneratedTerrainRuntime::GetConfirmedSpawnWorldMeters(ConfirmedWorldMeters) ||
+        !FCubusGeneratedTerrainRuntime::TryGetConfirmedSpawnSurfaceHeightMeters(ConfirmedHeightMeters))
+    {
+        return;
+    }
+
+    const FVector ConfirmedFocusLocation(
+        ConfirmedWorldMeters.X * 100.0,
+        ConfirmedWorldMeters.Y * 100.0,
+        static_cast<double>(ConfirmedHeightMeters) * 100.0 + 500.0);
+
+    // The button should only become enabled after these gates, but keep the
+    // GameMode defensive so an accidental confirmation can never spawn early.
     ACubusBlockWorldActor* BlockWorld = nullptr;
     for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
     {
@@ -155,37 +181,39 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
             break;
         }
     }
-
-    // This is the real second-layer loading pass in Lvl_ThirdPerson. The
-    // generator map's temporary preload cannot be reused after OpenLevel.
     if (!IsValid(BlockWorld) ||
         !BlockWorld->IsWorldLoadingComplete() ||
-        !BlockWorld->IsDensityStreamingCoverageReadyAtWorldLocation(StreamingFocusLocation))
+        !BlockWorld->IsDensityStreamingCoverageReadyAtWorldLocation(ConfirmedFocusLocation))
     {
         return;
     }
 
+    ACubusTerrainLodWorldActor* LodWorld = nullptr;
     for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(World); Iterator; ++Iterator)
     {
-        if (IsValid(*Iterator) && !Iterator->IsPreSpawnVisualCoverageReady())
+        if (IsValid(*Iterator))
         {
-            return;
+            LodWorld = *Iterator;
+            break;
         }
-        break;
+    }
+    if (!IsValid(LodWorld) || !LodWorld->IsPreSpawnVisualCoverageReady())
+    {
+        return;
     }
 
-    FVector FinalSpawnLocation = StreamingFocusLocation;
+    FVector FinalSpawnLocation = ConfirmedFocusLocation;
     FHitResult SurfaceHit;
     FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CubusGeneratedSpawnSurface), true, StreamingPawn);
-    const FVector TraceStart = StreamingFocusLocation + FVector(0.0, 0.0, 50000.0);
-    const FVector TraceEnd = StreamingFocusLocation - FVector(0.0, 0.0, 50000.0);
+    const FVector TraceStart = ConfirmedFocusLocation + FVector(0.0, 0.0, 50000.0);
+    const FVector TraceEnd = ConfirmedFocusLocation - FVector(0.0, 0.0, 50000.0);
     if (World->LineTraceSingleByChannel(SurfaceHit, TraceStart, TraceEnd, ECC_Visibility, QueryParams))
     {
         FinalSpawnLocation = SurfaceHit.ImpactPoint + FVector(0.0, 0.0, 200.0);
     }
     else
     {
-        FinalSpawnLocation.Z = static_cast<double>(SelectedHeightMeters) * 100.0 + 200.0;
+        FinalSpawnLocation.Z = static_cast<double>(ConfirmedHeightMeters) * 100.0 + 200.0;
     }
 
     FActorSpawnParameters CharacterSpawnParameters;
@@ -197,8 +225,7 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         DefaultPawnClass,
         FinalSpawnLocation,
         FRotator::ZeroRotator,
-        CharacterSpawnParameters
-    );
+        CharacterSpawnParameters);
 
     if (!IsValid(GeneratedCharacter))
     {
@@ -236,7 +263,7 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     PendingGeneratedPlayer.Reset();
 
     UE_LOG(LogTemp, Display,
-        TEXT("Cubus Lvl_ThirdPerson generated character %s created after full selected-area load at %s"),
+        TEXT("Cubus generated character %s created in Lvl_ThirdPerson after selected gameplay area was ready at %s"),
         *GetNameSafe(GeneratedCharacter),
         *FinalSpawnLocation.ToCompactString());
 }
