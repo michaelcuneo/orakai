@@ -3,6 +3,26 @@
 #include "CoreMinimal.h"
 #include "CubusCore/Generation/CubusTerrainStructure.h"
 
+class FCubusTerrainRasterTile;
+struct FCubusTerrainDepositionSettings;
+struct FCubusTerrainCarvingSettings;
+struct FCubusTerrainDrainageSegment;
+
+namespace CubusTerrainDeposition
+{
+    void ApplyHydrologicDeposition(
+        FCubusTerrainRasterTile& Result,
+        const FCubusTerrainDepositionSettings& Settings,
+        const FCubusTerrainCarvingSettings& CarvingSettings,
+        const TArray<FCubusTerrainDrainageSegment>& Segments
+    );
+
+    void ApplyLocalSettling(
+        FCubusTerrainRasterTile& Result,
+        const FCubusTerrainDepositionSettings& Settings
+    );
+}
+
 /**
  * Settings for the pre-voxel terrain domain.
  *
@@ -63,6 +83,16 @@ private:
     friend class FCubusTerrainCarving;
     friend class FCubusTerrainErosion;
     friend class FCubusTerrainDeposition;
+    friend void CubusTerrainDeposition::ApplyHydrologicDeposition(
+        FCubusTerrainRasterTile& Result,
+        const FCubusTerrainDepositionSettings& Settings,
+        const FCubusTerrainCarvingSettings& CarvingSettings,
+        const TArray<FCubusTerrainDrainageSegment>& Segments
+    );
+    friend void CubusTerrainDeposition::ApplyLocalSettling(
+        FCubusTerrainRasterTile& Result,
+        const FCubusTerrainDepositionSettings& Settings
+    );
 
     static float CubicInterpolate(float P0, float P1, float P2, float P3, float Alpha);
     int32 StorageIndex(int32 GridX, int32 GridY) const;
