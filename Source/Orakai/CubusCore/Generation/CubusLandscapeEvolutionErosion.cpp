@@ -21,8 +21,6 @@ float ProvinceAgeMultiplier(const FGlobalDem& Dem, const int32 Cell)
 	}
 	const EProvinceType Province = static_cast<EProvinceType>(Dem.ProvinceId[Cell]);
 	const FProvinceParameters Parameters = FGenerator::GetDefaultProvinceParameters(Province);
-	// Young landscapes retain relief and evolve more aggressively; old stable
-	// provinces receive longer effective geomorphic maturity but gentler uplift.
 	return FMath::Lerp(0.75f, 1.35f, Parameters.GeologicalAge01);
 }
 
@@ -139,16 +137,22 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 			}
 
 			const float DistanceM = FMath::Max(1.0f, ReceiverDistanceMeters(InOutDem, Cell, Receiver));
-			const float AreaKm2 = FMath::Max(0.000001f, InOutDem.DrainageAreaKm2[Cell]);
+
+			// DrainageAreaKm2 is deliberately stored in km^2 for hydrology/debugging,
+			// but the stream-power coefficient K is parameterized against SI area.
+			// Convert to m^2 here. With m=0.5, failing to do this weakens incision by
+			// exactly 1000x and makes a correctly-running evolution pass look inert.
+			const double AreaM2 = FMath::Max(1.0, static_cast<double>(InOutDem.DrainageAreaKm2[Cell]) * 1000000.0);
+
 			const EProvinceType Province = InOutDem.ProvinceId.IsValidIndex(Cell)
 				? static_cast<EProvinceType>(InOutDem.ProvinceId[Cell])
 				: EProvinceType::StablePlain;
 			const FProvinceParameters ProvinceParameters = GetDefaultProvinceParameters(Province);
-			const float K = Settings.StreamPowerK * ProvinceParameters.Erodibility * ProvinceAgeMultiplier(InOutDem, Cell);
-			const float Alpha = FMath::Max(0.0f,
-				K * FMath::Pow(AreaKm2, Settings.StreamPowerM) * Settings.EvolutionStepYears / DistanceM);
+			const double K = static_cast<double>(Settings.StreamPowerK) * ProvinceParameters.Erodibility * ProvinceAgeMultiplier(InOutDem, Cell);
+			const double Alpha = FMath::Max(0.0,
+				K * FMath::Pow(AreaM2, static_cast<double>(Settings.StreamPowerM)) * Settings.EvolutionStepYears / DistanceM);
 			const float DownstreamElevation = InOutDem.ElevationM[Receiver];
-			const float ErodedElevation = (TectonicElevation + Alpha * DownstreamElevation) / (1.0f + Alpha);
+			const float ErodedElevation = static_cast<float>((TectonicElevation + Alpha * DownstreamElevation) / (1.0 + Alpha));
 			const float NewElevation = FMath::Max(DownstreamElevation + Settings.PriorityFloodEpsilonM, ErodedElevation);
 			const float Incision = FMath::Max(0.0f, TectonicElevation - NewElevation);
 			InOutDem.ElevationM[Cell] = NewElevation;
@@ -202,8 +206,6 @@ bool FGenerator::EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem
 		Diffused.SetNumUninitialized(N);
 	}
 
-	// Finish with fresh drainage derived from the evolved surface so debug rivers
-	// and downstream constraints match what is displayed.
 	FGenerationStats FinalHydrologyStats;
 	if (!SolveHydrology(Settings, InOutDem, &FinalHydrologyStats, OutError))
 	{
