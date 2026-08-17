@@ -35,8 +35,10 @@ struct FCubusBlockNeighborhoodMeshSnapshot
 struct FCubusBlockMaterialMeshSnapshot
 {
 	TSet<int32> RenderableSolidMaterialIds;
+	TSet<int32> RenderableLiquidMaterialIds;
 
 	bool IsRenderableSolid(const FCubusBlockVoxel* Voxel) const;
+	bool IsRenderableLiquid(const FCubusBlockVoxel* Voxel) const;
 };
 
 /**
@@ -52,6 +54,8 @@ class ORAKAI_API FCubusBlockMesher
 public:
 	static void BuildChunk(const FCubusBlockNeighborhoodMeshSnapshot& Neighborhood, const FCubusBlockMaterialMeshSnapshot& Materials,
 						   float VoxelSize, FCubusMaterialMeshMap& OutMaterialMeshes, int32& OutGeneratedFaceCount);
+	static void BuildWaterChunk(const FCubusBlockNeighborhoodMeshSnapshot& Neighborhood, const FCubusBlockMaterialMeshSnapshot& Materials,
+								float VoxelSize, FCubusMaterialMeshMap& OutMaterialMeshes, int32& OutGeneratedFaceCount);
 
 	static void BuildChunk(const FCubusBlockChunkNeighborhood& Neighborhood, const UCubusMaterialRegistry* MaterialRegistry,
 						   float VoxelSize, FCubusMaterialMeshMap& OutMaterialMeshes, int32& OutGeneratedFaceCount);

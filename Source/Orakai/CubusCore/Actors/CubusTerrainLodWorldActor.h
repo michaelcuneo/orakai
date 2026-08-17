@@ -44,22 +44,22 @@ struct FCubusTerrainLodTileBuild
 
 struct FCubusTerrainLodTierRuntime
 {
-	int32 LodLevel = 1;
+	int32 LodLevel			   = 1;
 	int32 CanonicalVoxelStride = 2;
-	int32 MeshingSubdivisions = 2;
-	int32 VerticalRadiusTiles = 0;
+	int32 MeshingSubdivisions  = 2;
+	int32 VerticalRadiusTiles  = 0;
 
 	FCubusDensityTileBounds2D InnerBounds;
 	FCubusDensityTileBounds2D OuterBounds;
 
 	TMap<FIntVector, TObjectPtr<UProceduralMeshComponent>> TileComponents;
-	TSet<FIntVector> RequiredTiles;
-	TSet<FIntVector> ResolvedTiles;
-	TSet<FIntVector> TilesBuilding;
-	TArray<FIntVector> PendingTiles;
-	TArray<FCubusTerrainLodTileBuild> ActiveBuilds;
-	TArray<FCubusTerrainLodTileBuildResult> CompletedBuilds;
-	TMap<FIntVector, uint32> ResolvedTransitionSignatures;
+	TSet<FIntVector>									   RequiredTiles;
+	TSet<FIntVector>									   ResolvedTiles;
+	TSet<FIntVector>									   TilesBuilding;
+	TArray<FIntVector>									   PendingTiles;
+	TArray<FCubusTerrainLodTileBuild>					   ActiveBuilds;
+	TArray<FCubusTerrainLodTileBuildResult>				   CompletedBuilds;
+	TMap<FIntVector, uint32>							   ResolvedTransitionSignatures;
 };
 
 /**
@@ -79,6 +79,9 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	bool  IsInitialVisualCoverageReady() const;
+	float GetInitialVisualCoverageProgress() const;
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cubus|Components")
@@ -174,15 +177,9 @@ protected:
 private:
 	void ResolveBlockWorld();
 	void UpdateStreaming();
-	void UpdateTierStreaming(
-		FCubusTerrainLodTierRuntime& Tier,
-		const FCubusTerrainDensityField& DensityField,
-		float CanonicalChunkWorldSize,
-		const FCubusDensityTileBounds2D& InnerBounds,
-		const FCubusDensityTileBounds2D& OuterBounds,
-		int32 CanonicalVoxelStride,
-		int32 VerticalRadiusTiles
-	);
+	void UpdateTierStreaming(FCubusTerrainLodTierRuntime& Tier, const FCubusTerrainDensityField& DensityField,
+							 float CanonicalChunkWorldSize, const FCubusDensityTileBounds2D& InnerBounds,
+							 const FCubusDensityTileBounds2D& OuterBounds, int32 CanonicalVoxelStride, int32 VerticalRadiusTiles);
 	void CollectCompletedBuilds();
 	void CollectCompletedBuildsForTier(FCubusTerrainLodTierRuntime& Tier);
 	void StartPendingBuilds();
@@ -195,7 +192,7 @@ private:
 	void ClearAllTiles();
 	void ClearTier(FCubusTerrainLodTierRuntime& Tier);
 
-	static int32 ResolveTierSubdivisions(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
+	static int32						ResolveTierSubdivisions(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
 	static FCubusDensityTransitionFaces BuildTierTransitionFaces(const FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate);
 
 	UProceduralMeshComponent* CreateTileComponent(FCubusTerrainLodTierRuntime& Tier, const FIntVector& TileCoordinate, float TileWorldSize);

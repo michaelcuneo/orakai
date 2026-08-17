@@ -160,8 +160,14 @@ bool FCubusDensityChunkStore::LoadMesh(const FIntVector& ChunkCoordinate, const 
 		return false;
 	}
 
+	const FString MeshPath = CubusDensityChunkStore::GetMeshPath(ChunkCoordinate, Context, TransitionSignature);
+	if (!IFileManager::Get().FileExists(*MeshPath))
+	{
+		return false;
+	}
+
 	TArray<uint8> FileData;
-	if (!FFileHelper::LoadFileToArray(FileData, *CubusDensityChunkStore::GetMeshPath(ChunkCoordinate, Context, TransitionSignature)))
+	if (!FFileHelper::LoadFileToArray(FileData, *MeshPath))
 	{
 		return false;
 	}
@@ -301,6 +307,11 @@ bool FCubusDensityChunkStore::LoadBuffer(const FIntVector& ChunkCoordinate, cons
 	}
 
 	const FString Path = GetBufferPath(ChunkCoordinate, Context);
+	if (!IFileManager::Get().FileExists(*Path))
+	{
+		return false;
+	}
+
 	TArray<uint8> FileData;
 	if (!FFileHelper::LoadFileToArray(FileData, *Path))
 	{
@@ -396,6 +407,7 @@ FString FCubusDensityChunkStore::GetDensityStoreDirectory(const FCubusDensityChu
 	BaseContext.GenerationVersion = Context.GenerationVersion;
 
 	const int32 VoxelSizeMilliCentimetres = FMath::RoundToInt(Context.VoxelSize * 1000.0f);
-	return FPaths::Combine(FCubusChunkStore::GetWorldStoreDirectory(BaseContext), TEXT("Density"),
-						   FString::Printf(TEXT("s%d_v%d"), Context.SubdivisionsPerVoxel, VoxelSizeMilliCentimetres));
+	return FPaths::Combine(
+		FCubusChunkStore::GetWorldStoreDirectory(BaseContext), TEXT("Density"),
+		FString::Printf(TEXT("s%d_v%d_r%08x"), Context.SubdivisionsPerVoxel, VoxelSizeMilliCentimetres, Context.MaterialRulesFingerprint));
 }

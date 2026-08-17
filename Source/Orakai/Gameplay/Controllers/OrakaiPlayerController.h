@@ -7,7 +7,9 @@
 #include "OrakaiPlayerController.generated.h"
 
 class UInputMappingContext;
+class UOrakaiWorldLoadingWidget;
 class UUserWidget;
+class ACubusBlockWorldActor;
 struct FHitResult;
 
 /**
@@ -23,19 +25,18 @@ public:
 	AOrakaiPlayerController();
 
 	virtual void Tick(float DeltaSeconds) override;
-	
-protected:
 
+protected:
 	/** Input Mapping Contexts */
-	UPROPERTY(EditAnywhere, Category ="Input|Input Mappings")
+	UPROPERTY(EditAnywhere, Category = "Input|Input Mappings")
 	TArray<UInputMappingContext*> DefaultMappingContexts;
 
 	/** Input Mapping Contexts */
-	UPROPERTY(EditAnywhere, Category="Input|Input Mappings")
+	UPROPERTY(EditAnywhere, Category = "Input|Input Mappings")
 	TArray<UInputMappingContext*> MobileExcludedMappingContexts;
 
 	/** Mobile controls widget to spawn */
-	UPROPERTY(EditAnywhere, Category="Input|Touch Controls")
+	UPROPERTY(EditAnywhere, Category = "Input|Touch Controls")
 	TSubclassOf<UUserWidget> MobileControlsWidgetClass;
 
 	/** Pointer to the mobile controls widget */
@@ -64,6 +65,16 @@ protected:
 	bool ShouldUseTouchControls() const;
 
 private:
-	void UpdateTerrainMaterialInspector();
+	void  InitializeWorldLoadingScreen();
+	void  UpdateWorldLoadingScreen(float DeltaSeconds);
+	void  UpdateTerrainMaterialInspector();
 	int32 ResolveRenderedTerrainMaterialId(const FHitResult& Hit) const;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UOrakaiWorldLoadingWidget> WorldLoadingWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ACubusBlockWorldActor> LoadingBlockWorld;
+
+	float LoadingFadeElapsedSeconds = 0.0f;
 };

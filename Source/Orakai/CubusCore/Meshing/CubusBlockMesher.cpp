@@ -248,6 +248,11 @@ bool FCubusBlockMaterialMeshSnapshot::IsRenderableSolid(const FCubusBlockVoxel* 
 	return Voxel != nullptr && !Voxel->IsEmpty() && !Voxel->IsWater() && RenderableSolidMaterialIds.Contains(Voxel->MaterialId);
 }
 
+bool FCubusBlockMaterialMeshSnapshot::IsRenderableLiquid(const FCubusBlockVoxel* Voxel) const
+{
+	return Voxel != nullptr && Voxel->IsWater() && RenderableLiquidMaterialIds.Contains(Voxel->MaterialId);
+}
+
 namespace CubusBlockMesher
 {
 FCubusBlockVoxel ResolveSnapshotSample(const FCubusBlockNeighborhoodMeshSnapshot& Neighborhood,
@@ -336,6 +341,69 @@ void FCubusBlockMesher::BuildChunk(const FCubusBlockNeighborhoodMeshSnapshot& Ne
 		CubusBlockMesher::HardenGeologicalBlockMesh(*GeologicalMesh);
 	}
 	OutGeneratedFaceCount = GeneratedTriangleCount;
+}
+
+void FCubusBlockMesher::BuildWaterChunk(const FCubusBlockNeighborhoodMeshSnapshot& Neighborhood,
+										const FCubusBlockMaterialMeshSnapshot& Materials, const float VoxelSize,
+										FCubusMaterialMeshMap& OutMaterialMeshes, int32& OutGeneratedFaceCount)
+{
+	OutMaterialMeshes.Reset();
+	OutGeneratedFaceCount = 0;
+	if (!Neighborhood.Centre.IsValid() || VoxelSize <= 0.0f)
+	{
+		return;
+	}
+
+	static const FIntVector FaceOffsets[6]	 = {FIntVector(-1, 0, 0), FIntVector(1, 0, 0),	FIntVector(0, -1, 0),
+												FIntVector(0, 1, 0),  FIntVector(0, 0, -1), FIntVector(0, 0, 1)};
+	static const FVector	FaceNormals[6]	 = {FVector(-1, 0, 0), FVector(1, 0, 0),  FVector(0, -1, 0),
+												FVector(0, 1, 0),  FVector(0, 0, -1), FVector(0, 0, 1)};
+	static const FVector   FaceCorners[6][4] = {{{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}}, {{1, 0, 0}, {1, 1, 0}, {1, 1, 1}, {1, 0, 1}},
+												{{0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}}, {{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}},
+												{{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}}, {{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}}};
+	static const FVector2D FaceUvs[4]		 = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+
+	const float HalfChunkWorldSize = static_cast<float>(Cubus::ChunkSize) * VoxelSize * 0.5f;
+	for (int32 Z = 0; Z < Cubus::ChunkSize; ++Z)
+	{
+		for (int32 Y = 0; Y < Cubus::ChunkSize; ++Y)
+		{
+			for (int32 X = 0; X < Cubus::ChunkSize; ++X)
+			{
+				const FCubusBlockVoxel* Voxel = Neighborhood.GetVoxel(X, Y, Z);
+				if (!Materials.IsRenderableLiquid(Voxel))
+				{
+					continue;
+				}
+
+				FCubusMeshData& Mesh = OutMaterialMeshes.FindOrAdd(Voxel->MaterialId);
+				for (int32 FaceIndex = 0; FaceIndex < 6; ++FaceIndex)
+				{
+					const FIntVector		NeighbourCoordinate = FIntVector(X, Y, Z) + FaceOffsets[FaceIndex];
+					const FCubusBlockVoxel* Neighbour =
+						Neighborhood.GetVoxel(NeighbourCoordinate.X, NeighbourCoordinate.Y, NeighbourCoordinate.Z);
+					if (Neighbour != nullptr && !Neighbour->IsEmpty())
+					{
+						continue;
+					}
+
+					const int32 FirstVertex = Mesh.Vertices.Num();
+					for (int32 CornerIndex = 0; CornerIndex < 4; ++CornerIndex)
+					{
+						const FVector GridPosition = FVector(X, Y, Z) + FaceCorners[FaceIndex][CornerIndex];
+						Mesh.Vertices.Add(GridPosition * VoxelSize - FVector(HalfChunkWorldSize));
+						Mesh.Normals.Add(FaceNormals[FaceIndex]);
+						Mesh.UV0.Add(FaceUvs[CornerIndex]);
+						Mesh.VertexColors.Add(FLinearColor::White);
+						Mesh.Tangents.Add(
+							FProcMeshTangent(FVector::CrossProduct(FVector::UpVector, FaceNormals[FaceIndex]).GetSafeNormal(), false));
+					}
+					Mesh.Triangles.Append({FirstVertex, FirstVertex + 1, FirstVertex + 2, FirstVertex, FirstVertex + 2, FirstVertex + 3});
+					++OutGeneratedFaceCount;
+				}
+			}
+		}
+	}
 }
 
 void FCubusBlockMesher::BuildChunk(const FCubusBlockChunkNeighborhood& Neighborhood, const UCubusMaterialRegistry* MaterialRegistry,

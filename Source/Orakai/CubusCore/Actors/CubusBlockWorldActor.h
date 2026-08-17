@@ -87,12 +87,21 @@ public:
 	FCubusDensityTransitionFaces BuildDensityTransitionFaces(const FIntVector& ChunkCoordinate, int32 SelfSubdivisions) const;
 
 	const FCubusDensityTileBounds2D& GetDensityStreamingCoverageBounds() const { return DensityStreamingCoverageBounds; }
-	bool IsDensityStreamingCoverageReady() const;
+	bool							 IsDensityStreamingCoverageReady() const;
 
 	bool IsWorldVegetationEnabled() const { return bEnableWorldVegetation; }
 
 	UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Spawn")
 	bool IsInitialSpawnAreaReady() const { return bInitialSpawnAreaReady; }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Loading")
+	bool IsWorldLoadingComplete() const { return bInitialWorldLoadComplete; }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Loading")
+	float GetWorldLoadingProgress() const;
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Runtime Streaming|Loading")
+	FText GetWorldLoadingStatus() const;
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|World")
 	void GenerateChunkGrid();
@@ -170,10 +179,14 @@ protected:
 	FIntVector GridOrigin = FIntVector::ZeroValue;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation", meta = (ClampMin = "1.0", Units = "cm"))
-	float GeneratedVoxelSize = 100.0f;
+	float GeneratedVoxelSize = 80.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD")
 	bool bEnableDensityLod = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD",
+			  meta = (EditCondition = "bEnableDensityLod", Units = "cm", ClampMin = "1.0"))
+	float StableGameplayDensitySampleSpacing = 80.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Density LOD",
 			  meta = (EditCondition = "bEnableDensityLod", ClampMin = "1.0", ClampMax = "100.0", Units = "cm"))
@@ -208,7 +221,7 @@ protected:
 	TSubclassOf<ACubusWorldVegetationActor> WorldVegetationActorClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "16"))
-	int32 InitialLoadRadius = 2;
+	int32 InitialLoadRadius = 0;
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Cubus|Runtime Streaming", meta = (ClampMin = "0", UIMax = "32"))
 	int32 HorizontalViewRadius = 4;
@@ -366,11 +379,16 @@ protected:
 	int32 TerrainSnowMaterialId = 4;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials", meta = (ClampMin = "0.0"))
 	float TerrainRockSlopeThreshold = 1.25f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Materials",
+			  meta = (ClampMin = "0.0", Units = "m", DisplayName = "Snow Line"))
+	float TerrainSnowLineMeters = 1500.0f;
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use TerrainSnowLineMeters."))
 	int32 TerrainSnowMinimumHeight = 72;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water")
 	bool bGenerateWater = true;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water", meta = (Units = "m", DisplayName = "Sea Level"))
+	float TerrainSeaLevelMeters = 0.0f;
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use TerrainSeaLevelMeters."))
 	int32 TerrainWaterLevel = 8;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Terrain|Water", meta = (ClampMin = "1"))
 	int32 TerrainWaterMaterialId = 5;
@@ -391,6 +409,8 @@ protected:
 	int32 ReadyStreamingDensityChunkCount = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
 	bool bInitialSpawnAreaReady = false;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Diagnostics")
+	bool bInitialWorldLoadComplete = false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
 	bool bWeatherMaterialBridgeConnected = false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Weather|Materials|Diagnostics")
@@ -427,11 +447,13 @@ private:
 
 	TSet<FIntVector> StreamingChunksReady;
 	TSet<FIntVector> DensitySurfaceRetryCoordinates;
+	TSet<FIntVector> FineDensityEditCoordinates;
+	TSet<FIntVector> DensityEditTransitionCoordinates;
 
 	/* LOD resolution swaps are staged and published as one local topology transaction. */
 	TSet<FIntVector> ActiveDensityLodTransitionCoordinates;
 	TSet<FIntVector> StagedDensityLodTransitionCoordinates;
-	bool bDensityLodTransitionActive = false;
+	bool			 bDensityLodTransitionActive = false;
 
 	/*
 	 * Current hidden density rebuild transaction.
@@ -498,16 +520,16 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<AActor> CachedWeatherActor = nullptr;
 
-	FIntVector LastTrackedChunk				  = FIntVector(MAX_int32, MAX_int32, MAX_int32);
-	FIntVector DensityLodCentreChunk		  = FIntVector(MAX_int32, MAX_int32, MAX_int32);
+	FIntVector				  LastTrackedChunk		= FIntVector(MAX_int32, MAX_int32, MAX_int32);
+	FIntVector				  DensityLodCentreChunk = FIntVector(MAX_int32, MAX_int32, MAX_int32);
 	FCubusDensityTileBounds2D DensityStreamingCoverageBounds;
-	FVector	   HeldPawnLocation				  = FVector::ZeroVector;
-	bool	   bPawnHeldForStreaming		  = false;
-	bool	   bSpawnTimeoutReported		  = false;
-	float	   HeldPawnElapsedSeconds		  = 0.0f;
-	float	   TimeUntilStreamingUpdate		  = 0.0f;
-	float	   TimeUntilWeatherMaterialUpdate = 0.0f;
-	float	   WeatherMaterialElapsedSeconds  = 0.0f;
+	FVector					  HeldPawnLocation				 = FVector::ZeroVector;
+	bool					  bPawnHeldForStreaming			 = false;
+	bool					  bSpawnTimeoutReported			 = false;
+	float					  HeldPawnElapsedSeconds		 = 0.0f;
+	float					  TimeUntilStreamingUpdate		 = 0.0f;
+	float					  TimeUntilWeatherMaterialUpdate = 0.0f;
+	float					  WeatherMaterialElapsedSeconds	 = 0.0f;
 
 	void RemoveInvalidChunks();
 	void RebuildChunkAtCoordinate(const FIntVector& ChunkCoordinate);
@@ -516,6 +538,7 @@ private:
 	void RestoreDensityEdits();
 
 	void RebuildDensityEditIndex();
+	void RebuildDensityEditResolutionTopology(bool bQueueLoadedChanges);
 
 	void					ReindexDensityEditSample(const FIntVector& WorldSample);
 	void					ApplyPersistedEditsToChunk(ACubusVoxelVolumeActor& ChunkActor);
@@ -543,16 +566,11 @@ private:
 	void	   ProcessDirtyChunkQueue();
 	void	   BuildRequiredCoordinates(const FIntVector& CentreCoordinate, int32 HorizontalRadius, int32 VerticalRadius,
 										TSet<FIntVector>& OutCoordinates) const;
-	void BuildDensitySurfaceRequiredCoordinates(
-		const FCubusDensityTileBounds2D& CoverageBounds,
-		const FCubusTerrainFormSettings& TerrainSettings,
-		int32 TerrainOffsetX,
-		int32 TerrainOffsetY,
-		int32 VerticalPadding,
-		TSet<FIntVector>& OutCoordinates
-	) const;
-	bool AreRequiredStreamingChunksReady() const;
-	void TryCommitDensityLodTransition();
+	void	   BuildDensitySurfaceRequiredCoordinates(const FCubusDensityTileBounds2D& CoverageBounds,
+													  const FCubusTerrainFormSettings& TerrainSettings, int32 TerrainOffsetX,
+													  int32 TerrainOffsetY, int32 VerticalPadding, TSet<FIntVector>& OutCoordinates) const;
+	bool	   AreRequiredStreamingChunksReady() const;
+	void	   TryCommitDensityLodTransition();
 	FIntVector WorldLocationToChunkCoordinate(const FVector& WorldLocation) const;
 	int32	   ResolveDensitySubdivisions(const FIntVector& ChunkCoordinate) const;
 	void	   UpdateDensityLods();

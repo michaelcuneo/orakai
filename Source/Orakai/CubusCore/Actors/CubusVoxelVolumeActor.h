@@ -23,8 +23,10 @@ struct FCubusBlockChunkNeighborhood;
 
 struct FCubusDensityMeshBuildInput
 {
-	FCubusTerrainDensitySettings DensitySettings;
-	FCubusDensityEditMap		 DensityEdits;
+	FCubusTerrainDensitySettings		DensitySettings;
+	FCubusDensityEditMap				DensityEdits;
+	FCubusBlockNeighborhoodMeshSnapshot WaterNeighborhood;
+	FCubusBlockMaterialMeshSnapshot		WaterMaterials;
 
 	/*
 	 * Immutable generated subdivision-1 baseline shared with the worker.
@@ -50,6 +52,7 @@ struct FCubusDensityMeshBuildInput
 struct FCubusDensityMeshBuildResult
 {
 	TMap<int32, FCubusMeshData> MaterialMeshes;
+	FCubusMaterialMeshMap		WaterMaterialMeshes;
 
 	/*
 	 * When a worker had to generate the canonical terrain baseline for the
@@ -58,7 +61,8 @@ struct FCubusDensityMeshBuildResult
 	 */
 	FCubusDensitySamplingBuffer GeneratedDensityBuffer;
 
-	int32 GeneratedTriangleCount = 0;
+	int32 GeneratedTriangleCount  = 0;
+	int32 GeneratedWaterFaceCount = 0;
 
 	double BuildTimeMilliseconds = 0.0;
 
@@ -67,10 +71,12 @@ struct FCubusDensityMeshBuildResult
 	void Reset()
 	{
 		MaterialMeshes.Reset();
+		WaterMaterialMeshes.Reset();
 		GeneratedDensityBuffer.Reset();
 
-		GeneratedTriangleCount = 0;
-		BuildTimeMilliseconds  = 0.0;
+		GeneratedTriangleCount	= 0;
+		GeneratedWaterFaceCount = 0;
+		BuildTimeMilliseconds	= 0.0;
 
 		bHasGeneratedDensityBuffer = false;
 	}
@@ -466,6 +472,7 @@ private:
 	FCubusBlockChunkNeighborhood BuildNeighborhood() const;
 
 	void RebuildAffectedChunks();
+	void GenerateDensityWaterData();
 	void GenerateHeightTerrain();
 	void GenerateFlatTerrain();
 	void ResetDiagnostics();

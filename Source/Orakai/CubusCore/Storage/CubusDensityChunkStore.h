@@ -14,10 +14,11 @@ class FCubusDensitySamplingBuffer;
  */
 struct ORAKAI_API FCubusDensityChunkStoreContext
 {
-	int64  WorldSeed			= 1;
-	uint32 GenerationVersion	= 1;
-	float  VoxelSize			= 100.0f;
-	int32  SubdivisionsPerVoxel = 1;
+	int64  WorldSeed				= 1;
+	uint32 GenerationVersion		= 1;
+	float  VoxelSize				= 100.0f;
+	int32  SubdivisionsPerVoxel		= 1;
+	uint32 MaterialRulesFingerprint = 0;
 };
 
 /** Versioned binary storage for canonical density sampling buffers. */

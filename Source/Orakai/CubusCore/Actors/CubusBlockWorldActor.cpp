@@ -1,10 +1,12 @@
 #include "CubusCore/Actors/CubusBlockWorldActor.h"
+#include "CubusCore/Actors/CubusTerrainLodWorldActor.h"
 #include "CubusCore/Actors/CubusVoxelVolumeActor.h"
 #include "CubusCore/Actors/CubusWorldVegetationActor.h"
 #include "CubusCore/Chunks/CubusBlockChunkData.h"
 #include "CubusCore/Chunks/CubusChunkConstants.h"
 #include "CubusCore/Chunks/CubusDensitySamplingBuffer.h"
 #include "CubusCore/Generation/CubusTerrainForm.h"
+#include "CubusCore/Generation/CubusWorldScale.h"
 #include "CubusCore/Data/CubusGeologyProfile.h"
 #include "CubusCore/Data/CubusMaterialRegistry.h"
 #include "CubusCore/Meshing/CubusDensityLod.h"
@@ -48,10 +50,11 @@ void ACubusBlockWorldActor::OnConstruction(const FTransform& Transform)
 	GridDimensions.Y = FMath::Max(1, GridDimensions.Y);
 	GridDimensions.Z = FMath::Max(1, GridDimensions.Z);
 
-	GeneratedVoxelSize		   = FMath::Max(1.0f, GeneratedVoxelSize);
-	DensityNearSampleSpacing   = FMath::Clamp(DensityNearSampleSpacing, 1.0f, GeneratedVoxelSize);
-	DensityMiddleSampleSpacing = FMath::Clamp(DensityMiddleSampleSpacing, DensityNearSampleSpacing, GeneratedVoxelSize);
-	DensityFarSampleSpacing	   = FMath::Clamp(DensityFarSampleSpacing, DensityMiddleSampleSpacing, GeneratedVoxelSize);
+	GeneratedVoxelSize				   = 80.0f;
+	DensityNearSampleSpacing		   = FMath::Clamp(DensityNearSampleSpacing, 1.0f, GeneratedVoxelSize);
+	DensityMiddleSampleSpacing		   = FMath::Clamp(DensityMiddleSampleSpacing, DensityNearSampleSpacing, GeneratedVoxelSize);
+	DensityFarSampleSpacing			   = FMath::Clamp(DensityFarSampleSpacing, DensityMiddleSampleSpacing, GeneratedVoxelSize);
+	StableGameplayDensitySampleSpacing = GeneratedVoxelSize;
 	// Keep the finest 20 cm density ring at least two chunks wide. This places
 	// the 20->40 cm transition outside the immediate spawn/walking area and
 	// also upgrades older saved Blueprint defaults that still carry radius 1.
@@ -301,7 +304,7 @@ void ACubusBlockWorldActor::Tick(const float DeltaSeconds)
 	ProcessCompletedStreamingChunkBuilds();
 	QueueStreamingChunkBuilds();
 
-	if (!bInitialSpawnAreaReady)
+	if (!bInitialWorldLoadComplete)
 	{
 		ProcessInitialStreaming();
 	}
@@ -474,6 +477,7 @@ void ACubusBlockWorldActor::QueueDensityEditDependenciesForRebuild(const FIntVec
 																   const FIntVector& ChangedSampleMaximum)
 {
 	++DensityEditRevision;
+	RebuildDensityEditResolutionTopology(true);
 
 	/*
 	 * A changed density sample affects:
@@ -633,6 +637,62 @@ void ACubusBlockWorldActor::RebuildDensityEditIndex()
 		const FIntVector ChunkCoordinate = OrakaiPersistence::WorldVoxelToChunk(Pair.Key);
 
 		DensityEditsByChunk.FindOrAdd(ChunkCoordinate).Add(Pair.Key, Pair.Value);
+	}
+
+	RebuildDensityEditResolutionTopology(false);
+}
+
+void ACubusBlockWorldActor::RebuildDensityEditResolutionTopology(const bool bQueueLoadedChanges)
+{
+	const TSet<FIntVector> PreviousFine		  = FineDensityEditCoordinates;
+	const TSet<FIntVector> PreviousTransition = DensityEditTransitionCoordinates;
+	FineDensityEditCoordinates.Reset();
+	DensityEditTransitionCoordinates.Reset();
+
+	for (const TPair<FIntVector, FCubusDensityEdit>& Edit : DensityEdits)
+	{
+		const FIntVector MinimumChunk = OrakaiPersistence::WorldVoxelToChunk(Edit.Key - FIntVector(2, 2, 2));
+		const FIntVector MaximumChunk = OrakaiPersistence::WorldVoxelToChunk(Edit.Key + FIntVector(1, 1, 1));
+		for (int32 Z = MinimumChunk.Z; Z <= MaximumChunk.Z; ++Z)
+		{
+			for (int32 Y = MinimumChunk.Y; Y <= MaximumChunk.Y; ++Y)
+			{
+				for (int32 X = MinimumChunk.X; X <= MaximumChunk.X; ++X)
+				{
+					FineDensityEditCoordinates.Add(FIntVector(X, Y, Z));
+				}
+			}
+		}
+	}
+
+	for (const FIntVector& FineCoordinate : FineDensityEditCoordinates)
+	{
+		for (const FIntVector& Offset : CubusBlockWorldActor::NeighbourOffsets)
+		{
+			const FIntVector Neighbour = FineCoordinate + Offset;
+			if (!FineDensityEditCoordinates.Contains(Neighbour))
+			{
+				DensityEditTransitionCoordinates.Add(Neighbour);
+			}
+		}
+	}
+
+	if (!bQueueLoadedChanges)
+	{
+		return;
+	}
+
+	TSet<FIntVector> TopologyChanges = PreviousFine;
+	TopologyChanges.Append(PreviousTransition);
+	TopologyChanges.Append(FineDensityEditCoordinates);
+	TopologyChanges.Append(DensityEditTransitionCoordinates);
+	for (const FIntVector& Coordinate : TopologyChanges)
+	{
+		if (ACubusVoxelVolumeActor* Chunk = FindChunk(Coordinate))
+		{
+			Chunk->ConfigureDensityResolution(ResolveDensitySubdivisions(Coordinate));
+			AtomicDensityDirtyChunkCoordinates.Add(Coordinate);
+		}
 	}
 }
 
@@ -1161,14 +1221,16 @@ ACubusVoxelVolumeActor* ACubusBlockWorldActor::SpawnChunkAtCoordinate(const FInt
 
 	ChunkActor->SetGenerateVegetationData(bGenerateVegetation && bEnableWorldVegetation);
 
+	const int32 SnowMinimumVoxelHeight = FMath::RoundToInt(CubusWorldScale::MetersToVoxels(TerrainSnowLineMeters, GeneratedVoxelSize));
+	const int32 SeaLevelVoxelHeight	   = FMath::RoundToInt(CubusWorldScale::MetersToVoxels(TerrainSeaLevelMeters, GeneratedVoxelSize));
 	ChunkActor->ConfigureTerrain(bUseHeightTerrain, TerrainSurfaceWorldZ, TerrainBaseHeight, TerrainContinentAmplitude,
 								 TerrainContinentFrequency, TerrainHillAmplitude, TerrainHillFrequency, TerrainDetailAmplitude,
 								 TerrainDetailFrequency, TerrainRidgeAmplitude, TerrainRidgeFrequency, TerrainValleyDepth,
 								 TerrainValleyFrequency, TerrainValleyWidth, TerrainValleyFalloff, TerrainValleyWarpAmplitude,
 								 TerrainValleyWarpFrequency, TerrainRegionFrequency, TerrainPlainsThreshold, TerrainPlainsBlend,
 								 TerrainMountainThreshold, TerrainMountainBlend, TerrainSurfaceMaterialId, TerrainSubsurfaceMaterialId,
-								 TerrainRockMaterialId, TerrainSnowMaterialId, TerrainRockSlopeThreshold, TerrainSnowMinimumHeight,
-								 bGenerateWater, TerrainWaterLevel, TerrainWaterMaterialId);
+								 TerrainRockMaterialId, TerrainSnowMaterialId, TerrainRockSlopeThreshold, SnowMinimumVoxelHeight,
+								 bGenerateWater, SeaLevelVoxelHeight, TerrainWaterMaterialId);
 
 	ChunkActor->SetOwner(this);
 	ChunkActor->AttachToComponent(WorldRoot, FAttachmentTransformRules::KeepWorldTransform);
@@ -1231,9 +1293,10 @@ void ACubusBlockWorldActor::ClearGeneratedChunks()
 	RequiredChunkCoordinates.Reset();
 	InitialRequiredCoordinates.Reset();
 
-	GeneratedChunkCount		 = 0;
-	PendingRuntimeChunkCount = 0;
-	bInitialSpawnAreaReady	 = false;
+	GeneratedChunkCount		  = 0;
+	PendingRuntimeChunkCount  = 0;
+	bInitialSpawnAreaReady	  = false;
+	bInitialWorldLoadComplete = false;
 
 	RefreshChunkRegistry();
 }
@@ -1296,6 +1359,8 @@ void ACubusBlockWorldActor::RebuildAllChunks()
 void ACubusBlockWorldActor::RegenerateTerrain()
 {
 	RefreshChunkRegistry();
+	const int32 SnowMinimumVoxelHeight = FMath::RoundToInt(CubusWorldScale::MetersToVoxels(TerrainSnowLineMeters, GeneratedVoxelSize));
+	const int32 SeaLevelVoxelHeight	   = FMath::RoundToInt(CubusWorldScale::MetersToVoxels(TerrainSeaLevelMeters, GeneratedVoxelSize));
 
 	for (const auto& Entry : ChunksByCoordinate)
 	{
@@ -1314,8 +1379,8 @@ void ACubusBlockWorldActor::RegenerateTerrain()
 									 TerrainValleyFrequency, TerrainValleyWidth, TerrainValleyFalloff, TerrainValleyWarpAmplitude,
 									 TerrainValleyWarpFrequency, TerrainRegionFrequency, TerrainPlainsThreshold, TerrainPlainsBlend,
 									 TerrainMountainThreshold, TerrainMountainBlend, TerrainSurfaceMaterialId, TerrainSubsurfaceMaterialId,
-									 TerrainRockMaterialId, TerrainSnowMaterialId, TerrainRockSlopeThreshold, TerrainSnowMinimumHeight,
-									 bGenerateWater, TerrainWaterLevel, TerrainWaterMaterialId);
+									 TerrainRockMaterialId, TerrainSnowMaterialId, TerrainRockSlopeThreshold, SnowMinimumVoxelHeight,
+									 bGenerateWater, SeaLevelVoxelHeight, TerrainWaterMaterialId);
 
 		ChunkActor->GenerateTerrainData();
 		ChunkActor->RebuildVolume();
@@ -1393,14 +1458,10 @@ void ACubusBlockWorldActor::BuildRequiredCoordinates(const FIntVector& CentreCoo
 	OutCoordinates.Add(CentreCoordinate);
 }
 
-void ACubusBlockWorldActor::BuildDensitySurfaceRequiredCoordinates(
-	const FCubusDensityTileBounds2D& CoverageBounds,
-	const FCubusTerrainFormSettings& TerrainSettings,
-	const int32 TerrainOffsetX,
-	const int32 TerrainOffsetY,
-	const int32 VerticalPadding,
-	TSet<FIntVector>& OutCoordinates
-) const
+void ACubusBlockWorldActor::BuildDensitySurfaceRequiredCoordinates(const FCubusDensityTileBounds2D& CoverageBounds,
+																   const FCubusTerrainFormSettings& TerrainSettings,
+																   const int32 TerrainOffsetX, const int32 TerrainOffsetY,
+																   const int32 VerticalPadding, TSet<FIntVector>& OutCoordinates) const
 {
 	OutCoordinates.Reset();
 	if (!CoverageBounds.IsValid())
@@ -1408,9 +1469,9 @@ void ACubusBlockWorldActor::BuildDensitySurfaceRequiredCoordinates(
 		return;
 	}
 
-	const int32 SafePadding = FMath::Clamp(VerticalPadding, 0, 2);
+	const int32		SafePadding			  = FMath::Clamp(VerticalPadding, 0, 2);
 	constexpr int32 SurfaceSamplesPerAxis = 3;
-	const float ChunkSizeVoxels = static_cast<float>(Cubus::ChunkSize);
+	const float		ChunkSizeVoxels		  = static_cast<float>(Cubus::ChunkSize);
 
 	/*
 	 * The fine surface and bounded geology can move the scalar zero by less
@@ -1419,13 +1480,13 @@ void ACubusBlockWorldActor::BuildDensitySurfaceRequiredCoordinates(
 	 * its configured depth rather than loading whole empty chunks above/below
 	 * every XY column.
 	 */
-	const float RiverDownwardSafety = IsValid(GeologyProfile) && GeologyProfile->bGenerateRivers
-		? FMath::Max(0.0f, GeologyProfile->RiverValleyDepth) +
-		  static_cast<float>(FMath::Max(0, GeologyProfile->RiverChannelDepth))
-		: 0.0f;
+	const float RiverDownwardSafety =
+		IsValid(GeologyProfile) && GeologyProfile->bGenerateRivers
+			? FMath::Max(0.0f, GeologyProfile->RiverValleyDepth) + static_cast<float>(FMath::Max(0, GeologyProfile->RiverChannelDepth))
+			: 0.0f;
 	const float GeneralSurfaceSafety = 2.0f + static_cast<float>(SafePadding) * 2.0f;
-	const float DownwardSafety = GeneralSurfaceSafety + RiverDownwardSafety;
-	const float UpwardSafety = GeneralSurfaceSafety;
+	const float DownwardSafety		 = GeneralSurfaceSafety + RiverDownwardSafety;
+	const float UpwardSafety		 = GeneralSurfaceSafety;
 
 	for (int32 ChunkY = CoverageBounds.Min.Y; ChunkY < CoverageBounds.MaxExclusive.Y; ++ChunkY)
 	{
@@ -1444,22 +1505,24 @@ void ACubusBlockWorldActor::BuildDensitySurfaceRequiredCoordinates(
 					const float SurfaceSampleY =
 						(static_cast<float>(ChunkY) + AlphaY) * ChunkSizeVoxels + static_cast<float>(TerrainOffsetY);
 					const float SurfaceVoxelZ = bUseHeightTerrain
-						? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, TerrainSettings).Height
-						: static_cast<float>(TerrainSurfaceWorldZ);
-					MinimumSurfaceVoxelZ = FMath::Min(MinimumSurfaceVoxelZ, SurfaceVoxelZ);
-					MaximumSurfaceVoxelZ = FMath::Max(MaximumSurfaceVoxelZ, SurfaceVoxelZ);
+													? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, TerrainSettings).Height
+													: static_cast<float>(TerrainSurfaceWorldZ);
+					MinimumSurfaceVoxelZ	  = FMath::Min(MinimumSurfaceVoxelZ, SurfaceVoxelZ);
+					MaximumSurfaceVoxelZ	  = FMath::Max(MaximumSurfaceVoxelZ, SurfaceVoxelZ);
 				}
 			}
 
-			const int32 MinimumChunkZ = FMath::FloorToInt(
-				(MinimumSurfaceVoxelZ - DownwardSafety) / ChunkSizeVoxels
-			);
-			const int32 MaximumChunkZ = FMath::FloorToInt(
-				(MaximumSurfaceVoxelZ + UpwardSafety) / ChunkSizeVoxels
-			);
+			const int32 MinimumChunkZ = FMath::FloorToInt((MinimumSurfaceVoxelZ - DownwardSafety) / ChunkSizeVoxels);
+			const int32 MaximumChunkZ = FMath::FloorToInt((MaximumSurfaceVoxelZ + UpwardSafety) / ChunkSizeVoxels);
 			for (int32 ChunkZ = MinimumChunkZ; ChunkZ <= MaximumChunkZ; ++ChunkZ)
 			{
 				OutCoordinates.Add(FIntVector(ChunkX, ChunkY, ChunkZ));
+			}
+
+			if (bGenerateWater && MinimumSurfaceVoxelZ < static_cast<float>(TerrainWaterLevel))
+			{
+				const int32 SeaLevelChunkZ = FCubusDensityLod::FloorDivide(TerrainWaterLevel, Cubus::ChunkSize);
+				OutCoordinates.Add(FIntVector(ChunkX, ChunkY, SeaLevelChunkZ));
 			}
 		}
 	}
@@ -1522,68 +1585,67 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 	const FIntVector PawnCoordinate = WorldLocationToChunkCoordinate(TrackingLocation);
 
 	FCubusTerrainFormSettings StreamingTerrainSettings;
-	StreamingTerrainSettings.BaseHeight = static_cast<float>(TerrainBaseHeight);
-	StreamingTerrainSettings.VoxelSizeCm = GeneratedVoxelSize;
-	StreamingTerrainSettings.ContinentAmplitude = TerrainContinentAmplitude;
-	StreamingTerrainSettings.ContinentFrequency = TerrainContinentFrequency;
-	StreamingTerrainSettings.HillAmplitude = TerrainHillAmplitude;
-	StreamingTerrainSettings.HillFrequency = TerrainHillFrequency;
-	StreamingTerrainSettings.DetailAmplitude = TerrainDetailAmplitude;
-	StreamingTerrainSettings.DetailFrequency = TerrainDetailFrequency;
-	StreamingTerrainSettings.RidgeAmplitude = TerrainRidgeAmplitude;
-	StreamingTerrainSettings.RidgeFrequency = TerrainRidgeFrequency;
-	StreamingTerrainSettings.ValleyDepth = TerrainValleyDepth;
-	StreamingTerrainSettings.ValleyFrequency = TerrainValleyFrequency;
-	StreamingTerrainSettings.ValleyWidth = TerrainValleyWidth;
-	StreamingTerrainSettings.ValleyFalloff = TerrainValleyFalloff;
+	StreamingTerrainSettings.BaseHeight			 = static_cast<float>(TerrainBaseHeight);
+	StreamingTerrainSettings.VoxelSizeCm		 = GeneratedVoxelSize;
+	StreamingTerrainSettings.ContinentAmplitude	 = TerrainContinentAmplitude;
+	StreamingTerrainSettings.ContinentFrequency	 = TerrainContinentFrequency;
+	StreamingTerrainSettings.HillAmplitude		 = TerrainHillAmplitude;
+	StreamingTerrainSettings.HillFrequency		 = TerrainHillFrequency;
+	StreamingTerrainSettings.DetailAmplitude	 = TerrainDetailAmplitude;
+	StreamingTerrainSettings.DetailFrequency	 = TerrainDetailFrequency;
+	StreamingTerrainSettings.RidgeAmplitude		 = TerrainRidgeAmplitude;
+	StreamingTerrainSettings.RidgeFrequency		 = TerrainRidgeFrequency;
+	StreamingTerrainSettings.ValleyDepth		 = TerrainValleyDepth;
+	StreamingTerrainSettings.ValleyFrequency	 = TerrainValleyFrequency;
+	StreamingTerrainSettings.ValleyWidth		 = TerrainValleyWidth;
+	StreamingTerrainSettings.ValleyFalloff		 = TerrainValleyFalloff;
 	StreamingTerrainSettings.ValleyWarpAmplitude = TerrainValleyWarpAmplitude;
 	StreamingTerrainSettings.ValleyWarpFrequency = TerrainValleyWarpFrequency;
-	StreamingTerrainSettings.RegionFrequency = TerrainRegionFrequency;
-	StreamingTerrainSettings.PlainsThreshold = TerrainPlainsThreshold;
-	StreamingTerrainSettings.PlainsBlend = TerrainPlainsBlend;
-	StreamingTerrainSettings.MountainThreshold = TerrainMountainThreshold;
-	StreamingTerrainSettings.MountainBlend = TerrainMountainBlend;
+	StreamingTerrainSettings.RegionFrequency	 = TerrainRegionFrequency;
+	StreamingTerrainSettings.PlainsThreshold	 = TerrainPlainsThreshold;
+	StreamingTerrainSettings.PlainsBlend		 = TerrainPlainsBlend;
+	StreamingTerrainSettings.MountainThreshold	 = TerrainMountainThreshold;
+	StreamingTerrainSettings.MountainBlend		 = TerrainMountainBlend;
 
 	const FCubusGenerationSeeds Seeds = GetGenerationSeeds();
-	const int32 TerrainOffsetX =
-		(FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
-	const int32 TerrainOffsetY =
-		(FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
+	const int32 TerrainOffsetX		  = (FCubusGenerationSeeds::DomainOffsetX(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
+	const int32 TerrainOffsetY		  = (FCubusGenerationSeeds::DomainOffsetY(Seeds.Terrain) / Cubus::ChunkSize) * Cubus::ChunkSize;
 
 	const float HorizontalChunkCentreOffset = static_cast<float>(Cubus::ChunkSize) * 0.5f;
 	const float SurfaceSampleX =
 		static_cast<float>(PawnCoordinate.X * Cubus::ChunkSize) + HorizontalChunkCentreOffset + static_cast<float>(TerrainOffsetX);
 	const float SurfaceSampleY =
 		static_cast<float>(PawnCoordinate.Y * Cubus::ChunkSize) + HorizontalChunkCentreOffset + static_cast<float>(TerrainOffsetY);
-	const float TerrainSurfaceVoxelZ = bUseHeightTerrain
-		? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, StreamingTerrainSettings).Height
-		: static_cast<float>(TerrainSurfaceWorldZ);
-	const int32 TerrainChunkZ = FMath::FloorToInt(
-		TerrainSurfaceVoxelZ / static_cast<float>(Cubus::ChunkSize)
-	);
+	const float		 TerrainSurfaceVoxelZ = bUseHeightTerrain
+												? FCubusTerrainForm::Sample(SurfaceSampleX, SurfaceSampleY, StreamingTerrainSettings).Height
+												: static_cast<float>(TerrainSurfaceWorldZ);
+	const int32		 TerrainChunkZ		  = FMath::FloorToInt(TerrainSurfaceVoxelZ / static_cast<float>(Cubus::ChunkSize));
 	const FIntVector CentreCoordinate(PawnCoordinate.X, PawnCoordinate.Y, TerrainChunkZ);
 
-	const ECubusVoxelRenderMode RenderMode = GetVoxelRenderMode();
-	const bool bDensityWorld =
-		RenderMode == ECubusVoxelRenderMode::Density || RenderMode == ECubusVoxelRenderMode::Hybrid;
+	const ECubusVoxelRenderMode RenderMode	  = GetVoxelRenderMode();
+	const bool					bDensityWorld = RenderMode == ECubusVoxelRenderMode::Density || RenderMode == ECubusVoxelRenderMode::Hybrid;
 
-	const int32 HorizontalRadius = bInitialSpawnAreaReady ? HorizontalViewRadius : InitialLoadRadius;
-	const int32 VerticalRadius = bInitialSpawnAreaReady ? VerticalViewRadius : InitialVerticalLoadRadius;
-	TSet<FIntVector> DesiredRequiredCoordinates;
+	const int32				  HorizontalRadius = bInitialSpawnAreaReady ? HorizontalViewRadius : InitialLoadRadius;
+	const int32				  VerticalRadius   = bInitialSpawnAreaReady ? VerticalViewRadius : InitialVerticalLoadRadius;
+	TSet<FIntVector>		  DesiredRequiredCoordinates;
 	FCubusDensityTileBounds2D DesiredCoverageBounds;
 	if (bDensityWorld)
 	{
-		DesiredCoverageBounds = FCubusDensityLod::BuildAlignedCoverage(
-			FIntPoint(CentreCoordinate.X, CentreCoordinate.Y),
-			FMath::Max(1, HorizontalRadius),
-			2
-		);
+		if (!bInitialSpawnAreaReady)
+		{
+			DesiredCoverageBounds.Min		   = FIntPoint(CentreCoordinate.X, CentreCoordinate.Y);
+			DesiredCoverageBounds.MaxExclusive = DesiredCoverageBounds.Min + FIntPoint(1, 1);
+		}
+		else
+		{
+			DesiredCoverageBounds = FCubusDensityLod::BuildAlignedCoverage(FIntPoint(CentreCoordinate.X, CentreCoordinate.Y),
+																		   FMath::Max(1, HorizontalRadius), 2);
+		}
 	}
 
 	const bool bCentreChanged = CentreCoordinate != LastTrackedChunk;
-	const bool bCoverageChanged = bDensityWorld
-		? DesiredCoverageBounds != DensityStreamingCoverageBounds
-		: DensityStreamingCoverageBounds.IsValid();
+	const bool bCoverageChanged =
+		bDensityWorld ? DesiredCoverageBounds != DensityStreamingCoverageBounds : DensityStreamingCoverageBounds.IsValid();
 
 	/*
 	 * Keep the tracking coordinate current for spawn/priority work, but density
@@ -1591,7 +1653,7 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 	 * removes the full surface prepass and queue rebuild on every single chunk
 	 * crossed by the player.
 	 */
-	LastTrackedChunk = CentreCoordinate;
+	LastTrackedChunk				   = CentreCoordinate;
 	const bool bStreamingWindowChanged = bDensityWorld ? bCoverageChanged : (bCentreChanged || bCoverageChanged);
 	if (!bForce && !bStreamingWindowChanged)
 	{
@@ -1600,28 +1662,18 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 
 	if (bDensityWorld)
 	{
-		BuildDensitySurfaceRequiredCoordinates(
-			DesiredCoverageBounds,
-			StreamingTerrainSettings,
-			TerrainOffsetX,
-			TerrainOffsetY,
-			FMath::Min(VerticalRadius, DensitySurfaceVerticalPaddingChunks),
-			DesiredRequiredCoordinates
-		);
+		BuildDensitySurfaceRequiredCoordinates(DesiredCoverageBounds, StreamingTerrainSettings, TerrainOffsetX, TerrainOffsetY,
+											   FMath::Min(VerticalRadius, DensitySurfaceVerticalPaddingChunks), DesiredRequiredCoordinates);
 	}
 	else
 	{
-		BuildRequiredCoordinates(
-			CentreCoordinate, HorizontalRadius, VerticalRadius, DesiredRequiredCoordinates
-		);
+		BuildRequiredCoordinates(CentreCoordinate, HorizontalRadius, VerticalRadius, DesiredRequiredCoordinates);
 	}
 	if (bDensityWorld)
 	{
 		DensityStreamingCoverageBounds = DesiredCoverageBounds;
-		const FIntPoint CoverageCentre(
-			(DesiredCoverageBounds.Min.X + DesiredCoverageBounds.MaxExclusive.X) / 2,
-			(DesiredCoverageBounds.Min.Y + DesiredCoverageBounds.MaxExclusive.Y) / 2
-		);
+		const FIntPoint CoverageCentre((DesiredCoverageBounds.Min.X + DesiredCoverageBounds.MaxExclusive.X) / 2,
+									   (DesiredCoverageBounds.Min.Y + DesiredCoverageBounds.MaxExclusive.Y) / 2);
 
 		/*
 		 * The LOD centre follows the aligned coverage block, not every player
@@ -1646,7 +1698,7 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 	if (!bInitialSpawnAreaReady)
 	{
 		InitialRequiredCoordinates = DesiredRequiredCoordinates;
-		RequiredChunkCoordinates = InitialRequiredCoordinates;
+		RequiredChunkCoordinates   = InitialRequiredCoordinates;
 	}
 	else
 	{
@@ -1670,8 +1722,7 @@ void ACubusBlockWorldActor::UpdateRuntimeStreaming(const bool bForce)
 			const int32 DistanceA = FCubusDensityLod::ChunkDistance(A, CentreCoordinate);
 			const int32 DistanceB = FCubusDensityLod::ChunkDistance(B, CentreCoordinate);
 			return DistanceA > DistanceB;
-		}
-	);
+		});
 
 	for (const auto& Entry : ChunksByCoordinate)
 	{
@@ -1691,31 +1742,15 @@ int32 ACubusBlockWorldActor::ResolveDensitySubdivisions(const FIntVector& ChunkC
 		return 1;
 	}
 
-	const bool bHasLodCentre =
-		DensityLodCentreChunk.X != MAX_int32 && DensityLodCentreChunk.Y != MAX_int32;
-	float TargetSpacing = DensityFarSampleSpacing;
-
-	if (bHasLodCentre)
+	if (FineDensityEditCoordinates.Contains(ChunkCoordinate))
 	{
-		const int32 Distance = FCubusDensityLod::HorizontalChunkDistance(
-			ChunkCoordinate, DensityLodCentreChunk
-		);
-		if (Distance <= DensityNearChunkRadius)
-		{
-			TargetSpacing = DensityNearSampleSpacing;
-		}
-		else if (Distance <= DensityMiddleChunkRadius)
-		{
-			TargetSpacing = DensityMiddleSampleSpacing;
-		}
+		return 4;
 	}
-
-	const int32 Resolved = FCubusDensityLod::ResolveSubdivisionsForSpacing(
-		GeneratedVoxelSize, TargetSpacing
-	);
-	return DensitySurfaceRetryCoordinates.Contains(ChunkCoordinate)
-		? 4
-		: FMath::Clamp(Resolved, 2, 4);
+	if (DensityEditTransitionCoordinates.Contains(ChunkCoordinate))
+	{
+		return 2;
+	}
+	return 1;
 }
 
 FCubusDensityTransitionFaces ACubusBlockWorldActor::BuildDensityTransitionFaces(const FIntVector& ChunkCoordinate,
@@ -1764,9 +1799,7 @@ void ACubusBlockWorldActor::UpdateDensityLods()
 			AffectedCoordinates.Add(Entry.Key);
 			for (int32 FaceIndex = 0; FaceIndex < static_cast<int32>(ECubusDensityFace::Count); ++FaceIndex)
 			{
-				const FIntVector Neighbour = Entry.Key + FCubusDensityTransitionFaces::GetOffset(
-					static_cast<ECubusDensityFace>(FaceIndex)
-				);
+				const FIntVector Neighbour = Entry.Key + FCubusDensityTransitionFaces::GetOffset(static_cast<ECubusDensityFace>(FaceIndex));
 				if (RequiredChunkCoordinates.Contains(Neighbour) && IsValid(FindChunk(Neighbour)))
 				{
 					AffectedCoordinates.Add(Neighbour);
@@ -1839,7 +1872,7 @@ void ACubusBlockWorldActor::TryCommitDensityLodTransition()
 	ActiveDensityLodTransitionCoordinates.Reset();
 	StagedDensityLodTransitionCoordinates.Reset();
 	bDensityLodTransitionActive = false;
-	TimeUntilStreamingUpdate = 0.0f;
+	TimeUntilStreamingUpdate	= 0.0f;
 }
 
 void ACubusBlockWorldActor::QueueStreamingChunkBuilds()
@@ -1847,7 +1880,9 @@ void ACubusBlockWorldActor::QueueStreamingChunkBuilds()
 	StreamingDensityBuildCount		= StreamingChunkBuilds.Num();
 	ReadyStreamingDensityChunkCount = StreamingChunksReady.Num();
 
-	const int32 AvailableSlots = MaxConcurrentStreamingChunkBuilds - StreamingChunkBuilds.Num();
+	const int32 BuildConcurrency =
+		bInitialWorldLoadComplete ? MaxConcurrentStreamingChunkBuilds : FMath::Max(8, MaxConcurrentStreamingChunkBuilds);
+	const int32 AvailableSlots = BuildConcurrency - StreamingChunkBuilds.Num();
 
 	if (AvailableSlots <= 0)
 	{
@@ -1945,7 +1980,12 @@ void ACubusBlockWorldActor::QueueStreamingChunkBuilds()
 			continue;
 		}
 
-		const FCubusDensityMeshBuildInput BuildInput = Chunk->CaptureDensityMeshBuildInput();
+		FCubusDensityMeshBuildInput BuildInput = Chunk->CaptureDensityMeshBuildInput();
+		if (!bInitialSpawnAreaReady && Coordinate == LastTrackedChunk)
+		{
+			BuildInput.DensitySettings.bUseFastMaterialClassification = true;
+			BuildInput.bUseDiskDensityCache							  = false;
+		}
 
 		FCubusStreamingChunkBuild Build;
 
@@ -1998,34 +2038,86 @@ bool ACubusBlockWorldActor::AreInitialChunksReady() const
 
 void ACubusBlockWorldActor::ProcessInitialStreaming()
 {
-	if (bInitialSpawnAreaReady)
+	if (bInitialWorldLoadComplete)
 	{
 		return;
 	}
 
 	const bool bHasSupportCoordinate =
-		LastTrackedChunk.X != MAX_int32 &&
-		LastTrackedChunk.Y != MAX_int32 &&
-		LastTrackedChunk.Z != MAX_int32;
+		LastTrackedChunk.X != MAX_int32 && LastTrackedChunk.Y != MAX_int32 && LastTrackedChunk.Z != MAX_int32;
 
-	if (!bHasSupportCoordinate || !IsInitialChunkReady(LastTrackedChunk))
+	if (!bInitialSpawnAreaReady)
+	{
+		if (!bHasSupportCoordinate || !IsInitialChunkReady(LastTrackedChunk))
+		{
+			return;
+		}
+
+		bInitialSpawnAreaReady = true;
+		StreamingChunksReady.Remove(LastTrackedChunk);
+		UpdateRuntimeStreaming(true);
+		return;
+	}
+
+	if (!AreRequiredStreamingChunksReady())
 	{
 		return;
 	}
 
-	/*
-	 * The enlarged initial area is important for immediate walking quality,
-	 * but it is not a loading-screen dependency. Release the pawn as soon as
-	 * the support chunk has committed collision; the rest of the LOD0 ring
-	 * continues through the normal support-first streaming queue.
-	 */
-	bInitialSpawnAreaReady = true;
+	for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(GetWorld()); Iterator; ++Iterator)
+	{
+		if (IsValid(*Iterator) && !Iterator->IsInitialVisualCoverageReady())
+		{
+			return;
+		}
+		break;
+	}
 
-	UE_LOG(LogTemp, Display,
-		TEXT("Cubus spawn support ready at (%d, %d, %d); %d initial chunks continue streaming"),
-		LastTrackedChunk.X, LastTrackedChunk.Y, LastTrackedChunk.Z, InitialRequiredCoordinates.Num());
+	bInitialWorldLoadComplete = true;
+	UE_LOG(LogTemp, Display, TEXT("Cubus initial world loading complete: chunks=%d"), RequiredChunkCoordinates.Num());
+}
 
-	UpdateRuntimeStreaming(true);
+float ACubusBlockWorldActor::GetWorldLoadingProgress() const
+{
+	if (bInitialWorldLoadComplete)
+	{
+		return 1.0f;
+	}
+	if (!bInitialSpawnAreaReady)
+	{
+		return 0.05f;
+	}
+
+	int32 ReadyCount = 0;
+	for (const FIntVector& Coordinate : RequiredChunkCoordinates)
+	{
+		ReadyCount += StreamingChunksReady.Contains(Coordinate) ? 1 : 0;
+	}
+	const float TerrainProgress =
+		RequiredChunkCoordinates.IsEmpty() ? 0.0f : static_cast<float>(ReadyCount) / static_cast<float>(RequiredChunkCoordinates.Num());
+	float VisualProgress = 0.0f;
+	for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(GetWorld()); Iterator; ++Iterator)
+	{
+		if (IsValid(*Iterator))
+		{
+			VisualProgress = Iterator->GetInitialVisualCoverageProgress();
+		}
+		break;
+	}
+	return FMath::Clamp(0.15f + TerrainProgress * 0.70f + VisualProgress * 0.15f, 0.0f, 0.99f);
+}
+
+FText ACubusBlockWorldActor::GetWorldLoadingStatus() const
+{
+	if (!bInitialSpawnAreaReady)
+	{
+		return FText::FromString(TEXT("Preparing terrain"));
+	}
+	if (!AreRequiredStreamingChunksReady())
+	{
+		return FText::FromString(TEXT("Building the world"));
+	}
+	return bInitialWorldLoadComplete ? FText::FromString(TEXT("Ready")) : FText::FromString(TEXT("Finishing distant terrain"));
 }
 
 void ACubusBlockWorldActor::ProcessCompletedStreamingChunkBuilds()
@@ -2057,8 +2149,7 @@ void ACubusBlockWorldActor::ProcessCompletedStreamingChunkBuilds()
 		 */
 		const bool bStillRequired = RequiredChunkCoordinates.Contains(Build.Coordinate);
 		const bool bResolutionStillCurrent =
-			Build.bIsBlockBuild ||
-			(IsValid(Chunk) && Chunk->GetDensitySubdivisionsPerVoxel() == Build.SubdivisionsPerVoxel);
+			Build.bIsBlockBuild || (IsValid(Chunk) && Chunk->GetDensitySubdivisionsPerVoxel() == Build.SubdivisionsPerVoxel);
 
 		/*
 		 * Pure block jobs do not participate in density LOD topology. Their
@@ -2066,23 +2157,17 @@ void ACubusBlockWorldActor::ProcessCompletedStreamingChunkBuilds()
 		 * synthetic density-neighbour signature. Density and Hybrid jobs retain
 		 * the full stale-topology rejection.
 		 */
-		const bool bTopologyStillCurrent = Build.bIsBlockBuild ||
+		const bool bTopologyStillCurrent =
+			Build.bIsBlockBuild ||
 			(bResolutionStillCurrent &&
-			 BuildDensityTransitionFaces(Build.Coordinate, Build.SubdivisionsPerVoxel)
-				 .GetSignature(Build.SubdivisionsPerVoxel) == Build.TransitionSignature);
+			 BuildDensityTransitionFaces(Build.Coordinate, Build.SubdivisionsPerVoxel).GetSignature(Build.SubdivisionsPerVoxel) ==
+				 Build.TransitionSignature);
 		if (IsValid(Chunk) && FindChunk(Build.Coordinate) == Chunk && bStillRequired && bTopologyStillCurrent)
 		{
 			if (!Build.bIsBlockBuild && !Build.bIsHybridBuild)
 			{
 				FCubusDensityMeshBuildResult Result = Build.Task.GetResult();
-				if (Build.SubdivisionsPerVoxel < 4 && Chunk->IsDensitySurfaceExpected() && Result.MaterialMeshes.IsEmpty())
-				{
-					DensitySurfaceRetryCoordinates.Add(Build.Coordinate);
-					UpdateDensityLods();
-					UE_LOG(LogTemp, Warning, TEXT("Cubus density surface retry promoted to 4x at (%d, %d, %d): 2x mesh had no sections"),
-						   Build.Coordinate.X, Build.Coordinate.Y, Build.Coordinate.Z);
-				}
-				else if (Chunk->BuildStagedVolumeFromDensityMesh(Result))
+				if (Chunk->BuildStagedVolumeFromDensityMesh(Result))
 				{
 					if (bDensityLodTransitionActive && ActiveDensityLodTransitionCoordinates.Contains(Build.Coordinate))
 					{
@@ -2166,7 +2251,7 @@ void ACubusBlockWorldActor::ProcessRuntimeQueues()
 		}
 	}
 
-	const int32 GenerationLimit = MaxChunksGeneratedPerTick;
+	const int32 GenerationLimit = bInitialWorldLoadComplete ? MaxChunksGeneratedPerTick : FMath::Max(8, MaxChunksGeneratedPerTick);
 
 	int32 GeneratedCount = 0;
 
@@ -2176,7 +2261,7 @@ void ACubusBlockWorldActor::ProcessRuntimeQueues()
 
 		PendingChunkGeneration.Pop(EAllowShrinking::No);
 
-		if (IsValid(SpawnChunkAtCoordinate(Coordinate, bEnableWorldVegetation, false)))
+		if (IsValid(SpawnChunkAtCoordinate(Coordinate, bInitialSpawnAreaReady && bEnableWorldVegetation, false)))
 		{
 			++GeneratedCount;
 		}
@@ -2729,7 +2814,7 @@ void ACubusBlockWorldActor::HoldPawnForInitialStreaming()
 
 void ACubusBlockWorldActor::TryReleasePawnToTerrain()
 {
-	if (!bPawnHeldForStreaming || (!bInitialSpawnAreaReady))
+	if (!bPawnHeldForStreaming || !bInitialWorldLoadComplete)
 	{
 		return;
 	}

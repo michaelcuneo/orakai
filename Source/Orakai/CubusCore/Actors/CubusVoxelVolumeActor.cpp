@@ -20,6 +20,7 @@
 #include "HAL/PlatformTime.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/Crc.h"
 #include "ProceduralMeshComponent.h"
 
 namespace CubusVoxelVolumeActor
@@ -31,6 +32,37 @@ TAutoConsoleVariable<float> CVarCubusLod0ChunkBoundsScale(
 int32 WholeChunkOffset(const int32 VoxelOffset)
 {
 	return (VoxelOffset / Cubus::ChunkSize) * Cubus::ChunkSize;
+}
+
+uint32 CalculateMaterialRulesFingerprint(const TArray<FCubusCompiledTerrainMaterialRule>& Rules)
+{
+	uint32 Hash = 0;
+	for (const FCubusCompiledTerrainMaterialRule& Rule : Rules)
+	{
+		Hash = HashCombineFast(Hash, GetTypeHash(Rule.MaterialId));
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Rule.Selection.Role)));
+		Hash = HashCombineFast(Hash, GetTypeHash(Rule.Selection.BaseScore));
+		Hash = HashCombineFast(Hash, GetTypeHash(Rule.Selection.MinimumWinningScore));
+		Hash = HashCombineFast(Hash, GetTypeHash(Rule.Selection.CommunityScoreWeight));
+		Hash = HashCombineFast(Hash, GetTypeHash(Rule.Selection.VariationFrequency));
+		Hash = HashCombineFast(Hash, GetTypeHash(Rule.Selection.VariationScoreAmplitude));
+		Hash = HashCombineFast(Hash, GetTypeHash(Rule.Selection.VariationSalt));
+		Hash = HashCombineFast(Hash, GetTypeHash(Rule.Selection.TieBreakPriority));
+		for (const FName CommunityName : Rule.Selection.CommunityNames)
+		{
+			Hash = HashCombineFast(Hash, FCrc::StrCrc32(*CommunityName.ToString()));
+		}
+		for (const FCubusTerrainMaterialSignalRule& Signal : Rule.Selection.Signals)
+		{
+			Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Signal.Signal)));
+			Hash = HashCombineFast(Hash, GetTypeHash(Signal.Minimum));
+			Hash = HashCombineFast(Hash, GetTypeHash(Signal.Maximum));
+			Hash = HashCombineFast(Hash, GetTypeHash(Signal.BlendWidth));
+			Hash = HashCombineFast(Hash, GetTypeHash(Signal.ScoreWeight));
+			Hash = HashCombineFast(Hash, GetTypeHash(Signal.bRequired));
+		}
+	}
+	return Hash;
 }
 
 int32 AppendMaterialMeshes(UProceduralMeshComponent& TargetMesh, const UCubusMaterialRegistry* MaterialRegistry,
@@ -128,6 +160,7 @@ void ACubusVoxelVolumeActor::GenerateTerrainData()
 
 	if (GetEffectiveRenderMode() == ECubusVoxelRenderMode::Density)
 	{
+		GenerateDensityWaterData();
 		bChunkCacheDirty = false;
 		return;
 	}
@@ -725,6 +758,89 @@ FCubusTerrainDensitySettings ACubusVoxelVolumeActor::BuildDensitySettings() cons
 		DensitySettings.CaveThreshold = GeologyProfile->CaveThreshold;
 	}
 
+	if (IsValid(MaterialRegistry.Get()))
+	{
+		int32 DisabledRuleCount		 = 0;
+		int32 InvalidDefinitionCount = 0;
+		int32 MissingRoleCount		 = 0;
+		int32 InvalidMaterialIdCount = 0;
+
+		for (const FCubusMaterialDefinition& Definition : MaterialRegistry->Materials)
+		{
+			if (!Definition.TerrainSelection.bEnabled)
+			{
+				++DisabledRuleCount;
+				continue;
+			}
+			if (!Definition.bRenderable || !Definition.IsSolid())
+			{
+				++InvalidDefinitionCount;
+				continue;
+			}
+			if (Definition.TerrainSelection.Role == ECubusTerrainMaterialRole::None)
+			{
+				++MissingRoleCount;
+				continue;
+			}
+			if (Definition.MaterialId <= 0 || Definition.MaterialId > FCubusDensityMesher::MaximumDensityMaterialId)
+			{
+				++InvalidMaterialIdCount;
+				continue;
+			}
+
+			FCubusCompiledTerrainMaterialRule Rule;
+			Rule.MaterialId						   = Definition.MaterialId;
+			Rule.Selection						   = Definition.TerrainSelection;
+			Rule.Selection.CommunityScoreWeight	   = FMath::Max(0.0f, Rule.Selection.CommunityScoreWeight);
+			Rule.Selection.VariationFrequency	   = FMath::Max(0.0f, Rule.Selection.VariationFrequency);
+			Rule.Selection.VariationScoreAmplitude = FMath::Max(0.0f, Rule.Selection.VariationScoreAmplitude);
+			for (FCubusTerrainMaterialSignalRule& Signal : Rule.Selection.Signals)
+			{
+				if (Signal.Minimum > Signal.Maximum)
+				{
+					Swap(Signal.Minimum, Signal.Maximum);
+				}
+				Signal.BlendWidth  = FMath::Max(0.0f, Signal.BlendWidth);
+				Signal.ScoreWeight = FMath::Max(0.0f, Signal.ScoreWeight);
+			}
+			DensitySettings.MaterialSelectionRules.Add(MoveTemp(Rule));
+		}
+
+		DensitySettings.MaterialSelectionRules.Sort([](const FCubusCompiledTerrainMaterialRule& A,
+													   const FCubusCompiledTerrainMaterialRule& B) { return A.MaterialId < B.MaterialId; });
+
+		static TAtomic<bool> bLoggedMaterialRules(false);
+		bool				 bExpected = false;
+		if (bLoggedMaterialRules.CompareExchange(bExpected, true))
+		{
+			int32 SurfaceRuleCount	  = 0;
+			int32 SubsurfaceRuleCount = 0;
+			int32 BedrockRuleCount	  = 0;
+			for (const FCubusCompiledTerrainMaterialRule& Rule : DensitySettings.MaterialSelectionRules)
+			{
+				SurfaceRuleCount += Rule.Selection.Role == ECubusTerrainMaterialRole::Surface ? 1 : 0;
+				SubsurfaceRuleCount += Rule.Selection.Role == ECubusTerrainMaterialRole::Subsurface ? 1 : 0;
+				BedrockRuleCount += Rule.Selection.Role == ECubusTerrainMaterialRole::Bedrock ? 1 : 0;
+			}
+
+			UE_LOG(LogTemp, Display,
+				   TEXT("Cubus terrain material rules: registry=%s definitions=%d compiled=%d surface=%d subsurface=%d bedrock=%d "
+						"rejected=(disabled:%d invalid-definition:%d missing-role:%d invalid-id:%d)"),
+				   *GetPathNameSafe(MaterialRegistry.Get()), MaterialRegistry->Materials.Num(),
+				   DensitySettings.MaterialSelectionRules.Num(), SurfaceRuleCount, SubsurfaceRuleCount, BedrockRuleCount, DisabledRuleCount,
+				   InvalidDefinitionCount, MissingRoleCount, InvalidMaterialIdCount);
+		}
+	}
+	else
+	{
+		static TAtomic<bool> bLoggedMissingMaterialRegistry(false);
+		bool				 bExpected = false;
+		if (bLoggedMissingMaterialRegistry.CompareExchange(bExpected, true))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Cubus terrain material rules: registry=None compiled=0"));
+		}
+	}
+
 	return DensitySettings;
 }
 
@@ -733,6 +849,12 @@ FCubusDensityMeshBuildInput ACubusVoxelVolumeActor::CaptureDensityMeshBuildInput
 	FCubusDensityMeshBuildInput Input;
 
 	Input.DensitySettings = BuildDensitySettings();
+	if (ChunkData.IsValid() && ChunkData->HasAnyOccupiedVoxel())
+	{
+		const FCubusBlockMeshBuildInput WaterInput = CaptureBlockMeshBuildInput();
+		Input.WaterNeighborhood					   = WaterInput.Neighborhood;
+		Input.WaterMaterials					   = WaterInput.Materials;
+	}
 
 	if (IsValid(OwningBlockWorld.Get()))
 	{
@@ -837,6 +959,10 @@ FCubusBlockMeshBuildInput ACubusVoxelVolumeActor::CaptureBlockMeshBuildInput() c
 			{
 				Input.Materials.RenderableSolidMaterialIds.Add(Definition.MaterialId);
 			}
+			if (Definition.bRenderable && Definition.IsLiquid())
+			{
+				Input.Materials.RenderableLiquidMaterialIds.Add(Definition.MaterialId);
+			}
 		}
 	}
 	else
@@ -844,6 +970,7 @@ FCubusBlockMeshBuildInput ACubusVoxelVolumeActor::CaptureBlockMeshBuildInput() c
 		for (int32 MaterialId = 1; MaterialId <= MAX_uint16; ++MaterialId)
 		{
 			Input.Materials.RenderableSolidMaterialIds.Add(MaterialId);
+			Input.Materials.RenderableLiquidMaterialIds.Add(MaterialId);
 		}
 	}
 
@@ -855,6 +982,8 @@ FCubusDensityMeshBuildResult ACubusVoxelVolumeActor::BuildDensityMeshData(const 
 	const double BuildStartTime = FPlatformTime::Seconds();
 
 	FCubusDensityMeshBuildResult Result;
+	FCubusBlockMesher::BuildWaterChunk(Input.WaterNeighborhood, Input.WaterMaterials, Input.VoxelSize, Result.WaterMaterialMeshes,
+									   Result.GeneratedWaterFaceCount);
 
 	const FCubusTerrainDensityField DensityField(Input.DensitySettings);
 
@@ -865,8 +994,10 @@ FCubusDensityMeshBuildResult ACubusVoxelVolumeActor::BuildDensityMeshData(const 
 	MeshCacheContext.GenerationVersion	  = Input.GenerationVersion;
 	MeshCacheContext.VoxelSize			  = Input.VoxelSize;
 	MeshCacheContext.SubdivisionsPerVoxel = Subdivisions;
-	const uint32 TransitionSignature	  = Input.TransitionFaces.GetSignature(Subdivisions);
-	const bool	 bCanUseMeshCache		  = Input.bUseDiskDensityCache && Input.DensityEdits.IsEmpty();
+	MeshCacheContext.MaterialRulesFingerprint =
+		CubusVoxelVolumeActor::CalculateMaterialRulesFingerprint(Input.DensitySettings.MaterialSelectionRules);
+	const uint32 TransitionSignature = Input.TransitionFaces.GetSignature(Subdivisions);
+	const bool	 bCanUseMeshCache	 = Input.bUseDiskDensityCache && Input.DensityEdits.IsEmpty();
 
 	if (bCanUseMeshCache && FCubusDensityChunkStore::LoadMesh(Input.ChunkCoordinate, MeshCacheContext, TransitionSignature,
 															  Result.MaterialMeshes, Result.GeneratedTriangleCount))
@@ -892,10 +1023,11 @@ FCubusDensityMeshBuildResult ACubusVoxelVolumeActor::BuildDensityMeshData(const 
 		else
 		{
 			FCubusDensityChunkStoreContext CacheContext;
-			CacheContext.WorldSeed			  = Input.WorldSeed;
-			CacheContext.GenerationVersion	  = Input.GenerationVersion;
-			CacheContext.VoxelSize			  = Input.VoxelSize;
-			CacheContext.SubdivisionsPerVoxel = Subdivisions;
+			CacheContext.WorldSeed				  = Input.WorldSeed;
+			CacheContext.GenerationVersion		  = Input.GenerationVersion;
+			CacheContext.VoxelSize				  = Input.VoxelSize;
+			CacheContext.SubdivisionsPerVoxel	  = Subdivisions;
+			CacheContext.MaterialRulesFingerprint = MeshCacheContext.MaterialRulesFingerprint;
 
 			const bool bLoadedDiskBaseline =
 				Input.bUseDiskDensityCache && FCubusDensityChunkStore::LoadBuffer(Input.ChunkCoordinate, CacheContext, DensityBuffer);
@@ -971,6 +1103,10 @@ void ACubusVoxelVolumeActor::UploadDensityMesh(UProceduralMeshComponent& TargetM
 	GeneratedDensitySectionCount = CubusVoxelVolumeActor::AppendMaterialMeshes(
 		TargetMesh, MaterialRegistry.Get(), BuildResult.MaterialMeshes, bGenerateDensityCollision, InOutMeshSectionIndex,
 		GeneratedVertexCount, GeneratedTriangleCount);
+	GeneratedBlockSectionCount +=
+		CubusVoxelVolumeActor::AppendMaterialMeshes(TargetMesh, MaterialRegistry.Get(), BuildResult.WaterMaterialMeshes, false,
+													InOutMeshSectionIndex, GeneratedVertexCount, GeneratedTriangleCount);
+	GeneratedFaceCount += BuildResult.GeneratedWaterFaceCount;
 
 	if (GeneratedDensitySectionCount <= 0)
 	{
@@ -1198,6 +1334,40 @@ void ACubusVoxelVolumeActor::GenerateHeightTerrain()
 		TerrainRegionFrequency, TerrainPlainsThreshold, TerrainPlainsBlend, TerrainMountainThreshold, TerrainMountainBlend,
 		TerrainSurfaceMaterialId, TerrainSubsurfaceMaterialId, TerrainRockMaterialId, TerrainSnowMaterialId, TerrainRockSlopeThreshold,
 		TerrainSnowMinimumHeight, bGenerateWater, TerrainWaterLevel, TerrainWaterMaterialId, GeologyProfile.Get());
+}
+
+void ACubusVoxelVolumeActor::GenerateDensityWaterData()
+{
+	if (!bGenerateWater || !ChunkData.IsValid())
+	{
+		return;
+	}
+
+	const int32 ChunkBaseZ	= ChunkCoordinate.Z * Cubus::ChunkSize;
+	const int32 WaterLocalZ = TerrainWaterLevel - ChunkBaseZ;
+	if (WaterLocalZ < 0 || WaterLocalZ >= Cubus::ChunkSize)
+	{
+		return;
+	}
+
+	const FCubusTerrainDensityField DensityField(BuildDensitySettings());
+	const FIntVector				GlobalOrigin = ChunkCoordinate * Cubus::ChunkSize;
+	FCubusBlockVoxel				WaterVoxel;
+	WaterVoxel.MaterialId = TerrainWaterMaterialId;
+	WaterVoxel.SetWater(true);
+
+	for (int32 LocalY = 0; LocalY < Cubus::ChunkSize; ++LocalY)
+	{
+		for (int32 LocalX = 0; LocalX < Cubus::ChunkSize; ++LocalX)
+		{
+			const float SurfaceHeight = DensityField.SampleSurfaceVoxelHeight(static_cast<float>(GlobalOrigin.X + LocalX),
+																			  static_cast<float>(GlobalOrigin.Y + LocalY));
+			if (SurfaceHeight < static_cast<float>(TerrainWaterLevel))
+			{
+				ChunkData->SetVoxel(LocalX, LocalY, WaterLocalZ, WaterVoxel);
+			}
+		}
+	}
 }
 
 void ACubusVoxelVolumeActor::ResetDiagnostics()

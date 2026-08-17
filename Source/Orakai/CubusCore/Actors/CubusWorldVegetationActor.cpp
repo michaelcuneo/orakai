@@ -1832,7 +1832,7 @@ void ACubusWorldVegetationActor::ResolveBlockWorld()
 
 bool ACubusWorldVegetationActor::IsWorldVegetationEnabled() const
 {
-	return IsValid(BlockWorld) && BlockWorld->IsWorldVegetationEnabled();
+	return bRenderWorldPlantBatches && IsValid(BlockWorld) && BlockWorld->IsWorldVegetationEnabled();
 }
 
 uint32 ACubusWorldVegetationActor::CalculateVegetationSettingsHash() const
