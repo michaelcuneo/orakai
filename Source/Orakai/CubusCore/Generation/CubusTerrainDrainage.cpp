@@ -90,18 +90,59 @@ namespace CubusTerrainDrainage
         return Result;
     }
 
+    uint32 HashStructureSettings(const FCubusTerrainStructureSettings& Settings)
+    {
+        uint32 Hash = GetTypeHash(Settings.Seed);
+        auto AddFloat = [&Hash](const float Value)
+        {
+            Hash = HashCombine(Hash, GetTypeHash(Value));
+        };
+
+        AddFloat(Settings.BaseElevationMeters);
+        AddFloat(Settings.RegionalReliefMeters);
+        AddFloat(Settings.RegionalScaleKm);
+        AddFloat(Settings.MountainSystemSpacingKm);
+        AddFloat(Settings.RangeNodeSpacingKm);
+        AddFloat(Settings.RangeCoreHalfWidthKm);
+        AddFloat(Settings.RangeShoulderHalfWidthKm);
+        AddFloat(Settings.RangeReliefMeters);
+        AddFloat(Settings.AlongSpineJitter);
+        AddFloat(Settings.AcrossSpineJitter);
+        AddFloat(Settings.BranchChance);
+        AddFloat(Settings.BranchReliefScale);
+        AddFloat(Settings.BranchWidthScale);
+        AddFloat(Settings.MassifRadiusKm);
+        AddFloat(Settings.MassifReliefMeters);
+        AddFloat(Settings.PassChance);
+        AddFloat(Settings.PassHalfWidthKm);
+        AddFloat(Settings.PassDepthMeters);
+        AddFloat(Settings.BasinCellSizeKm);
+        AddFloat(Settings.BasinRadiusKm);
+        AddFloat(Settings.BasinDepthMeters);
+        AddFloat(Settings.HillScaleKm);
+        AddFloat(Settings.HillReliefMeters);
+        AddFloat(Settings.SpurScaleKm);
+        AddFloat(Settings.SpurReliefMeters);
+        AddFloat(Settings.SwaleScaleMeters);
+        AddFloat(Settings.SwaleDepthMeters);
+        AddFloat(Settings.FineScaleMeters);
+        AddFloat(Settings.FineReliefMeters);
+        AddFloat(Settings.MorphologyWarpMeters);
+        return Hash;
+    }
+
     uint32 HashSettings(const FCubusTerrainDrainageSettings& Settings)
     {
-        uint32 Hash = GetTypeHash(Settings.Raster.Structure.Seed);
-        Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.AnalysisCellSizeMeters * 100.0f)));
+        // Only hash inputs that affect the solved region itself. Stream/lake
+        // classification thresholds are applied when querying the cached field,
+        // so changing those should not force an expensive drainage rebuild.
+        uint32 Hash = HashStructureSettings(Settings.Raster.Structure);
+        Hash = HashCombine(Hash, GetTypeHash(Settings.Raster.DomainOffsetMeters));
+        Hash = HashCombine(Hash, GetTypeHash(Settings.AnalysisCellSizeMeters));
         Hash = HashCombine(Hash, GetTypeHash(Settings.RegionCellCount));
         Hash = HashCombine(Hash, GetTypeHash(Settings.HaloCellCount));
-        Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.StreamSourceAreaSquareKm * 1000.0f)));
-        Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.MajorRiverAreaSquareKm * 1000.0f)));
-        Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.Raster.DomainOffsetMeters.X)));
-        Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.Raster.DomainOffsetMeters.Y)));
-        Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.RegionOriginMeters.X)));
-        Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Settings.RegionOriginMeters.Y)));
+        Hash = HashCombine(Hash, GetTypeHash(Settings.FillEpsilonMeters));
+        Hash = HashCombine(Hash, GetTypeHash(Settings.RegionOriginMeters));
         return Hash;
     }
 
@@ -185,6 +226,12 @@ namespace CubusTerrainDrainage
         TArray<FHeapNode> Heap;
         Heap.Reserve(SampleCount / 4);
 
+        // Priority flood already removes cells from the min-heap in nondecreasing
+        // filled-height order. Retaining that order lets accumulation later walk
+        // it backwards instead of sorting every cell by height a second time.
+        TArray<int32> LowToHigh;
+        LowToHigh.Reserve(SampleCount);
+
         auto SeedBoundary = [&](const int32 X, const int32 Y)
         {
             const int32 Index = Region->Index(X, Y);
@@ -210,6 +257,8 @@ namespace CubusTerrainDrainage
         while (!Heap.IsEmpty())
         {
             const FHeapNode Current = HeapPop(Heap);
+            LowToHigh.Add(Current.Index);
+
             const int32 CurrentX = Current.Index % Region->GridSize;
             const int32 CurrentY = Current.Index / Region->GridSize;
 
@@ -268,23 +317,12 @@ namespace CubusTerrainDrainage
             }
         }
 
-        TArray<int32> HighToLow;
-        HighToLow.Reserve(SampleCount);
-        for (int32 Index = 0; Index < SampleCount; ++Index)
+        // Receivers are always strictly lower on the epsilon-resolved filled
+        // surface, so reverse priority-flood order is already a valid upstream-
+        // to-downstream accumulation order. No O(N log N) height sort is needed.
+        for (int32 OrderIndex = LowToHigh.Num() - 1; OrderIndex >= 0; --OrderIndex)
         {
-            HighToLow.Add(Index);
-        }
-        HighToLow.Sort([&](const int32 A, const int32 B)
-        {
-            if (!FMath::IsNearlyEqual(Region->FilledHeight[A], Region->FilledHeight[B], Settings.FillEpsilonMeters * 0.1f))
-            {
-                return Region->FilledHeight[A] > Region->FilledHeight[B];
-            }
-            return A > B;
-        });
-
-        for (const int32 Index : HighToLow)
-        {
+            const int32 Index = LowToHigh[OrderIndex];
             const int32 Receiver = Region->Receiver[Index];
             if (Receiver != INDEX_NONE)
             {
@@ -396,6 +434,11 @@ namespace CubusTerrainDrainage
         return Region.CellSizeMeters * Region.CellSizeMeters / 1000000.0f;
     }
 
+    float DepressionDepthMeters(const FRegion& Region, const int32 Index)
+    {
+        return FMath::Max(0.0f, Region.FilledHeight[Index] - Region.RawHeight[Index]);
+    }
+
     int32 ClosestCellIndex(const FRegion& Region, const double WorldXmeters, const double WorldYmeters)
     {
         const int32 X = FMath::Clamp(
@@ -427,9 +470,11 @@ FCubusTerrainDrainageSample FCubusTerrainDrainage::Sample(
     FCubusTerrainDrainageSample Result;
     Result.RawHeightMeters = Region->RawHeight[Index];
     Result.FilledHeightMeters = Region->FilledHeight[Index];
+    Result.DepressionDepthMeters = DepressionDepthMeters(*Region, Index);
     Result.ContributingAreaSquareKm = Region->AccumulationCells[Index] * CellAreaSquareKm(*Region);
     Result.StrahlerOrder = Region->StrahlerOrder[Index];
     Result.bStream = Result.ContributingAreaSquareKm >= FMath::Max(0.0f, Settings.StreamSourceAreaSquareKm);
+    Result.bLakeCandidate = Result.DepressionDepthMeters > FMath::Max(0.0f, Settings.LakeMinimumDepthMeters);
 
     const int32 Receiver = Region->Receiver[Index];
     if (Receiver != INDEX_NONE)
@@ -459,6 +504,7 @@ void FCubusTerrainDrainage::CollectSegments(
 
     const FIntPoint MinRegion = WorldToRegion(WorldBoundsMeters.Min.X, WorldBoundsMeters.Min.Y, Settings);
     const FIntPoint MaxRegion = WorldToRegion(WorldBoundsMeters.Max.X, WorldBoundsMeters.Max.Y, Settings);
+    const float LakeThresholdMeters = FMath::Max(0.0f, Settings.LakeMinimumDepthMeters);
 
     for (int32 RegionY = MinRegion.Y; RegionY <= MaxRegion.Y; ++RegionY)
     {
@@ -502,6 +548,9 @@ void FCubusTerrainDrainage::CollectSegments(
                     Segment.EndElevationMeters = Region->FilledHeight[Receiver];
                     Segment.ContributingAreaSquareKm = AreaKm2;
                     Segment.StrahlerOrder = Region->StrahlerOrder[Index];
+                    Segment.bLakeTraversal =
+                        DepressionDepthMeters(*Region, Index) > LakeThresholdMeters ||
+                        DepressionDepthMeters(*Region, Receiver) > LakeThresholdMeters;
                     OutSegments.Add(Segment);
                 }
             }
