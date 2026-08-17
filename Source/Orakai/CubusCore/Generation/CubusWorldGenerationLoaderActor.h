@@ -261,7 +261,7 @@ private:
     void RebuildTerrainPreview(bool bOverlayDrainage);
     void DrawDrainageSegmentsToPreview(const TArray<FCubusTerrainDrainageSegment>& Segments);
     FColor HeightToPreviewColor(float NormalizedHeight, float Hillshade) const;
-    FIntPoint WorldToPreviewPixel(int32 PixelX, int32 PixelY) const;
+    FIntPoint WorldToPreviewPixel(const FVector2D& WorldMeters) const;
     FVector2D PreviewPixelToWorld(int32 PixelX, int32 PixelY) const;
     void DrawPreviewLine(FIntPoint Start, FIntPoint End, const FColor& Color, int32 RadiusPixels);
 
