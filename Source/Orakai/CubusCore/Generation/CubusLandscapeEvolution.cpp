@@ -1,7 +1,6 @@
 #include "CubusCore/Generation/CubusLandscapeEvolution.h"
 
-#include "Algo/Sort.h"
-#include "Containers/Queue.h"
+#include "Async/ParallelFor.h"
 #include "HAL/PlatformTime.h"
 
 namespace CubusLandscapeEvolution
@@ -10,6 +9,7 @@ namespace
 {
 constexpr int32 D8X[8] = {1, 1, 0, -1, -1, -1, 0, 1};
 constexpr int32 D8Y[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+constexpr double SqrtTwo = 1.4142135623730950488;
 
 float Hash01(uint32 V)
 {
@@ -32,7 +32,10 @@ float ValueNoise2D(const FVector2D& P, const int32 Seed)
 
 	auto H = [Seed](const int32 X, const int32 Y)
 	{
-		return Hash01(static_cast<uint32>(X * 73856093) ^ static_cast<uint32>(Y * 19349663) ^ static_cast<uint32>(Seed * 83492791));
+		const uint32 HX = static_cast<uint32>(X) * 73856093u;
+		const uint32 HY = static_cast<uint32>(Y) * 19349663u;
+		const uint32 HS = static_cast<uint32>(Seed) * 83492791u;
+		return Hash01(HX ^ HY ^ HS);
 	};
 
 	const float A = FMath::Lerp(H(X0, Y0), H(X0 + 1, Y0), Sx);
@@ -104,6 +107,13 @@ uint64 PairKey(const uint8 A, const uint8 B)
 	const uint8 Hi = FMath::Max(A, B);
 	return (static_cast<uint64>(Lo) << 32) | static_cast<uint64>(Hi);
 }
+
+double ReceiverDistanceMeters(const FGlobalDem& Dem, const int32 Cell, const int32 Receiver)
+{
+	const FIntPoint A = Dem.Coordinates(Cell);
+	const FIntPoint B = Dem.Coordinates(Receiver);
+	return Dem.CellSizeMeters * ((A.X != B.X && A.Y != B.Y) ? SqrtTwo : 1.0);
+}
 }
 
 void FGlobalDem::Reset()
@@ -118,7 +128,10 @@ bool FGlobalDem::IsValid() const
 
 bool FGlobalDem::HasHydrology() const
 {
-	return IsValid() && Receiver.Num() == ElevationM.Num() && DrainageAreaKm2.Num() == ElevationM.Num();
+	return IsValid() &&
+		Receiver.Num() == ElevationM.Num() &&
+		DrainageAreaKm2.Num() == ElevationM.Num() &&
+		FlowOrder.Num() == ElevationM.Num();
 }
 
 int32 FGlobalDem::NumCells() const
@@ -233,113 +246,156 @@ bool FGenerator::GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem,
 
 	const int32 CellCount = OutDem.NumCells();
 	OutDem.ElevationM.SetNumUninitialized(CellCount);
-	OutDem.UpliftM.SetNumZeroed(CellCount);
+	OutDem.UpliftM.SetNumUninitialized(CellCount);
 	OutDem.PlateId.SetNumUninitialized(CellCount);
 	OutDem.ProvinceId.SetNumUninitialized(CellCount);
-	OutDem.BoundaryType.SetNumZeroed(CellCount);
+	OutDem.BoundaryType.SetNumUninitialized(CellCount);
 
-	TMap<uint64, FPlateBoundary> BoundaryMap;
+	const int32 R = Settings.Resolution;
+	const double Half = Settings.WorldSizeMeters * 0.5;
+	const double InvIntervals = 1.0 / static_cast<double>(R - 1);
+
+	// Every cell is independent here. At 4097^2 with ~18 plates this is roughly
+	// 302 million distance checks, so leaving this serial wastes most of the CPU.
+	// The plate array is immutable and every worker writes a unique cell.
+	ParallelFor(CellCount, [&OutDem, &Settings, R, Half, InvIntervals](const int32 Cell)
+	{
+		const int32 X = Cell % R;
+		const int32 Y = Cell / R;
+		const double U = static_cast<double>(X) * InvIntervals;
+		const double V = static_cast<double>(Y) * InvIntervals;
+		const double WorldX = -Half + U * Settings.WorldSizeMeters;
+		const double WorldY = -Half + V * Settings.WorldSizeMeters;
+		const FVector2D WorldMeters(WorldX, WorldY);
+		const FVector2D P01(U, V);
+
+		int32 Closest = INDEX_NONE;
+		int32 Second = INDEX_NONE;
+		double ClosestD2 = TNumericLimits<double>::Max();
+		double SecondD2 = TNumericLimits<double>::Max();
+		for (int32 P = 0; P < OutDem.Plates.Num(); ++P)
+		{
+			const double D2 = FVector2D::DistSquared(P01, OutDem.Plates[P].Center01);
+			if (D2 < ClosestD2)
+			{
+				SecondD2 = ClosestD2;
+				Second = Closest;
+				ClosestD2 = D2;
+				Closest = P;
+			}
+			else if (D2 < SecondD2)
+			{
+				SecondD2 = D2;
+				Second = P;
+			}
+		}
+
+		check(Closest != INDEX_NONE && Second != INDEX_NONE);
+		const FPlate& Plate = OutDem.Plates[Closest];
+		const FPlate& Other = OutDem.Plates[Second];
+		const FVector2D PairAxis = (Other.Center01 - Plate.Center01) * Settings.WorldSizeMeters;
+		float NormalSpeed = 0.0f;
+		float TangentSpeed = 0.0f;
+		const EBoundaryType Type = ClassifyBoundary(Plate, Other, PairAxis, NormalSpeed, TangentSpeed);
+
+		const double ClosestD = FMath::Sqrt(ClosestD2) * Settings.WorldSizeMeters;
+		const double SecondD = FMath::Sqrt(SecondD2) * Settings.WorldSizeMeters;
+		float BoundaryDistanceM = static_cast<float>(0.5 * FMath::Abs(SecondD - ClosestD));
+		const float Warp = ValueNoise2D(WorldMeters / 35000.0, Settings.Seed + Closest * 97 + Second * 211);
+		BoundaryDistanceM = FMath::Max(0.0f, BoundaryDistanceM + Warp * Settings.BoundaryWarpAmplitudeM);
+
+		float Uplift = BoundaryContribution(Type, BoundaryDistanceM, Settings);
+		if (Type == EBoundaryType::Convergent)
+		{
+			Uplift *= FMath::Clamp((FMath::Abs(NormalSpeed) + 0.05f) * 3.0f, 0.45f, 1.5f);
+		}
+
+		EProvinceType Province = Plate.InteriorProvince;
+		if (BoundaryDistanceM < Settings.BoundaryWidthM * 0.9f)
+		{
+			Province = Type == EBoundaryType::Convergent ? EProvinceType::FoldMountainBelt :
+				Type == EBoundaryType::Divergent ? EProvinceType::RiftValley : Province;
+		}
+		if (Plate.bVolcanic && BoundaryDistanceM < Settings.BoundaryWidthM * 0.55f)
+		{
+			Province = EProvinceType::VolcanicProvince;
+		}
+
+		const float OceanMask = EdgeOceanMask(WorldMeters, Settings);
+		if (OceanMask > 0.3f)
+		{
+			Province = EProvinceType::CoastalShelf;
+		}
+
+		const float WeakRelief = LongWaveField(WorldMeters, Settings) * Settings.LongWaveAmplitudeM;
+		float Elevation = Plate.BaseElevationM + Uplift + WeakRelief;
+		Elevation = FMath::Lerp(Elevation, Settings.OceanFloorM, OceanMask * OceanMask);
+
+		OutDem.ElevationM[Cell] = Elevation;
+		OutDem.UpliftM[Cell] = Uplift;
+		OutDem.PlateId[Cell] = static_cast<uint8>(Closest);
+		OutDem.ProvinceId[Cell] = static_cast<uint8>(Province);
+		OutDem.BoundaryType[Cell] = static_cast<uint8>(Type);
+	});
+
 	float MinElevation = TNumericLimits<float>::Max();
 	float MaxElevation = TNumericLimits<float>::Lowest();
-	const double Half = Settings.WorldSizeMeters * 0.5;
-
-	for (int32 Y = 0; Y < Settings.Resolution; ++Y)
+	for (const float Elevation : OutDem.ElevationM)
 	{
-		const double WorldY = -Half + Y * OutDem.CellSizeMeters;
-		for (int32 X = 0; X < Settings.Resolution; ++X)
+		MinElevation = FMath::Min(MinElevation, Elevation);
+		MaxElevation = FMath::Max(MaxElevation, Elevation);
+	}
+
+	// Boundary metadata is derived from actual ownership adjacency after the
+	// parallel raster pass. This removes the shared TMap write from the hot loop
+	// and makes the expensive cell evaluation embarrassingly parallel.
+	TMap<uint64, FPlateBoundary> BoundaryMap;
+	auto AddBoundaryPair = [&OutDem, &Settings, &BoundaryMap](const uint8 PlateAId, const uint8 PlateBId)
+	{
+		if (PlateAId == PlateBId)
 		{
-			const double WorldX = -Half + X * OutDem.CellSizeMeters;
-			const FVector2D WorldMeters(WorldX, WorldY);
-			const FVector2D P01((WorldX + Half) / Settings.WorldSizeMeters, (WorldY + Half) / Settings.WorldSizeMeters);
+			return;
+		}
+		const uint64 Key = PairKey(PlateAId, PlateBId);
+		if (BoundaryMap.Contains(Key))
+		{
+			return;
+		}
 
-			int32 Closest = 0;
-			int32 Second = 1;
-			double ClosestD2 = TNumericLimits<double>::Max();
-			double SecondD2 = TNumericLimits<double>::Max();
-			for (int32 P = 0; P < OutDem.Plates.Num(); ++P)
-			{
-				const double D2 = FVector2D::DistSquared(P01, OutDem.Plates[P].Center01);
-				if (D2 < ClosestD2)
-				{
-					SecondD2 = ClosestD2;
-					Second = Closest;
-					ClosestD2 = D2;
-					Closest = P;
-				}
-				else if (D2 < SecondD2)
-				{
-					SecondD2 = D2;
-					Second = P;
-				}
-			}
+		const uint8 Lo = FMath::Min(PlateAId, PlateBId);
+		const uint8 Hi = FMath::Max(PlateAId, PlateBId);
+		const FPlate& A = OutDem.Plates[Lo];
+		const FPlate& B = OutDem.Plates[Hi];
+		const FVector2D PairAxis = (B.Center01 - A.Center01) * Settings.WorldSizeMeters;
+		float NormalSpeed = 0.0f;
+		float TangentSpeed = 0.0f;
 
-			const FPlate& Plate = OutDem.Plates[Closest];
-			const FPlate& Other = OutDem.Plates[Second];
-			const FVector2D PairAxis = (Other.Center01 - Plate.Center01) * Settings.WorldSizeMeters;
-			float NormalSpeed = 0.0f;
-			float TangentSpeed = 0.0f;
-			const EBoundaryType Type = ClassifyBoundary(Plate, Other, PairAxis, NormalSpeed, TangentSpeed);
+		FPlateBoundary Boundary;
+		Boundary.PlateA = Lo;
+		Boundary.PlateB = Hi;
+		Boundary.Type = ClassifyBoundary(A, B, PairAxis, NormalSpeed, TangentSpeed);
+		Boundary.RelativeNormalSpeed = NormalSpeed;
+		Boundary.RelativeTangentialSpeed = TangentSpeed;
+		BoundaryMap.Add(Key, Boundary);
+	};
 
-			const double ClosestD = FMath::Sqrt(ClosestD2) * Settings.WorldSizeMeters;
-			const double SecondD = FMath::Sqrt(SecondD2) * Settings.WorldSizeMeters;
-			float BoundaryDistanceM = static_cast<float>(0.5 * FMath::Abs(SecondD - ClosestD));
-			const float Warp = ValueNoise2D(WorldMeters / 35000.0, Settings.Seed + Closest * 97 + Second * 211);
-			BoundaryDistanceM = FMath::Max(0.0f, BoundaryDistanceM + Warp * Settings.BoundaryWarpAmplitudeM);
-
-			float Uplift = BoundaryContribution(Type, BoundaryDistanceM, Settings);
-			if (Type == EBoundaryType::Convergent)
-			{
-				Uplift *= FMath::Clamp((FMath::Abs(NormalSpeed) + 0.05f) * 3.0f, 0.45f, 1.5f);
-			}
-
-			EProvinceType Province = Plate.InteriorProvince;
-			if (BoundaryDistanceM < Settings.BoundaryWidthM * 0.9f)
-			{
-				Province = Type == EBoundaryType::Convergent ? EProvinceType::FoldMountainBelt :
-					Type == EBoundaryType::Divergent ? EProvinceType::RiftValley : Province;
-			}
-			if (Plate.bVolcanic && BoundaryDistanceM < Settings.BoundaryWidthM * 0.55f)
-			{
-				Province = EProvinceType::VolcanicProvince;
-			}
-
-			const float OceanMask = EdgeOceanMask(WorldMeters, Settings);
-			if (OceanMask > 0.3f)
-			{
-				Province = EProvinceType::CoastalShelf;
-			}
-
-			const float WeakRelief = LongWaveField(WorldMeters, Settings) * Settings.LongWaveAmplitudeM;
-			float Elevation = Plate.BaseElevationM + Uplift + WeakRelief;
-			Elevation = FMath::Lerp(Elevation, Settings.OceanFloorM, OceanMask * OceanMask);
-
+	for (int32 Y = 0; Y < R; ++Y)
+	{
+		for (int32 X = 0; X < R; ++X)
+		{
 			const int32 Cell = OutDem.Index(X, Y);
-			OutDem.ElevationM[Cell] = Elevation;
-			OutDem.UpliftM[Cell] = Uplift;
-			OutDem.PlateId[Cell] = static_cast<uint8>(Closest);
-			OutDem.ProvinceId[Cell] = static_cast<uint8>(Province);
-			OutDem.BoundaryType[Cell] = static_cast<uint8>(Type);
-			MinElevation = FMath::Min(MinElevation, Elevation);
-			MaxElevation = FMath::Max(MaxElevation, Elevation);
-
-			if (BoundaryDistanceM < OutDem.CellSizeMeters * 1.75)
+			if (X + 1 < R)
 			{
-				const uint64 Key = PairKey(static_cast<uint8>(Closest), static_cast<uint8>(Second));
-				if (!BoundaryMap.Contains(Key))
-				{
-					FPlateBoundary Boundary;
-					Boundary.PlateA = static_cast<uint8>(Closest);
-					Boundary.PlateB = static_cast<uint8>(Second);
-					Boundary.Type = Type;
-					Boundary.RelativeNormalSpeed = NormalSpeed;
-					Boundary.RelativeTangentialSpeed = TangentSpeed;
-					BoundaryMap.Add(Key, Boundary);
-				}
+				AddBoundaryPair(OutDem.PlateId[Cell], OutDem.PlateId[Cell + 1]);
+			}
+			if (Y + 1 < R)
+			{
+				AddBoundaryPair(OutDem.PlateId[Cell], OutDem.PlateId[Cell + R]);
 			}
 		}
 	}
-
 	BoundaryMap.GenerateValueArray(OutDem.PlateBoundaries);
+
 	if (OutStats)
 	{
 		OutStats->CellCount = CellCount;
@@ -363,12 +419,16 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 
 	const double Start = FPlatformTime::Seconds();
 	const int32 N = InOutDem.NumCells();
+	const int32 R = InOutDem.Resolution;
+	const float CellAreaKm2 = static_cast<float>((InOutDem.CellSizeMeters * InOutDem.CellSizeMeters) / 1000000.0);
+
 	InOutDem.HydrologyElevationM = InOutDem.ElevationM;
 	InOutDem.Receiver.Init(INDEX_NONE, N);
-	InOutDem.DrainageAreaKm2.Init(static_cast<float>((InOutDem.CellSizeMeters * InOutDem.CellSizeMeters) / 1000000.0), N);
+	InOutDem.DrainageAreaKm2.Init(CellAreaKm2, N);
 	InOutDem.DistanceToOutletKm.Init(0.0f, N);
 	InOutDem.BasinId.Init(INDEX_NONE, N);
 	InOutDem.RiverMask.Init(0, N);
+	InOutDem.FlowOrder.Reset();
 
 	struct FHeapNode
 	{
@@ -378,20 +438,31 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 	};
 
 	TArray<FHeapNode> Heap;
-	Heap.Reserve(N / 8);
+	Heap.Reserve(FMath::Max(64, R * 4));
 	TBitArray<> Visited(false, N);
-	for (int32 Y = 0; Y < InOutDem.Resolution; ++Y)
+
+	auto PushBoundary = [&InOutDem, &Heap, &Visited](const int32 X, const int32 Y)
 	{
-		for (int32 X = 0; X < InOutDem.Resolution; ++X)
+		const int32 Cell = InOutDem.Index(X, Y);
+		if (Visited[Cell])
 		{
-			if (!InOutDem.IsBoundaryCell(X, Y))
-			{
-				continue;
-			}
-			const int32 Cell = InOutDem.Index(X, Y);
-			Visited[Cell] = true;
-			Heap.HeapPush({InOutDem.HydrologyElevationM[Cell], Cell});
+			return;
 		}
+		Visited[Cell] = true;
+		Heap.HeapPush({InOutDem.HydrologyElevationM[Cell], Cell});
+	};
+
+	// Seed only the perimeter: O(R), rather than scanning the full R^2 grid just
+	// to discover the boundary cells.
+	for (int32 X = 0; X < R; ++X)
+	{
+		PushBoundary(X, 0);
+		PushBoundary(X, R - 1);
+	}
+	for (int32 Y = 1; Y < R - 1; ++Y)
+	{
+		PushBoundary(0, Y);
+		PushBoundary(R - 1, Y);
 	}
 
 	while (Heap.Num() > 0)
@@ -403,7 +474,7 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 		{
 			const int32 NX = C.X + D8X[Dir];
 			const int32 NY = C.Y + D8Y[Dir];
-			if (NX < 0 || NY < 0 || NX >= InOutDem.Resolution || NY >= InOutDem.Resolution)
+			if (NX < 0 || NY < 0 || NX >= R || NY >= R)
 			{
 				continue;
 			}
@@ -419,20 +490,22 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 		}
 	}
 
-	for (int32 Cell = 0; Cell < N; ++Cell)
+	// Receiver selection is independent per cell once Priority-Flood has produced
+	// the strictly drainable hydrological surface.
+	ParallelFor(N, [&InOutDem, R](const int32 Cell)
 	{
-		const FIntPoint C = InOutDem.Coordinates(Cell);
-		if (InOutDem.IsBoundaryCell(C.X, C.Y))
+		const int32 X = Cell % R;
+		const int32 Y = Cell / R;
+		if (X == 0 || Y == 0 || X == R - 1 || Y == R - 1)
 		{
-			continue;
+			return;
 		}
+
 		float BestElevation = InOutDem.HydrologyElevationM[Cell];
 		int32 Best = INDEX_NONE;
 		for (int32 Dir = 0; Dir < 8; ++Dir)
 		{
-			const int32 NX = C.X + D8X[Dir];
-			const int32 NY = C.Y + D8Y[Dir];
-			const int32 Neighbor = InOutDem.Index(NX, NY);
+			const int32 Neighbor = InOutDem.Index(X + D8X[Dir], Y + D8Y[Dir]);
 			const float E = InOutDem.HydrologyElevationM[Neighbor];
 			if (E < BestElevation)
 			{
@@ -441,61 +514,92 @@ bool FGenerator::SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem,
 			}
 		}
 		InOutDem.Receiver[Cell] = Best;
-	}
-
-	TArray<int32> Order;
-	Order.SetNumUninitialized(N);
-	for (int32 I = 0; I < N; ++I)
-	{
-		Order[I] = I;
-	}
-	Algo::Sort(Order, [&InOutDem](const int32 A, const int32 B)
-	{
-		return InOutDem.HydrologyElevationM[A] > InOutDem.HydrologyElevationM[B];
 	});
 
-	for (const int32 Cell : Order)
+	// Build a source-to-outlet topological order with Kahn's algorithm. D8 limits
+	// the number of direct upstream neighbours to eight, so uint8 is sufficient.
+	// This replaces the former 16.8-million-element comparison sort at 4097^2.
+	TArray<uint8> UpstreamCount;
+	UpstreamCount.Init(0, N);
+	for (int32 Cell = 0; Cell < N; ++Cell)
 	{
 		const int32 Receiver = InOutDem.Receiver[Cell];
 		if (Receiver != INDEX_NONE)
 		{
-			InOutDem.DrainageAreaKm2[Receiver] += InOutDem.DrainageAreaKm2[Cell];
+			++UpstreamCount[Receiver];
 		}
 	}
 
-	int32 BasinCounter = 0;
-	TMap<int32, int32> OutletToBasin;
+	InOutDem.FlowOrder.Reserve(N);
+	for (int32 Cell = 0; Cell < N; ++Cell)
+	{
+		if (UpstreamCount[Cell] == 0)
+		{
+			InOutDem.FlowOrder.Add(Cell);
+		}
+	}
+
+	int32 ReadIndex = 0;
+	while (ReadIndex < InOutDem.FlowOrder.Num())
+	{
+		const int32 Cell = InOutDem.FlowOrder[ReadIndex++];
+		const int32 Receiver = InOutDem.Receiver[Cell];
+		if (Receiver == INDEX_NONE)
+		{
+			continue;
+		}
+
+		InOutDem.DrainageAreaKm2[Receiver] += InOutDem.DrainageAreaKm2[Cell];
+		check(UpstreamCount[Receiver] > 0);
+		--UpstreamCount[Receiver];
+		if (UpstreamCount[Receiver] == 0)
+		{
+			InOutDem.FlowOrder.Add(Receiver);
+		}
+	}
+
+	if (InOutDem.FlowOrder.Num() != N)
+	{
+		if (OutError)
+		{
+			*OutError = FString::Printf(TEXT("Hydrology receiver graph is not acyclic: ordered %d of %d cells."), InOutDem.FlowOrder.Num(), N);
+		}
+		return false;
+	}
+
 	float MaxArea = 0.0f;
 	int32 RiverCells = 0;
 	for (int32 Cell = 0; Cell < N; ++Cell)
 	{
-		MaxArea = FMath::Max(MaxArea, InOutDem.DrainageAreaKm2[Cell]);
-		if (InOutDem.DrainageAreaKm2[Cell] >= Settings.RiverSourceAreaKm2 && InOutDem.ElevationM[Cell] > Settings.OceanLevelM)
+		const float Area = InOutDem.DrainageAreaKm2[Cell];
+		MaxArea = FMath::Max(MaxArea, Area);
+		if (Area >= Settings.RiverSourceAreaKm2 && InOutDem.ElevationM[Cell] > Settings.OceanLevelM)
 		{
 			InOutDem.RiverMask[Cell] = 1;
 			++RiverCells;
 		}
+	}
 
-		int32 Current = Cell;
-		double DistanceM = 0.0;
-		int32 Guard = 0;
-		while (InOutDem.Receiver[Current] != INDEX_NONE && Guard++ < InOutDem.Resolution * 4)
+	// Reverse topological propagation is outlet-to-source. Each receiver is
+	// therefore already assigned when its upstream cell is visited, giving basin
+	// identity and distance-to-outlet in O(N). The old implementation walked the
+	// entire downstream path independently from every cell.
+	int32 BasinCounter = 0;
+	for (int32 OrderIndex = InOutDem.FlowOrder.Num() - 1; OrderIndex >= 0; --OrderIndex)
+	{
+		const int32 Cell = InOutDem.FlowOrder[OrderIndex];
+		const int32 Receiver = InOutDem.Receiver[Cell];
+		if (Receiver == INDEX_NONE)
 		{
-			const int32 Next = InOutDem.Receiver[Current];
-			const FIntPoint A = InOutDem.Coordinates(Current);
-			const FIntPoint B = InOutDem.Coordinates(Next);
-			DistanceM += InOutDem.CellSizeMeters * ((A.X != B.X && A.Y != B.Y) ? UE_SQRT_2 : 1.0);
-			Current = Next;
+			InOutDem.BasinId[Cell] = BasinCounter++;
+			InOutDem.DistanceToOutletKm[Cell] = 0.0f;
+			continue;
 		}
-		int32* Basin = OutletToBasin.Find(Current);
-		if (!Basin)
-		{
-			const int32 NewId = BasinCounter++;
-			OutletToBasin.Add(Current, NewId);
-			Basin = OutletToBasin.Find(Current);
-		}
-		InOutDem.BasinId[Cell] = *Basin;
-		InOutDem.DistanceToOutletKm[Cell] = static_cast<float>(DistanceM / 1000.0);
+
+		check(InOutDem.BasinId[Receiver] != INDEX_NONE);
+		InOutDem.BasinId[Cell] = InOutDem.BasinId[Receiver];
+		InOutDem.DistanceToOutletKm[Cell] = InOutDem.DistanceToOutletKm[Receiver] +
+			static_cast<float>(ReceiverDistanceMeters(InOutDem, Cell, Receiver) / 1000.0);
 	}
 
 	if (OutStats)
