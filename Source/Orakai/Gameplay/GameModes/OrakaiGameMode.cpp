@@ -129,11 +129,27 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         }
     }
 
-    if (!IsValid(BlockWorld) || !BlockWorld->IsDensityStreamingCoverageReadyAtWorldLocation(StreamingFocusLocation))
+    // The selected location is promoted in two streaming passes:
+    //
+    // 1. Build and commit the immediate support area so the terrain system has
+    //    a valid local surface anchor.
+    // 2. Expand to the normal gameplay view radius and build/commit the entire
+    //    required chunk set into the scene, including the initial visual LOD1
+    //    coverage.
+    //
+    // Density coverage can report ready at the end of pass 1. Do NOT create the
+    // real character at that point. Keep the controller on the hidden streaming
+    // focus pawn until BlockWorld declares the complete second pass resident.
+    if (!IsValid(BlockWorld) ||
+        !BlockWorld->IsWorldLoadingComplete() ||
+        !BlockWorld->IsDensityStreamingCoverageReadyAtWorldLocation(StreamingFocusLocation))
     {
         return;
     }
 
+    // The BlockWorld completion gate includes its required LOD1 window. Before
+    // exposing the player, also require the complete DEM-derived LOD1-LOD6
+    // clipmap around the promoted location to be resident.
     for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(World); Iterator; ++Iterator)
     {
         if (IsValid(*Iterator) && !Iterator->IsPreSpawnVisualCoverageReady())
@@ -168,7 +184,7 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         bGeneratedSpawnCompleted = true;
         PendingGeneratedPlayer.Reset();
         UE_LOG(LogTemp, Display,
-            TEXT("Cubus generated player created after selected terrain became resident at %s"),
+            TEXT("Cubus generated player created only after selected terrain full-load pass became resident at %s"),
             *FinalSpawnLocation.ToCompactString());
     }
 }
