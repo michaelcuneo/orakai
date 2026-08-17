@@ -169,8 +169,6 @@ void AOrakaiPlayerController::InitializeWorldLoadingScreen()
 		return;
 	}
 
-	// Lvl_Generator already owns its DEM-generation WBP. The separate gameplay
-	// spawn/loading page is created only in Lvl_ThirdPerson.
 	for (TActorIterator<ACubusWorldGenerationLoaderActor> Iterator(GetWorld()); Iterator; ++Iterator)
 	{
 		if (IsValid(*Iterator))
@@ -257,11 +255,28 @@ void AOrakaiPlayerController::UpdateWorldLoadingScreen(const float DeltaSeconds)
 					FText::FromString(TEXT("Spawning into selected terrain")));
 				return;
 			}
+
+			// The GameMode has successfully replaced the hidden streaming pawn with
+			// the real OrakaiCharacter. Fade the spawn page away now.
+			WorldLoadingWidget->SetSpawnPromotionActive(true);
+			constexpr float GeneratedFadeDuration = 0.35f;
+			LoadingFadeElapsedSeconds += DeltaSeconds;
+			WorldLoadingWidget->SetRenderOpacity(1.0f - FMath::Clamp(LoadingFadeElapsedSeconds / GeneratedFadeDuration, 0.0f, 1.0f));
+			if (LoadingFadeElapsedSeconds < GeneratedFadeDuration)
+			{
+				return;
+			}
+
+			WorldLoadingWidget->RemoveFromParent();
+			WorldLoadingWidget = nullptr;
+			ResetIgnoreMoveInput();
+			ResetIgnoreLookInput();
+			EnterGameplayInputMode();
+			CreateMobileControlsIfNeeded();
+			return;
 		}
-		else
-		{
-			WorldLoadingWidget->SetSpawnPromotionActive(false);
-		}
+
+		WorldLoadingWidget->SetSpawnPromotionActive(false);
 
 		if (!bHasProposal)
 		{
