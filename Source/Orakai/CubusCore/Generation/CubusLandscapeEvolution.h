@@ -74,18 +74,35 @@ struct FSettings
 
 	float RiverSourceAreaKm2 = 20.0f;
 	float PriorityFloodEpsilonM = 0.001f;
+
+	// First landscape-evolution stage. StreamPowerN is intentionally fixed at 1
+	// in the solver so incision can use the unconditionally stable FastScape-style
+	// implicit downstream update rather than a tiny explicit timestep.
+	int32 EvolutionIterations = 12;
+	float EvolutionStepYears = 25000.0f;
+	float StreamPowerK = 5.0e-7f;
+	float StreamPowerM = 0.5f;
+	float BaseUpliftRateMPerYear = 0.00015f;
+	float HillslopeDiffusivityM2PerYear = 0.03f;
+	float MaxNonlinearDiffusionBoost = 4.0f;
+	float ChannelDiffusionMultiplier = 0.15f;
+	int32 HydrologyRefreshInterval = 2;
 };
 
 struct FGenerationStats
 {
 	double SkeletonSeconds = 0.0;
 	double HydrologySeconds = 0.0;
+	double EvolutionSeconds = 0.0;
 	int32 CellCount = 0;
 	int32 BasinCount = 0;
 	int32 RiverCellCount = 0;
+	int32 EvolutionIterations = 0;
 	float MinimumElevationM = 0.0f;
 	float MaximumElevationM = 0.0f;
 	float MaximumDrainageAreaKm2 = 0.0f;
+	float MaximumStreamIncisionM = 0.0f;
+	float MeanStreamIncisionM = 0.0f;
 };
 
 struct FGlobalDem
@@ -103,8 +120,10 @@ struct FGlobalDem
 	TArray<float> UpliftM;
 	TArray<float> DrainageAreaKm2;
 	TArray<float> DistanceToOutletKm;
+	TArray<float> StreamIncisionM;
 	TArray<int32> Receiver;
 	TArray<int32> BasinId;
+	TArray<int32> FlowOrder;
 	TArray<uint8> PlateId;
 	TArray<uint8> ProvinceId;
 	TArray<uint8> BoundaryType;
@@ -125,6 +144,7 @@ class ORAKAI_API FGenerator
 public:
 	static bool GenerateSkeleton(const FSettings& Settings, FGlobalDem& OutDem, FGenerationStats* OutStats = nullptr, FString* OutError = nullptr);
 	static bool SolveHydrology(const FSettings& Settings, FGlobalDem& InOutDem, FGenerationStats* OutStats = nullptr, FString* OutError = nullptr);
+	static bool EvolveLandscape(const FSettings& Settings, FGlobalDem& InOutDem, FGenerationStats* OutStats = nullptr, FString* OutError = nullptr);
 	static FProvinceParameters GetDefaultProvinceParameters(EProvinceType Province);
 };
 } // namespace CubusLandscapeEvolution
