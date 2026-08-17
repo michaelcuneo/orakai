@@ -3,7 +3,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
-#include "UObject/CoreUObjectDelegates.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace CubusWorldGenerationTravelRuntime
 {
