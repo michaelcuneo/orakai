@@ -16,10 +16,10 @@ class UTextureRenderTarget2D;
 /**
  * Lightweight interactive 3D preview of the generated DEM.
  *
- * This actor never builds gameplay voxels. It samples the authoritative DEM
- * owned by ACubusWorldGenerationLoaderActor into a small procedural heightfield,
- * captures that mesh to a render target for UMG, and provides screen-to-DEM
- * picking for the spawn selector.
+ * This actor never builds gameplay voxels or physics collision. It samples the
+ * authoritative DEM into a small visual-only heightfield, captures that mesh to
+ * a render target for UMG, and performs spawn picking directly against its cached
+ * preview triangles instead of invoking Unreal collision/cooking.
  */
 UCLASS(BlueprintType, Blueprintable, ClassGroup="Cubus", meta=(DisplayName="Cubus World Generation 3D Preview"))
 class ORAKAI_API ACubusWorldGenerationPreviewActor : public AActor
@@ -36,20 +36,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview")
     TObjectPtr<ACubusWorldGenerationLoaderActor> TargetLoader = nullptr;
 
-    /**
-     * Grid resolution of the preview mesh, independent of the real DEM resolution.
-     * Keep this deliberately coarse: this is a live generation visualization, not
-     * gameplay terrain. 40x40 is enough to show mountain/valley evolution without
-     * making procedural-mesh rebuilds dominate the generator frame.
-     */
+    /** Coarse live visualization resolution; completely independent of gameplay terrain. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="32", ClampMax="256"))
     int32 PreviewMeshResolution = 40;
 
-    /**
-     * Render target size used by the UMG image. The preview is intentionally
-     * lower resolution than the finished game viewport because every capture is
-     * performed while terrain generation is already consuming frame time.
-     */
+    /** Render target size used by the UMG image. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="256", ClampMax="2048"))
     int32 PreviewRenderResolution = 384;
 
@@ -61,11 +52,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="25.0", ClampMax="1000.0"))
     float PreviewVerticalRelief = 260.0f;
 
-    /**
-     * Minimum delay between DEM resamples while the generator is changing.
-     * Half-second updates still read as continuous progress to the player while
-     * avoiding the old 10 full mesh/collision/capture rebuilds per second.
-     */
+    /** Camera distance relative to PreviewHorizontalSize. Larger values show more empty margin around the whole model. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="1.0", ClampMax="5.0"))
+    float PreviewCameraDistanceMultiplier = 2.35f;
+
+    /** Minimum delay between DEM resamples while the generator is changing. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Cubus|Generation|3D Preview", meta=(ClampMin="0.02", ClampMax="2.0", Units="s"))
     float PreviewRefreshInterval = 0.50f;
 
@@ -97,9 +88,9 @@ public:
     bool IsPreviewReady() const { return bHasRenderableTerrain; }
 
     /**
-     * Convert a point on the rendered 3D preview to authoritative DEM preview UV
-     * by ray-casting the captured heightfield. This keeps spawn selection correct
-     * even after the player has rotated the model.
+     * Convert a point on the rendered 3D preview to authoritative DEM preview UV.
+     * Picking is done directly against cached visual triangles; no physics
+     * collision or procedural-mesh collision cooking is ever required.
      */
     UFUNCTION(BlueprintCallable, Category="Cubus|Generation|Spawn", meta=(DisplayName="Set Generated Spawn From 3D Preview Position"))
     bool SetGeneratedSpawnFromPreviewPosition(
@@ -142,6 +133,9 @@ private:
     float LastObservedOverallProgress = -1.0f;
     uint8 LastObservedStage = 255;
     bool bHasRenderableTerrain = false;
-    bool bPickingCollisionBuilt = false;
     FVector2D BuiltMeshDimensions = FVector2D(900.0, 900.0);
+
+    /** Local-space visual geometry retained only for cheap click picking. */
+    TArray<FVector> CachedPickVertices;
+    TArray<int32> CachedPickTriangles;
 };
