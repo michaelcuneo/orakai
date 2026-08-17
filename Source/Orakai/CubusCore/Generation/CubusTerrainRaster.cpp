@@ -1,6 +1,38 @@
 #include "CubusCore/Generation/CubusTerrainRaster.h"
 #include "CubusCore/Generation/CubusTerrainMorphology.h"
 
+namespace CubusTerrainRaster
+{
+    uint32 MixSeed(uint32 Value)
+    {
+        Value ^= Value >> 16;
+        Value *= 0x7FEB352Du;
+        Value ^= Value >> 15;
+        Value *= 0x846CA68Bu;
+        Value ^= Value >> 16;
+        return Value;
+    }
+
+    FVector2D SeedDomainOffsetMeters(const int32 Seed)
+    {
+        const uint32 Bits = static_cast<uint32>(Seed);
+        const uint32 HX = MixSeed(Bits ^ 0xA341316Cu);
+        const uint32 HY = MixSeed(Bits ^ 0xC8013EA4u);
+        const double UX = static_cast<double>(HX & 0x00ffffffu) / static_cast<double>(0x00ffffffu);
+        const double UY = static_cast<double>(HY & 0x00ffffffu) / static_cast<double>(0x00ffffffu);
+
+        // A local 4 km loader crop can otherwise look deceptively similar when
+        // two seeds happen to sample the same side of a 20-60 km macro feature.
+        // Moving the seed domain by +/-48 km makes seed changes visually obvious
+        // while retaining a continuous metric world and exact reproducibility.
+        constexpr double OffsetRadiusMeters = 48000.0;
+        return FVector2D(
+            (UX * 2.0 - 1.0) * OffsetRadiusMeters,
+            (UY * 2.0 - 1.0) * OffsetRadiusMeters
+        );
+    }
+}
+
 bool FCubusTerrainRasterTile::IsValid() const
 {
     return InteriorCellCount > 0 &&
@@ -102,8 +134,11 @@ float FCubusTerrainRasterBuilder::SampleStructuralHeightMeters(
     const FCubusTerrainRasterSettings& Settings
 )
 {
-    const double SourceXmeters = WorldXmeters + Settings.DomainOffsetMeters.X;
-    const double SourceYmeters = WorldYmeters + Settings.DomainOffsetMeters.Y;
+    using namespace CubusTerrainRaster;
+
+    const FVector2D SeedOffset = SeedDomainOffsetMeters(Settings.Structure.Seed);
+    const double SourceXmeters = WorldXmeters + Settings.DomainOffsetMeters.X + SeedOffset.X;
+    const double SourceYmeters = WorldYmeters + Settings.DomainOffsetMeters.Y + SeedOffset.Y;
     const FCubusTerrainStructureSample Structure = FCubusTerrainStructure::Sample(
         SourceXmeters,
         SourceYmeters,
