@@ -21,6 +21,14 @@ struct ORAKAI_API FCubusTerrainDrainageSettings
     /** Interior cells per solved drainage region. */
     int32 RegionCellCount = 256;
 
+    /**
+     * World-space origin of drainage region (0,0).
+     *
+     * Loader generation can centre one large analysis domain over the authored
+     * DEM instead of forcing a hydrology boundary through world XY zero.
+     */
+    FVector2D RegionOriginMeters = FVector2D::ZeroVector;
+
     /** Extra cells solved around each region to stabilise boundary routing. */
     int32 HaloCellCount = 96;
 
