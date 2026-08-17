@@ -5,6 +5,7 @@
 #include "CubusCore/Generation/CubusTerrainCarving.h"
 #include "CubusCore/Generation/CubusTerrainErosion.h"
 #include "CubusCore/Generation/CubusTerrainDeposition.h"
+#include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
 #include "CubusWorldGenerationLoaderActor.generated.h"
 
 class UTexture2D;
@@ -80,6 +81,16 @@ public:
 
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Preview")
     UTexture2D* GetPreviewTexture() const { return PreviewTexture; }
+
+    /** Preserve the final DEM preview across OpenLevel for the runtime spawn picker. */
+    void PublishPreviewSnapshotToRuntime() const
+    {
+        FCubusGeneratedTerrainRuntime::StorePreviewSnapshot(
+            FMath::Clamp(PreviewTextureResolution, 64, 2048),
+            GetGenerationBoundsMeters(),
+            PreviewPixels
+        );
+    }
 
     UFUNCTION(BlueprintPure, Category="Cubus|Generation|Diagnostics")
     int32 GetGeneratedTerrainTileCount() const { return TerrainTiles.Num(); }
