@@ -35,6 +35,9 @@ void ACubusWorldGenerationLoaderActor::Tick(float DeltaSeconds)
         case ECubusGenerationLoaderStage::TerrainCarving:
             ProcessTerrainCarving();
             break;
+        case ECubusGenerationLoaderStage::Erosion:
+            ProcessErosion();
+            break;
         default:
             return;
         }
@@ -78,6 +81,8 @@ FText ACubusWorldGenerationLoaderActor::GetStageDisplayName() const
         return FText::FromString(TEXT("Solving Drainage"));
     case ECubusGenerationLoaderStage::TerrainCarving:
         return FText::FromString(TEXT("Carving Valleys and Rivers"));
+    case ECubusGenerationLoaderStage::Erosion:
+        return FText::FromString(TEXT("Eroding Slopes and Gullies"));
     case ECubusGenerationLoaderStage::Complete:
         return FText::FromString(TEXT("Terrain Generation Complete"));
     case ECubusGenerationLoaderStage::Failed:
@@ -123,10 +128,17 @@ void ACubusWorldGenerationLoaderActor::ResetSession()
 
 void ACubusWorldGenerationLoaderActor::BuildSettings()
 {
+    ErosionSettings = FCubusTerrainErosionSettings();
+    ErosionSettings.Iterations = FMath::Clamp(ErosionIterations, 1, 12);
+    ErosionSettings.TalusAngleDegrees = FMath::Clamp(ErosionTalusAngleDegrees, 5.0f, 60.0f);
+
     RasterSettings = FCubusTerrainRasterSettings();
     RasterSettings.SampleSpacingMeters = FMath::Max(0.25f, DEMSampleSpacingMeters);
     RasterSettings.TileSizeMeters = FMath::Max(64.0f, DEMTileSizeMeters);
-    RasterSettings.HaloSamples = 2;
+    // Bicubic interpolation needs two samples. Repeated erosion needs one fresh
+    // neighbour layer per pass; retaining extra halo keeps tile-edge results
+    // identical because both tiles evaluate the same world-space neighbourhood.
+    RasterSettings.HaloSamples = FMath::Max(2, ErosionSettings.Iterations + 2);
     RasterSettings.Structure.Seed = WorldSeed;
 
     DrainageSettings = FCubusTerrainDrainageSettings();
@@ -134,9 +146,6 @@ void ACubusWorldGenerationLoaderActor::BuildSettings()
     DrainageSettings.AnalysisCellSizeMeters = FMath::Max(2.0f, DrainageCellSizeMeters);
     DrainageSettings.StreamSourceAreaSquareKm = FMath::Max(0.001f, StreamSourceAreaSquareKm);
 
-    // For loader generation, align hydrology to the authored DEM instead of
-    // allowing an arbitrary region boundary through world XY zero. A 4 km map
-    // at the default 8 m analysis spacing fits in one 500 x 500 drainage domain.
     const FBox2D Bounds = GetGenerationBoundsMeters();
     const FVector2D Size = Bounds.GetSize();
     const double LongestSideMeters = FMath::Max(Size.X, Size.Y);
@@ -208,6 +217,8 @@ void ACubusWorldGenerationLoaderActor::FinishCurrentPipeline()
     Stage = ECubusGenerationLoaderStage::Complete;
     StageProgress = 1.0f;
     OverallProgress = 1.0f;
+    RebuildTerrainPreview(false);
+    UploadPreview();
     OnStageChanged.Broadcast(Stage);
     OnProgressChanged.Broadcast(Stage, 1.0f);
     OnGenerationFinished.Broadcast();
@@ -243,6 +254,9 @@ void ACubusWorldGenerationLoaderActor::ProcessDrainage()
 {
     if (!DrainageRegionQueue.IsValidIndex(CurrentWorkIndex))
     {
+        // The blue stream graph is a diagnostic for this stage only. Restore the
+        // DEM before carving so guide lines never survive into later previews.
+        RebuildTerrainPreview(false);
         UploadPreview();
         BeginStage(ECubusGenerationLoaderStage::TerrainCarving);
         return;
@@ -273,9 +287,9 @@ void ACubusWorldGenerationLoaderActor::ProcessTerrainCarving()
 {
     if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
     {
-        RebuildTerrainPreview(true);
+        RebuildTerrainPreview(false);
         UploadPreview();
-        FinishCurrentPipeline();
+        BeginStage(ECubusGenerationLoaderStage::Erosion);
         return;
     }
 
@@ -296,7 +310,41 @@ void ACubusWorldGenerationLoaderActor::ProcessTerrainCarving()
 
     *StructuralTile = MoveTemp(Carved);
     PaintTileToPreview(*StructuralTile);
-    RebuildTerrainPreview(true);
+    RebuildTerrainPreview(false);
+
+    ++CurrentWorkIndex;
+    SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
+    UploadPreview();
+}
+
+void ACubusWorldGenerationLoaderActor::ProcessErosion()
+{
+    if (!TerrainTileQueue.IsValidIndex(CurrentWorkIndex))
+    {
+        RebuildTerrainPreview(false);
+        UploadPreview();
+        FinishCurrentPipeline();
+        return;
+    }
+
+    const FIntPoint TileCoordinate = TerrainTileQueue[CurrentWorkIndex];
+    FCubusTerrainRasterTile* CarvedTile = TerrainTiles.Find(TileCoordinate);
+    if (CarvedTile == nullptr || !CarvedTile->IsValid())
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    FCubusTerrainRasterTile Eroded = FCubusTerrainErosion::ErodeTile(*CarvedTile, ErosionSettings);
+    if (!Eroded.IsValid())
+    {
+        BeginStage(ECubusGenerationLoaderStage::Failed);
+        return;
+    }
+
+    *CarvedTile = MoveTemp(Eroded);
+    PaintTileToPreview(*CarvedTile);
+    RebuildTerrainPreview(false);
 
     ++CurrentWorkIndex;
     SetWorkProgress(CurrentWorkIndex, TerrainTileQueue.Num());
@@ -318,23 +366,27 @@ void ACubusWorldGenerationLoaderActor::SetWorkProgress(const int32 CompletedItem
         ? FMath::Clamp(static_cast<float>(CompletedItems) / static_cast<float>(TotalItems), 0.0f, 1.0f)
         : 1.0f;
 
-    float StageBase = 0.0f;
+    constexpr float StageCount = 4.0f;
+    float StageIndex = 0.0f;
     switch (Stage)
     {
     case ECubusGenerationLoaderStage::StructuralDEM:
-        StageBase = 0.0f;
+        StageIndex = 0.0f;
         break;
     case ECubusGenerationLoaderStage::Drainage:
-        StageBase = 1.0f / 3.0f;
+        StageIndex = 1.0f;
         break;
     case ECubusGenerationLoaderStage::TerrainCarving:
-        StageBase = 2.0f / 3.0f;
+        StageIndex = 2.0f;
+        break;
+    case ECubusGenerationLoaderStage::Erosion:
+        StageIndex = 3.0f;
         break;
     default:
         break;
     }
 
-    OverallProgress = FMath::Clamp(StageBase + StageProgress / 3.0f, 0.0f, 1.0f);
+    OverallProgress = FMath::Clamp((StageIndex + StageProgress) / StageCount, 0.0f, 1.0f);
     OnProgressChanged.Broadcast(Stage, StageProgress);
 }
 
@@ -440,8 +492,6 @@ void ACubusWorldGenerationLoaderActor::RebuildTerrainPreview(const bool bOverlay
         return;
     }
 
-    // Always use the elevation range actually present in this generated map.
-    // A minimum span prevents tiny numerical variation becoming full contrast.
     const float HeightSpan = FMath::Max(60.0f, MaximumHeight - MinimumHeight);
     const FBox2D Bounds = GetGenerationBoundsMeters();
     const FVector2D WorldSize = Bounds.GetSize();
