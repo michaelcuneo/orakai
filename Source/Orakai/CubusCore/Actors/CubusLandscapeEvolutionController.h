@@ -16,7 +16,8 @@ enum class ECubusLandscapeDebugView : uint8
 	Plate,
 	Uplift,
 	DrainageArea,
-	RiverNetwork
+	RiverNetwork,
+	StreamIncision
 };
 
 /**
@@ -39,7 +40,13 @@ public:
 	void SolveGlobalHydrology();
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
+	void EvolveLandscape();
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
 	void GenerateAndSolve();
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
+	void GenerateSolveAndEvolve();
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Cubus|Landscape Evolution")
 	void RebuildPreview();
@@ -68,6 +75,27 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Generation", meta = (ClampMin = "0.01"))
 	float RiverSourceAreaKm2 = 20.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "1", ClampMax = "128"))
+	int32 EvolutionIterations = 12;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "100.0"))
+	float EvolutionStepYears = 25000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "0.0"))
+	float StreamPowerK = 5.0e-7f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	float StreamPowerM = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "0.0"))
+	float BaseUpliftRateMPerYear = 0.00015f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "0.0"))
+	float HillslopeDiffusivityM2PerYear = 0.03f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Evolution", meta = (ClampMin = "1", ClampMax = "16"))
+	int32 HydrologyRefreshInterval = 2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "17", ClampMax = "513"))
 	int32 PreviewResolution = 129;
@@ -103,6 +131,12 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
 	float MaximumElevationM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
+	float MaximumStreamIncisionM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Cubus|Landscape Evolution|Diagnostics")
+	float MeanStreamIncisionM = 0.0f;
 
 private:
 	CubusLandscapeEvolution::FSettings MakeSettings() const;
