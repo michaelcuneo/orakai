@@ -27,16 +27,18 @@ struct FHeader
 	float MeanElevationM = 0.0f;
 };
 
-struct FProvinceSource
+struct FMacroSource
 {
 	FIndexedPatch Metadata;
 	FPatch Patch;
+	float ExtentM = 0.0f;
+};
+
+struct FPlacement
+{
+	int32 SourceIndex = 0;
+	int32 Variant = 0;
 	FVector2D CenterM = FVector2D::ZeroVector;
-	float RadiusM = 50000.0f;
-	float RotationRad = 0.0f;
-	float HeightScale = 1.0f;
-	float Weight = 1.0f;
-	uint8 ProvinceId = 0;
 };
 
 uint32 Hash(uint32 V)
@@ -90,6 +92,21 @@ float Fbm(double X, double Y, const int32 Seed)
 	return Weight > 0.0f ? Sum / Weight : 0.0f;
 }
 
+FVector2D TransformUv(FVector2D UV, const int32 Variant)
+{
+	UV -= FVector2D(0.5, 0.5);
+	if ((Variant & 1) != 0) UV.X = -UV.X;
+	if ((Variant & 2) != 0) UV.Y = -UV.Y;
+	switch ((Variant >> 2) & 3)
+	{
+	case 1: UV = FVector2D(-UV.Y, UV.X); break;
+	case 2: UV = FVector2D(-UV.X, -UV.Y); break;
+	case 3: UV = FVector2D(UV.Y, -UV.X); break;
+	default: break;
+	}
+	return UV + FVector2D(0.5, 0.5);
+}
+
 float IslandEnvelope(const double WorldX, const double WorldY, const FSettings& Settings)
 {
 	const double Half = Settings.WorldSizeMeters * 0.5;
@@ -106,41 +123,6 @@ float IslandEnvelope(const double WorldX, const double WorldY, const FSettings& 
 	const double Super = FMath::Pow(FMath::Pow(Nx, 2.6) + FMath::Pow(Ny, 2.6), 1.0 / 2.6);
 	const double DistanceM = (1.0 - Super) * FMath::Min(Ax, Ay);
 	return Smooth01(static_cast<float>(DistanceM / Margin));
-}
-
-FVector2D Rotate(const FVector2D V, const float Radians)
-{
-	const float C = FMath::Cos(Radians);
-	const float S = FMath::Sin(Radians);
-	return FVector2D(V.X * C - V.Y * S, V.X * S + V.Y * C);
-}
-
-float SampleProvinceRelief(const FProvinceSource& Province, const FVector2D WorldM)
-{
-	const FVector2D Local = Rotate(WorldM - Province.CenterM, -Province.RotationRad);
-	const float Diameter = FMath::Max(1.0f, Province.RadiusM * 2.0f);
-	const float U = Local.X / Diameter + 0.5f;
-	const float V = Local.Y / Diameter + 0.5f;
-	if (U < 0.0f || U > 1.0f || V < 0.0f || V > 1.0f)
-	{
-		return 0.0f;
-	}
-	return (Province.Patch.SampleBilinear(U, V) - Province.Patch.MeanElevationM) * Province.HeightScale;
-}
-
-float ProvinceInfluence(const FProvinceSource& Province, const FVector2D WorldM, const float BlendM)
-{
-	const float Distance = FVector2D::Distance(WorldM, Province.CenterM);
-	const float Inner = FMath::Max(1000.0f, Province.RadiusM - BlendM);
-	if (Distance <= Inner)
-	{
-		return 1.0f;
-	}
-	if (Distance >= Province.RadiusM)
-	{
-		return 0.0f;
-	}
-	return 1.0f - Smooth01((Distance - Inner) / FMath::Max(1.0f, Province.RadiusM - Inner));
 }
 
 CubusLandscapeEvolution::EProvinceType MapProvinceType(const FIndexedPatch& Entry)
@@ -299,74 +281,77 @@ bool FGenerator::LoadIndex(const FSettings& Settings, TArray<FIndexedPatch>& Out
 		Entry.MacroSuitability = ReadNumber(Object, TEXT("macro_suitability"), 0.0f);
 		Entry.RegionalSuitability = ReadNumber(Object, TEXT("regional_suitability"), 0.0f);
 		Entry.LocalSuitability = ReadNumber(Object, TEXT("local_suitability"), 0.0f);
-		const TArray<TSharedPtr<FJsonValue>>* Tags = nullptr;
-		if (Object->TryGetArrayField(TEXT("tags"), Tags) && Tags)
-		{
-			for (const TSharedPtr<FJsonValue>& Tag : *Tags) Entry.Tags.Add(Tag->AsString());
-		}
 		if (!Entry.RelativePath.IsEmpty()) OutEntries.Add(MoveTemp(Entry));
 	}
-	OutEntries.Sort([](const FIndexedPatch& A, const FIndexedPatch& B) { return A.MacroSuitability > B.MacroSuitability; });
-	if (OutEntries.IsEmpty())
-	{
-		if (OutError) *OutError = TEXT("DEM terrain index contained zero usable patches.");
-		return false;
-	}
-	return true;
+	return !OutEntries.IsEmpty();
 }
 
 bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FGlobalDem& OutDem,
 	CubusLandscapeEvolution::FGenerationStats* OutStats, FString* OutError)
 {
-	if (Settings.Resolution < 33 || Settings.WorldSizeMeters <= 100.0 || Settings.OceanFloorM >= Settings.OceanLevelM)
+	if (Settings.Resolution < 33 || Settings.WorldSizeMeters <= 10000.0 || Settings.OceanFloorM >= Settings.OceanLevelM)
 	{
-		if (OutError) *OutError = TEXT("Invalid DEM world settings.");
+		if (OutError) *OutError = TEXT("500 km DEM world requires valid production-scale settings.");
 		return false;
 	}
 
 	TArray<FIndexedPatch> IndexEntries;
 	if (!LoadIndex(Settings, IndexEntries, OutError)) return false;
 
-	FRandomStream Random(Settings.Seed);
-	const int32 CandidateCount = FMath::Clamp(IndexEntries.Num(), 1, 64);
-	const int32 WantedProvinceCount = FMath::Clamp(Settings.ProvinceCount, 4, 64);
-	TArray<FProvinceSource> Provinces;
-	Provinces.Reserve(WantedProvinceCount);
-	TSet<FString> RecentlyUsedSources;
+	TArray<FMacroSource> Sources;
 	const FString SourceRoot = ResolveSourceDirectory(Settings);
-	const double Half = Settings.WorldSizeMeters * 0.5;
-
-	for (int32 ProvinceIndex = 0; ProvinceIndex < WantedProvinceCount; ++ProvinceIndex)
+	for (const FIndexedPatch& Entry : IndexEntries)
 	{
-		int32 Pick = Random.RandRange(0, CandidateCount - 1);
-		for (int32 Attempt = 0; Attempt < 12; ++Attempt)
+		if (!Entry.RelativePath.StartsWith(TEXT("Macro/")) && Entry.SourceKey != TEXT("macro_nz_8m")) continue;
+		FMacroSource Source;
+		Source.Metadata = Entry;
+		if (!LoadPatch(FPaths::Combine(SourceRoot, Entry.RelativePath), Source.Patch, OutError)) return false;
+		Source.ExtentM = FMath::Min((Source.Patch.Width - 1) * Source.Patch.CellSizeM, (Source.Patch.Height - 1) * Source.Patch.CellSizeM);
+		if (Source.ExtentM > 10000.0f) Sources.Add(MoveTemp(Source));
+	}
+	if (Sources.IsEmpty())
+	{
+		if (OutError) *OutError = TEXT("No macro DEM patches found. Run Tools/DemLibrary/prepare_macro_dem_library.py first.");
+		return false;
+	}
+
+	float MeanExtentM = 0.0f;
+	for (const FMacroSource& Source : Sources) MeanExtentM += Source.ExtentM;
+	MeanExtentM /= Sources.Num();
+	const float GridSpacingM = FMath::Clamp(MeanExtentM * 0.72f, 18000.0f, 42000.0f);
+	const int32 GridR = FMath::CeilToInt(Settings.WorldSizeMeters / GridSpacingM) + 3;
+	const double HalfWorld = Settings.WorldSizeMeters * 0.5;
+	const double GridOrigin = -HalfWorld - GridSpacingM;
+
+	TArray<FPlacement> Placements;
+	Placements.SetNum(GridR * GridR);
+	FRandomStream Random(Settings.Seed);
+	for (int32 Gy = 0; Gy < GridR; ++Gy)
+	{
+		for (int32 Gx = 0; Gx < GridR; ++Gx)
 		{
-			const int32 Candidate = Random.RandRange(0, CandidateCount - 1);
-			if (!RecentlyUsedSources.Contains(IndexEntries[Candidate].SourceKey) || Attempt == 11)
+			const FVector2D Center(GridOrigin + Gx * GridSpacingM, GridOrigin + Gy * GridSpacingM);
+			const float Radial01 = FMath::Clamp(static_cast<float>(Center.Size() / HalfWorld), 0.0f, 1.0f);
+			const float DesiredRelief01 = FMath::Clamp(1.15f - Radial01 + Random.FRandRange(-0.20f, 0.20f), 0.0f, 1.0f);
+			int32 BestSource = 0;
+			float BestScore = -TNumericLimits<float>::Max();
+			for (int32 Candidate = 0; Candidate < Sources.Num(); ++Candidate)
 			{
-				Pick = Candidate;
-				break;
+				const FMacroSource& Source = Sources[Candidate];
+				const float Relief01 = FMath::Clamp(Source.Metadata.ReliefP90M / 1800.0f, 0.0f, 1.0f);
+				const float ReliefMatch = 1.0f - FMath::Abs(Relief01 - DesiredRelief01);
+				const float Score = ReliefMatch * 0.55f + Source.Metadata.MacroSuitability * 0.35f + Random.FRandRange(0.0f, 0.10f);
+				if (Score > BestScore)
+				{
+					BestScore = Score;
+					BestSource = Candidate;
+				}
 			}
+			FPlacement& Placement = Placements[Gy * GridR + Gx];
+			Placement.SourceIndex = BestSource;
+			Placement.Variant = Random.RandRange(0, 15);
+			Placement.CenterM = Center;
 		}
-		const FIndexedPatch& Entry = IndexEntries[Pick];
-		FProvinceSource Province;
-		Province.Metadata = Entry;
-		const FString PatchPath = FPaths::Combine(SourceRoot, Entry.RelativePath);
-		if (!LoadPatch(PatchPath, Province.Patch, OutError)) return false;
-		const float RadiusKm = Random.FRandRange(Settings.ProvinceMinRadiusKm, Settings.ProvinceMaxRadiusKm);
-		Province.RadiusM = RadiusKm * 1000.0f;
-		const float PlacementRadius = static_cast<float>(Half * 0.72);
-		const float Angle = Random.FRandRange(0.0f, 2.0f * PI);
-		const float Radial = FMath::Sqrt(Random.FRand()) * PlacementRadius;
-		Province.CenterM = FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radial;
-		Province.RotationRad = FMath::DegreesToRadians(Entry.DominantStructureAngleDeg) + Random.FRandRange(-0.55f, 0.55f);
-		const float ReliefTarget = FMath::Lerp(500.0f, 2600.0f, FMath::Clamp(Entry.MacroSuitability, 0.0f, 1.0f));
-		Province.HeightScale = Settings.ReliefScale * ReliefTarget / FMath::Max(30.0f, Entry.ReliefP90M);
-		Province.Weight = FMath::Lerp(0.65f, 1.0f, Entry.MacroSuitability);
-		Province.ProvinceId = static_cast<uint8>(ProvinceIndex % 255);
-		Provinces.Add(MoveTemp(Province));
-		RecentlyUsedSources.Add(Entry.SourceKey);
-		if (RecentlyUsedSources.Num() > 4) RecentlyUsedSources.Reset();
 	}
 
 	OutDem.Reset();
@@ -381,37 +366,51 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 	OutDem.BoundaryType.Init(static_cast<uint8>(CubusLandscapeEvolution::EBoundaryType::Stable), OutDem.NumCells());
 
 	const int32 R = OutDem.Resolution;
-	const float BlendM = Settings.ProvinceBlendKm * 1000.0f;
-	ParallelFor(OutDem.NumCells(), [&OutDem, &Settings, &Provinces, R, Half, BlendM](const int32 Cell)
+	ParallelFor(OutDem.NumCells(), [&OutDem, &Settings, &Sources, &Placements, R, GridR, GridSpacingM, GridOrigin](const int32 Cell)
 	{
 		const int32 X = Cell % R;
 		const int32 Y = Cell / R;
-		const double U = static_cast<double>(X) / static_cast<double>(R - 1);
-		const double V = static_cast<double>(Y) / static_cast<double>(R - 1);
-		const FVector2D WorldM(-Half + U * Settings.WorldSizeMeters, -Half + V * Settings.WorldSizeMeters);
-		const float Envelope = IslandEnvelope(WorldM.X, WorldM.Y, Settings);
+		const double UWorld = static_cast<double>(X) / static_cast<double>(R - 1);
+		const double VWorld = static_cast<double>(Y) / static_cast<double>(R - 1);
+		const double Half = Settings.WorldSizeMeters * 0.5;
+		const FVector2D WorldM(-Half + UWorld * Settings.WorldSizeMeters, -Half + VWorld * Settings.WorldSizeMeters);
 
-		float WeightedRelief = 0.0f;
+		const double Gx = (WorldM.X - GridOrigin) / GridSpacingM;
+		const double Gy = (WorldM.Y - GridOrigin) / GridSpacingM;
+		const int32 X0 = FMath::Clamp(FMath::FloorToInt(Gx), 0, GridR - 2);
+		const int32 Y0 = FMath::Clamp(FMath::FloorToInt(Gy), 0, GridR - 2);
+		const float Fx = Smooth01(static_cast<float>(Gx - X0));
+		const float Fy = Smooth01(static_cast<float>(Gy - Y0));
+		const int32 PlacementIndices[4] = {Y0 * GridR + X0, Y0 * GridR + X0 + 1, (Y0 + 1) * GridR + X0, (Y0 + 1) * GridR + X0 + 1};
+		const float BaseWeights[4] = {(1.0f - Fx) * (1.0f - Fy), Fx * (1.0f - Fy), (1.0f - Fx) * Fy, Fx * Fy};
+
+		float Relief = 0.0f;
 		float WeightSum = 0.0f;
-		float BestWeight = 0.0f;
-		int32 BestProvince = INDEX_NONE;
-		for (int32 ProvinceIndex = 0; ProvinceIndex < Provinces.Num(); ++ProvinceIndex)
+		float BestWeight = -1.0f;
+		int32 BestPlacement = PlacementIndices[0];
+		for (int32 Corner = 0; Corner < 4; ++Corner)
 		{
-			const FProvinceSource& Province = Provinces[ProvinceIndex];
-			const float W = ProvinceInfluence(Province, WorldM, BlendM) * Province.Weight;
-			if (W <= 0.0001f) continue;
-			WeightedRelief += SampleProvinceRelief(Province, WorldM) * W;
+			const FPlacement& Placement = Placements[PlacementIndices[Corner]];
+			const FMacroSource& Source = Sources[Placement.SourceIndex];
+			const float SampleExtentM = FMath::Max(Source.ExtentM, GridSpacingM * 1.35f);
+			const FVector2D Local = WorldM - Placement.CenterM;
+			FVector2D SourceUv(Local.X / SampleExtentM + 0.5f, Local.Y / SampleExtentM + 0.5f);
+			SourceUv = TransformUv(SourceUv, Placement.Variant);
+			if (SourceUv.X < 0.0f || SourceUv.X > 1.0f || SourceUv.Y < 0.0f || SourceUv.Y > 1.0f) continue;
+			const float W = BaseWeights[Corner];
+			const float Sample = (Source.Patch.SampleBilinear(SourceUv.X, SourceUv.Y) - Source.Patch.MeanElevationM) * Settings.ReliefScale;
+			Relief += Sample * W;
 			WeightSum += W;
 			if (W > BestWeight)
 			{
 				BestWeight = W;
-				BestProvince = ProvinceIndex;
+				BestPlacement = PlacementIndices[Corner];
 			}
 		}
+		if (WeightSum > 0.001f) Relief /= WeightSum;
 
-		float Relief = WeightSum > 0.001f ? WeightedRelief / WeightSum : 0.0f;
-		const float InteriorUndulation = Fbm(WorldM.X / 70000.0, WorldM.Y / 70000.0, Settings.Seed ^ 0x68bc21eb) * 120.0f;
-		const float LandHeight = Settings.BaseLandElevationM + Relief + InteriorUndulation;
+		const float Envelope = IslandEnvelope(WorldM.X, WorldM.Y, Settings);
+		const float LandHeight = Settings.BaseLandElevationM + Relief;
 		const float Elevation = FMath::Lerp(Settings.OceanFloorM, LandHeight, Envelope);
 		OutDem.ElevationM[Cell] = Elevation;
 
@@ -423,16 +422,17 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 		{
 			OutDem.ProvinceId[Cell] = static_cast<uint8>(CubusLandscapeEvolution::EProvinceType::CoastalShelf);
 		}
-		else if (BestProvince != INDEX_NONE)
+		else
 		{
-			OutDem.PlateId[Cell] = Provinces[BestProvince].ProvinceId;
-			OutDem.ProvinceId[Cell] = static_cast<uint8>(MapProvinceType(Provinces[BestProvince].Metadata));
+			const FPlacement& Placement = Placements[BestPlacement];
+			OutDem.PlateId[Cell] = static_cast<uint8>(BestPlacement % 255);
+			OutDem.ProvinceId[Cell] = static_cast<uint8>(MapProvinceType(Sources[Placement.SourceIndex].Metadata));
 		}
 	});
 
 	Measure(OutDem, OutStats);
-	UE_LOG(LogTemp, Display, TEXT("Cubus DEM province world: seed %d, %d provinces, %.0f km world, %.2f m/cell, %d indexed sources"),
-		Settings.Seed, Provinces.Num(), Settings.WorldSizeMeters / 1000.0, OutDem.CellSizeMeters, IndexEntries.Num());
+	UE_LOG(LogTemp, Display, TEXT("Cubus 500 km DEM quilt: seed %d, %d macro sources, %d x %d placements, %.2f m/cell"),
+		Settings.Seed, Sources.Num(), GridR, GridR, OutDem.CellSizeMeters);
 	return true;
 }
 } // namespace CubusDemIsland
