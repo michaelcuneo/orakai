@@ -72,10 +72,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "17", ClampMax = "513"))
 	int32 PreviewResolution = 129;
 
+	/** Uniform scale applied to the physical DEM after converting metres to Unreal centimetres. 0.01 displays a 500 km world as 5 km wide. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.0001"))
 	float PreviewHorizontalScale = 0.01f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.01"))
+	/** Height exaggeration relative to the uniform preview scale. 1.0 preserves the DEM's real aspect ratio. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview", meta = (ClampMin = "0.01", DisplayName = "Preview Vertical Exaggeration"))
 	float PreviewVerticalScale = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Landscape Evolution|Preview")
