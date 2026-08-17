@@ -8,43 +8,46 @@
 /**
  * Process-local handoff from the loader DEM pipeline to the runtime density world.
  *
- * The loader authors terrain in physical metres while Cubus density operates in
- * canonical voxel coordinates. This bridge keeps one thread-safe copy of the
- * currently generated raster tiles and performs the coordinate conversion at
- * sample time. It deliberately does not create a second voxel terrain store.
- *
- * Generation writes occur before gameplay level handoff. Runtime density workers
- * then read the finished tiles concurrently through the same immutable sampling
- * interface used by streaming surface prediction.
+ * The generated DEM is authoritative for the runtime voxel world. The loader
+ * publishes the finished raster tiles and preview snapshot here, then gameplay
+ * consumes those same tiles while building density chunks at the required LOD.
  */
 class ORAKAI_API FCubusGeneratedTerrainRuntime
 {
 public:
-    /** Start or continue staging terrain for one loader generation session. */
     static void Configure(
         int32 WorldSeed,
         const FCubusTerrainRasterSettings& RasterSettings
     );
 
-    /** Store the latest version of one authored raster tile. */
     static void StoreTile(const FCubusTerrainRasterTile& Tile);
-
-    /** Replace a tile only when a generated-terrain session is already active. */
     static void StoreTileIfActive(const FCubusTerrainRasterTile& Tile);
 
-    /** Clear the process-local generated terrain handoff. */
+    static void StorePreviewSnapshot(
+        int32 Resolution,
+        const FBox2D& BoundsMeters,
+        const TArray<FColor>& Pixels
+    );
+
+    static bool GetPreviewSnapshot(
+        int32& OutResolution,
+        FBox2D& OutBoundsMeters,
+        TArray<FColor>& OutPixels
+    );
+
+    static void SetProposedSpawnFromPreviewUV(const FVector2D& PreviewUV);
+    static bool GetProposedSpawnWorldMeters(FVector2D& OutWorldMeters);
+    static bool ConfirmProposedSpawn();
+    static bool HasConfirmedSpawn();
+    static bool GetConfirmedSpawnWorldMeters(FVector2D& OutWorldMeters);
+    static bool TryGetConfirmedSpawnSurfaceHeightMeters(float& OutHeightMeters);
+
     static void Reset();
 
     static bool IsActive();
     static int32 GetWorldSeed();
     static int32 GetTileCount();
 
-    /**
-     * Sample the generated DEM using the coordinate convention received by
-     * FCubusTerrainForm::Sample(). WorldX/Y already contain the legacy seeded
-     * terrain-domain offset, so the bridge removes that offset before converting
-     * canonical voxels to physical metres.
-     */
     static bool TrySampleTerrainForm(
         float WorldX,
         float WorldY,
@@ -59,8 +62,22 @@ private:
         FIntPoint TerrainDomainOffsetVoxels = FIntPoint::ZeroValue;
         FCubusTerrainRasterSettings RasterSettings;
         TMap<FIntPoint, FCubusTerrainRasterTile> Tiles;
+
+        int32 PreviewResolution = 0;
+        FBox2D PreviewBoundsMeters;
+        TArray<FColor> PreviewPixels;
+
+        FVector2D ProposedSpawnWorldMeters = FVector2D::ZeroVector;
+        FVector2D ConfirmedSpawnWorldMeters = FVector2D::ZeroVector;
+        bool bHasProposedSpawn = false;
+        bool bHasConfirmedSpawn = false;
         bool bActive = false;
     };
+
+    static bool TrySampleHeightMetersLocked(
+        const FVector2D& WorldMeters,
+        float& OutHeightMeters
+    );
 
     static FRWLock StateLock;
     static FState State;
