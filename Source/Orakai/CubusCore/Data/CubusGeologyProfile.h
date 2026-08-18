@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CubusCore/Data/CubusBiomeTypes.h"
 #include "Engine/DataAsset.h"
 
 #include "CubusGeologyProfile.generated.h"
@@ -95,14 +96,22 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes", meta = (ClampMin = "0.000001", UIMin = "0.0001", UIMax = "0.05"))
     float BiomeFrequency = 0.004f;
 
+    /** Long-term moisture-bearing wind direction in terrain XY space. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes|Climate")
+    FVector2D BiomePrevailingWindDirection = FVector2D(0.82f, 0.57f);
+
+    /** Representative warm/sun-facing downslope direction used by the ecology model. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes|Climate")
+    FVector2D BiomeSolarDirection = FVector2D(-0.42f, -0.91f);
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
-    float ForestThreshold = 0.15f;
+    float ForestThreshold = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "16.0"))
     float WetlandRiverDistance = 0.10f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "32.0"))
-    float RockySlopeThreshold = 4.0f;
+    float RockySlopeThreshold = 1.15f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes")
     int32 RockyMinimumWorldZ = 48;
@@ -118,6 +127,62 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes")
     int32 WetlandSurfaceMaterialId = 8;
+
+    /**
+     * Optional client-authored biome list. When empty, the four legacy
+     * plains/forest/rocky/wetland definitions above remain authoritative.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Biomes|Definitions")
+    TArray<FCubusBiomeDefinition> BiomeDefinitions;
+
+    /** Generate sparse, world-seeded weathered stone mesas. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks")
+    bool bGenerateLandmarks = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "64.0", UIMin = "128.0", UIMax = "1024.0"))
+    float LandmarkCellSizeVoxels = 320.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.0", ClampMax = "1.0"))
+    float LandmarkSpawnChance = 0.75f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "2.0", UIMin = "8.0", UIMax = "128.0"))
+    float LandmarkMinimumRadiusVoxels = 18.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "2.0", UIMin = "8.0", UIMax = "128.0"))
+    float LandmarkMaximumRadiusVoxels = 38.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "1.0", UIMin = "4.0", UIMax = "128.0"))
+    float LandmarkMinimumHeightVoxels = 18.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "1.0", UIMin = "4.0", UIMax = "128.0"))
+    float LandmarkMaximumHeightVoxels = 42.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.05", ClampMax = "0.85"))
+    float LandmarkPlateauRadiusFraction = 0.34f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Shape", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "1.0", ClampMax = "3.0"))
+    float LandmarkMinimumAspectRatio = 1.15f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Shape", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "1.0", ClampMax = "3.0"))
+    float LandmarkMaximumAspectRatio = 1.65f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Shape", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.0", ClampMax = "0.45"))
+    float LandmarkOutlineIrregularity = 0.22f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Weathering", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.0", ClampMax = "1.0"))
+    float LandmarkShoulderStrength = 0.58f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks|Weathering", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.0", ClampMax = "0.85"))
+    float LandmarkGullyStrength = 0.38f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "1", ClampMax = "16"))
+    int32 LandmarkTerraceSteps = 5;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "0.0", ClampMax = "1.0"))
+    float LandmarkTerraceStrength = 0.32f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Landmarks", meta = (EditCondition = "bGenerateLandmarks", ClampMin = "1"))
+    int32 LandmarkSurfaceMaterialId = 3;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cubus|Geology|Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float ForestTreeDensity = 0.025f;

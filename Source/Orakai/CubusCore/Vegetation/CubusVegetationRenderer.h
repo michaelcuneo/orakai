@@ -12,8 +12,8 @@ class USceneComponent;
 class UMaterialInterface;
 class USkeletalMeshComponent;
 class UInstancedSkinnedMeshComponent;
-class UHierarchicalInstancedStaticMeshComponent;
 class USkinnedMeshComponent;
+class UInstancedStaticMeshComponent;
 
 struct FCubusVegetationSpeciesCatalogEntry;
 
@@ -55,27 +55,9 @@ public:
         bool bCastShadow,
         int32 StartCullDistance,
         int32 EndCullDistance,
-        TMap<
-            int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
-        >& StaticBatchComponents,
-        TMap<
-            int64,
-            TObjectPtr<UInstancedSkinnedMeshComponent>
-        >& SkeletalBatchComponents
-    ) const;
-
-    void ApplyShadowSettings(
-        bool bCastShadow,
-        const TMap<
-            int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
-        >& StaticBatchComponents,
-        const TMap<
-            int64,
-            TObjectPtr<UInstancedSkinnedMeshComponent>
-        >& SkeletalBatchComponents,
-        const TArray<TObjectPtr<USkeletalMeshComponent>>& HeroComponents
+        TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>>& GrassBatchComponents,
+        TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>>& StaticBatchComponents,
+        TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>>& SkeletalBatchComponents
     ) const;
 
     void ApplyFoliageMaterialOverride(
@@ -84,17 +66,21 @@ public:
     ) const;
 
     void ClearBatches(
-        const TMap<
-            int64,
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent>
-        >& StaticBatchComponents,
-        const TMap<
-            int64,
-            TObjectPtr<UInstancedSkinnedMeshComponent>
-        >& SkeletalBatchComponents
+        const TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>>& GrassBatchComponents,
+        const TMap<int64, TObjectPtr<UInstancedStaticMeshComponent>>& StaticBatchComponents,
+        const TMap<int64, TObjectPtr<UInstancedSkinnedMeshComponent>>& SkeletalBatchComponents
     ) const;
 
-    UHierarchicalInstancedStaticMeshComponent* CreateStaticBatch(
+    UInstancedStaticMeshComponent* CreateGrassBatch(
+        AActor* Owner,
+        USceneComponent* Root,
+        FName ComponentName,
+        bool bCastShadow,
+        int32 StartCullDistance,
+        int32 EndCullDistance
+    ) const;
+
+    UInstancedStaticMeshComponent* CreateStaticBatch(
         AActor* Owner,
         USceneComponent* Root,
         FName ComponentName,

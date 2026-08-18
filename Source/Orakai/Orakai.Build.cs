@@ -23,6 +23,7 @@ public class Orakai : ModuleRules
 			"SlateCore",
 			"ProceduralMeshComponent",
 			"PCG",
+			"Json",
 			"DynamicWind",
 			"SpacetimeDbSdk"
 		});
@@ -38,7 +39,9 @@ public class Orakai : ModuleRules
 			PrivateDependencyModuleNames.AddRange(new string[] {
 				"UnrealEd",
 				"AssetTools",
-				"MaterialEditor"
+				"MaterialEditor",
+				"AnimToTexture",
+				"AnimToTextureEditor"
 			});
 		}
 

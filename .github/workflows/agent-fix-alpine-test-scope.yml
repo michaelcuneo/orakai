@@ -1,0 +1,60 @@
+name: Fix alpine test scope
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Move alpine height declaration before use
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('Source/Orakai/CubusCore/Tests/CubusTerrainFormTests.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          old_before = '''    TArray<uint8> MountainMask;\n    MountainMask.SetNumZeroed(RangeGridSize * RangeGridSize);\n\n    const auto RangeIndex = [](const int32 X, const int32 Y)\n'''
+          new_before = '''    TArray<uint8> MountainMask;\n    MountainMask.SetNumZeroed(RangeGridSize * RangeGridSize);\n    float MaximumAlpineHeight = -MAX_flt;\n\n    const auto RangeIndex = [](const int32 X, const int32 Y)\n'''
+          if old_before not in text:
+              raise RuntimeError('missing pre-loop anchor')
+          text = text.replace(old_before, new_before, 1)
+
+          old_after = '''    int32 LongestConnectedRange = 0;\n    float MaximumAlpineHeight = -MAX_flt;\n    constexpr int32 NeighbourOffsets[8][2] =\n'''
+          new_after = '''    int32 LongestConnectedRange = 0;\n    constexpr int32 NeighbourOffsets[8][2] =\n'''
+          if old_after not in text:
+              raise RuntimeError('missing duplicate declaration anchor')
+          text = text.replace(old_after, new_after, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Source/Orakai/CubusCore/Tests/CubusTerrainFormTests.cpp')
+          t = p.read_text(encoding='utf-8')
+          declaration = t.index('float MaximumAlpineHeight = -MAX_flt;')
+          first_use = t.index('MaximumAlpineHeight = FMath::Max(')
+          assert declaration < first_use, 'MaximumAlpineHeight is still declared after first use'
+          assert t.count('float MaximumAlpineHeight = -MAX_flt;') == 1, 'duplicate declaration remains'
+          PY
+
+          if git diff --quiet; then
+            echo 'Scope fix already applied.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Source/Orakai/CubusCore/Tests/CubusTerrainFormTests.cpp
+          git commit -m 'Fix alpine terrain test variable scope'
+          git push origin HEAD:agent/density-meshing

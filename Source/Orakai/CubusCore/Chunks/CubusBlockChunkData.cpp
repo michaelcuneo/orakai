@@ -87,6 +87,11 @@ FCubusBlockVoxel* FCubusBlockChunkData::GetVoxel(
         return nullptr;
     }
 
+    // Mutable access can change occupancy without going through SetVoxel.
+    // Invalidate before returning so terrain generators, geology, rivers and
+    // edit systems cannot leave HasAnyOccupiedVoxel() with stale cached state.
+    InvalidateOccupiedState();
+
     return &Voxels[
         Cubus::FlattenLocalCoordinate(X, Y, Z)
     ];
@@ -140,6 +145,8 @@ FCubusBlockChunkData::GetVoxelChecked(
 )
 {
     check(Cubus::IsValidLocalCoordinate(X, Y, Z));
+
+    InvalidateOccupiedState();
 
     return Voxels[
         Cubus::FlattenLocalCoordinate(X, Y, Z)
@@ -281,4 +288,52 @@ void FCubusBlockChunkData::Clear()
     EmptyVoxel.Flags = 0;
 
     Fill(EmptyVoxel);
+}
+
+bool FCubusBlockChunkData::RemoveVegetationAtWorldVoxel(
+    const FIntVector& WorldVoxel
+)
+{
+    const int32 RemovedCount =
+        VegetationInstances.RemoveAll(
+            [&WorldVoxel](
+                const FCubusVegetationInstance& Instance
+            )
+            {
+                return Instance.WorldVoxel == WorldVoxel;
+            }
+        );
+
+    if (RemovedCount <= 0)
+    {
+        return false;
+    }
+
+    ++VegetationRevision;
+
+    return true;
+}
+
+void FCubusBlockChunkData::AddOrReplaceVegetationInstance(
+    const FCubusVegetationInstance& Instance
+)
+{
+    for (
+        FCubusVegetationInstance& ExistingInstance
+        : VegetationInstances
+    )
+    {
+        if (
+            ExistingInstance.WorldVoxel ==
+            Instance.WorldVoxel
+        )
+        {
+            ExistingInstance = Instance;
+            ++VegetationRevision;
+            return;
+        }
+    }
+
+    VegetationInstances.Add(Instance);
+    ++VegetationRevision;
 }

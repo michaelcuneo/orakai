@@ -1,6 +1,46 @@
 #include "CubusCore/Vegetation/CubusVegetationPlacement.h"
 
 #include "CubusCore/Data/CubusVegetationInstance.h"
+#include "CubusCore/Vegetation/CubusVegetationTypes.h"
+
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "HAL/IConsoleManager.h"
+#include "Kismet/GameplayStatics.h"
+
+namespace
+{
+bool IsGroundDetailPlacementType(const int32 TypeId)
+{
+    return
+        TypeId == CubusVegetationType::Grass ||
+        TypeId == CubusVegetationType::StoneClutter ||
+        TypeId == CubusVegetationType::OrganicClutter;
+}
+
+float ResolveGroundDetailEndDistance()
+{
+    constexpr float DefaultGroundDetailEndDistance = 16000.0f;
+
+    IConsoleVariable* Variable =
+        IConsoleManager::Get().FindConsoleVariable(
+            TEXT("cubus.Vegetation.GroundDetailEndDistance")
+        );
+
+    if (Variable == nullptr)
+    {
+        return DefaultGroundDetailEndDistance;
+    }
+
+    const int32 ConfiguredDistance =
+        Variable->GetInt();
+
+    return
+        ConfiguredDistance > 0
+            ? static_cast<float>(ConfiguredDistance)
+            : 0.0f;
+}
+}
 
 void FCubusVegetationPlacement::Reset()
 {
@@ -107,6 +147,56 @@ FCubusVegetationPlacement::Resolve(
     Result.Location = BaseWorldLocation;
     Result.Scale = FMath::Max(0.01f, BaseScale);
     Result.Yaw = Instance.RotationYaw;
+
+    if (IsGroundDetailPlacementType(Instance.TypeId))
+    {
+        const float GroundDetailEndDistance =
+            ResolveGroundDetailEndDistance();
+
+        if (GroundDetailEndDistance > 0.0f)
+        {
+            UWorld* World = GWorld;
+
+            if (IsValid(World))
+            {
+                const APawn* PlayerPawn =
+                    UGameplayStatics::GetPlayerPawn(
+                        World,
+                        0
+                    );
+
+                if (IsValid(PlayerPawn))
+                {
+                    const FVector PlayerLocation =
+                        PlayerPawn->GetActorLocation();
+
+                    const FVector2D DetailLocation(
+                        BaseWorldLocation.X,
+                        BaseWorldLocation.Y
+                    );
+
+                    const FVector2D PlayerLocation2D(
+                        PlayerLocation.X,
+                        PlayerLocation.Y
+                    );
+
+                    if (
+                        FVector2D::DistSquared(
+                            DetailLocation,
+                            PlayerLocation2D
+                        ) >
+                        FMath::Square(
+                            GroundDetailEndDistance
+                        )
+                    )
+                    {
+                        Result.bPruned = true;
+                        return Result;
+                    }
+                }
+            }
+        }
+    }
 
     if (!Settings.bEnabled)
     {

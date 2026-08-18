@@ -53,4 +53,95 @@ public:
 
     /** Remove a foliage delta, restoring the generated foliage. */
     virtual void ClearFoliageEdit(const FIntVector& WorldVoxel) = 0;
+
+    virtual void RecordDensityEdit(
+        const FOrakaiDensityEdit& Edit
+    )
+    {
+    }
+
+    virtual void ClearDensityEdit(
+        const FIntVector& WorldSample
+    )
+    {
+    }
+
+    /*
+    * Apply one complete density-brush persistence batch.
+    *
+    * The default implementation preserves compatibility with backends that
+    * only implement the existing single-record operations.
+    */
+    virtual void ApplyDensityEditBatch(
+        const TArray<FOrakaiDensityEdit>& Records,
+        const TArray<FIntVector>& Clears
+    )
+    {
+    for (const FIntVector& WorldSample : Clears)
+    {
+        ClearDensityEdit(
+            WorldSample
+        );
+    }
+
+    for (const FOrakaiDensityEdit& Edit : Records)
+    {
+        RecordDensityEdit(
+            Edit
+        );
+    }
+}
+
+    /** Read the complete delta snapshot for a generated world/chunk. */
+    virtual void GetVoxelEditsForChunk(
+        const FIntVector& ChunkCoordinate,
+        TArray<FOrakaiVoxelEdit>& OutEdits
+    ) const
+    {
+        OutEdits.Reset();
+    }
+
+    virtual void GetDensityEdits(TArray<FOrakaiDensityEdit>& OutEdits) const
+    {
+        OutEdits.Reset();
+    }
+
+    virtual void GetFoliageEditsForChunk(
+        const FIntVector& ChunkCoordinate,
+        TArray<FOrakaiFoliageEdit>& OutEdits
+    ) const
+    {
+        OutEdits.Reset();
+    }
+
+    /** Optional small inventory store used by the local gameplay slice. */
+    virtual int32 GetInventoryQuantity(const FName ItemId) const
+    {
+        return 0;
+    }
+
+    virtual void SetInventoryQuantity(const FName ItemId, int32 Quantity) {}
+
+    /**
+     * Persistent non-terrain object deltas. Optional for older remote
+     * backends; local worlds support these records by default.
+     */
+    virtual void RecordWorldObject(const FOrakaiWorldObjectRecord& Record) {}
+    virtual void ClearWorldObject(const FString& ObjectId) {}
+
+    virtual bool GetWorldObject(
+        const FString& ObjectId,
+        FOrakaiWorldObjectRecord& OutRecord
+    ) const
+    {
+        return false;
+    }
+
+    virtual void GetWorldObjectsForChunk(
+        const FIntVector& ChunkCoordinate,
+        TArray<FOrakaiWorldObjectRecord>& OutRecords
+    ) const
+    {
+        OutRecords.Reset();
+    }
 };

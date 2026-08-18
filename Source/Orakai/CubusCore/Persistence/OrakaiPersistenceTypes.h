@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "OrakaiPersistenceTypes.generated.h"
 
 /**
  * Transport-agnostic value types shared by the persistence subsystem and its
@@ -15,6 +16,14 @@ struct FOrakaiVoxelEdit
     FIntVector LocalCoordinate = FIntVector::ZeroValue;
     int32 MaterialId = 0;
     bool bIsWater = false;
+};
+
+/** A sparse scalar-field delta applied on top of generated density terrain. */
+struct FOrakaiDensityEdit
+{
+    FIntVector WorldSample = FIntVector::ZeroValue;
+    float DensityDelta = 0.0f;
+    int32 MaterialId = 0;
 };
 
 /** A single authoritative foliage delta applied on top of generated foliage. */
@@ -37,6 +46,55 @@ struct FOrakaiPlayerCoordinate
     FVector Location = FVector::ZeroVector;
     float Yaw = 0.0f;
     float Pitch = 0.0f;
+};
+
+/** Minimal item stack used by the first local survival interaction. */
+struct FOrakaiInventoryEntry
+{
+    FName ItemId = NAME_None;
+    int32 Quantity = 0;
+};
+
+/**
+ * A persistent non-terrain object delta.
+ *
+ * Generated objects only need a record when their generated state changes
+ * (normally a tombstone). Player-placed objects store their complete authored
+ * state here. Runtime actors are reconstructed separately from these records;
+ * they are deliberately not baked into chunk meshes.
+ */
+USTRUCT(BlueprintType)
+struct FOrakaiWorldObjectRecord
+{
+    GENERATED_BODY()
+
+    /** Stable primary key. Generated IDs are reproducible from seed + location. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|World Objects")
+    FString ObjectId;
+
+    /** Catalog/type key used to choose the runtime actor or object definition. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|World Objects")
+    FName TypeId = NAME_None;
+
+    /** Spatial index used to load this record with its owning terrain chunk. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|World Objects")
+    FIntVector ChunkCoordinate = FIntVector::ZeroValue;
+
+    /** Authored or generated world transform. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|World Objects")
+    FTransform Transform = FTransform::Identity;
+
+    /** True when the baseline generator owns the object. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|World Objects")
+    bool bGenerated = false;
+
+    /** A generated-object tombstone; no actor should be reconstructed. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|World Objects")
+    bool bDestroyed = false;
+
+    /** Small type-specific payload. Large state belongs in a dedicated system. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orakai|World Objects")
+    FString Payload;
 };
 
 namespace OrakaiPersistence
@@ -92,6 +150,36 @@ namespace OrakaiPersistence
             WorldVoxel.X,
             WorldVoxel.Y,
             WorldVoxel.Z
+        );
+    }
+
+    /**
+     * Reproducible ID for an object produced by deterministic generation.
+     * StableCoordinate is the generator's canonical integer anchor (for
+     * foliage this is its world voxel), so IDs do not depend on actor order.
+     */
+    inline FString MakeGeneratedWorldObjectId(
+        const int64 WorldSeed,
+        const FName TypeId,
+        const FIntVector& StableCoordinate
+    )
+    {
+        return FString::Printf(
+            TEXT("generated:%lld:%s:%d:%d:%d"),
+            static_cast<long long>(WorldSeed),
+            *TypeId.ToString(),
+            StableCoordinate.X,
+            StableCoordinate.Y,
+            StableCoordinate.Z
+        );
+    }
+
+    /** Globally unique ID for a player-authored object record. */
+    inline FString MakePlacedWorldObjectId()
+    {
+        return FString::Printf(
+            TEXT("placed:%s"),
+            *FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower)
         );
     }
 

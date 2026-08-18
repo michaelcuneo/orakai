@@ -1,0 +1,8 @@
+name: Archived corrected biome ecology v18 patch
+on:
+  workflow_dispatch:
+jobs:
+  archived:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Biome ecology v18 patch already applied."

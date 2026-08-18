@@ -1,0 +1,391 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Async/Future.h"
+#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "CubusCore/Generation/CubusTerrainCarving.h"
+#include "CubusCore/Generation/CubusTerrainErosion.h"
+#include "CubusCore/Generation/CubusTerrainDeposition.h"
+#include "CubusCore/Generation/CubusGeneratedTerrainRuntime.h"
+#include "CubusCore/Generation/CubusWorldGenerationPreviewActor.h"
+#include "CubusWorldGenerationLoaderActor.generated.h"
+
+class ACubusBlockWorldActor;
+class ACubusTerrainLodWorldActor;
+class ACubusSpawnStreamingPawn;
+class UTexture2D;
+
+UENUM(BlueprintType)
+enum class ECubusGenerationLoaderStage : uint8
+{
+	WaitingForSeed UMETA(DisplayName = "Waiting for Seed"),
+	StructuralDEM  UMETA(DisplayName = "Structural DEM"),
+	Drainage       UMETA(DisplayName = "Drainage"),
+	TerrainCarving UMETA(DisplayName = "Terrain Carving"),
+	Erosion        UMETA(DisplayName = "Coarse Erosion"),
+	Deposition     UMETA(DisplayName = "Alluvial Deposition"),
+	FineErosion    UMETA(DisplayName = "Fine Erosion"),
+	SupportChunks  UMETA(DisplayName = "Support Chunk Pass"),
+	GameplayChunks UMETA(DisplayName = "Gameplay Chunk Loading"),
+	TerrainLOD     UMETA(DisplayName = "Terrain LOD Loading"),
+	Complete       UMETA(DisplayName = "Ready for Spawn Selection"),
+	Failed         UMETA(DisplayName = "Failed")
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCubusGenerationStageChanged, ECubusGenerationLoaderStage, NewStage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCubusGenerationProgressChanged, ECubusGenerationLoaderStage, Stage, float, StageProgress);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCubusGenerationFinished);
+
+/** Plain worker-thread result. It deliberately owns no UObjects. */
+struct FCubusProductionDemBuildResult
+{
+	uint64 SessionSerial = 0;
+	TSharedPtr<CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe> Dem;
+	CubusLandscapeEvolution::FGenerationStats Stats;
+	FString Error;
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class ORAKAI_API ACubusWorldGenerationLoaderActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ACubusWorldGenerationLoaderActor();
+	virtual void Tick(float DeltaSeconds) override;
+
+	/**
+	 * Production generation always hands off from Lvl_Generator to
+	 * Lvl_ThirdPerson as soon as the authoritative DEM is ready.  Force these
+	 * values after serialized level-instance properties are applied so an old
+	 * placed loader cannot silently retain the temporary "stay on generator"
+	 * setting that was introduced during DEM preview work.
+	 */
+	virtual void PostInitializeComponents() override
+	{
+		Super::PostInitializeComponents();
+		if (bUseProductionRealDemWorld)
+		{
+			bTravelToGameplayWhenComplete = true;
+			GameplayLevelName = TEXT("Lvl_ThirdPerson");
+		}
+	}
+
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation")
+	void StartGeneration(int32 InWorldSeed);
+
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation")
+	void CancelGeneration();
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation")
+	ECubusGenerationLoaderStage GetGenerationStage() const { return Stage; }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation")
+	float GetStageProgress() const { return StageProgress; }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation")
+	float GetOverallProgress() const { return OverallProgress; }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation")
+	int32 GetWorldSeed() const { return WorldSeed; }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation")
+	FText GetStageDisplayName() const;
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Spawn", meta = (DisplayName = "Is Generated Spawn Selection Ready"))
+	bool IsGeneratedSpawnSelectionReady() const { return Stage == ECubusGenerationLoaderStage::Complete; }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Preview")
+	UTexture2D* GetPreviewTexture() const { return PreviewTexture; }
+
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation|3D Preview", meta = (DisplayName = "Get Or Create Generated Terrain 3D Preview"))
+	ACubusWorldGenerationPreviewActor* GetOrCreateGeneratedTerrain3DPreview()
+	{
+		if (IsValid(GeneratedTerrainPreviewActor))
+		{
+			GeneratedTerrainPreviewActor->TargetLoader = this;
+			return GeneratedTerrainPreviewActor;
+		}
+		if (!IsValid(GetWorld()))
+		{
+			return nullptr;
+		}
+		GeneratedTerrainPreviewActor = Cast<ACubusWorldGenerationPreviewActor>(
+			UGameplayStatics::GetActorOfClass(this, ACubusWorldGenerationPreviewActor::StaticClass()));
+		if (!IsValid(GeneratedTerrainPreviewActor))
+		{
+			FActorSpawnParameters SpawnParameters;
+			SpawnParameters.Owner = this;
+			SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			SpawnParameters.ObjectFlags |= RF_Transient;
+			GeneratedTerrainPreviewActor = GetWorld()->SpawnActor<ACubusWorldGenerationPreviewActor>(
+				ACubusWorldGenerationPreviewActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+		}
+		if (IsValid(GeneratedTerrainPreviewActor))
+		{
+			GeneratedTerrainPreviewActor->TargetLoader = this;
+		}
+		return GeneratedTerrainPreviewActor;
+	}
+
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation|Preview", meta = (DisplayName = "Publish Generated DEM Preview"))
+	void PublishPreviewSnapshotToRuntime()
+	{
+		FCubusGeneratedTerrainRuntime::StorePreviewSnapshot(
+			FMath::Clamp(PreviewTextureResolution, 64, 2048), GetGenerationBoundsMeters(), PreviewPixels);
+	}
+
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation|Spawn", meta = (DisplayName = "Set Generated Spawn From Preview UV"))
+	bool SetGeneratedSpawnFromPreviewUV(FVector2D PreviewUV, FVector2D& OutWorldMeters)
+	{
+		if (Stage != ECubusGenerationLoaderStage::Complete)
+		{
+			OutWorldMeters = FVector2D::ZeroVector;
+			return false;
+		}
+		FCubusGeneratedTerrainRuntime::SetProposedSpawnFromPreviewUV(PreviewUV);
+		return FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(OutWorldMeters);
+	}
+
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation|Spawn", meta = (DisplayName = "Set Generated Spawn From Preview Position"))
+	bool SetGeneratedSpawnFromPreviewPosition(FVector2D LocalPreviewPosition, FVector2D PreviewSize, FVector2D& OutPreviewUV,
+		FVector2D& OutWorldMeters)
+	{
+		if (PreviewSize.X <= UE_SMALL_NUMBER || PreviewSize.Y <= UE_SMALL_NUMBER)
+		{
+			OutPreviewUV = FVector2D::ZeroVector;
+			OutWorldMeters = FVector2D::ZeroVector;
+			return false;
+		}
+		OutPreviewUV = FVector2D(
+			FMath::Clamp(LocalPreviewPosition.X / PreviewSize.X, 0.0, 1.0),
+			FMath::Clamp(LocalPreviewPosition.Y / PreviewSize.Y, 0.0, 1.0));
+		return SetGeneratedSpawnFromPreviewUV(OutPreviewUV, OutWorldMeters);
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Spawn", meta = (DisplayName = "Get Proposed Generated Spawn"))
+	bool GetProposedGeneratedSpawn(FVector2D& OutWorldMeters) const
+	{
+		return FCubusGeneratedTerrainRuntime::GetProposedSpawnWorldMeters(OutWorldMeters);
+	}
+
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation|Spawn", meta = (DisplayName = "Confirm Generated Spawn"))
+	bool ConfirmGeneratedSpawn(FVector2D& OutWorldMeters)
+	{
+		OutWorldMeters = FVector2D::ZeroVector;
+		if (Stage != ECubusGenerationLoaderStage::Complete || GameplayLevelName.IsNone() || !IsValid(GetWorld()) ||
+			!FCubusGeneratedTerrainRuntime::ConfirmProposedSpawn() ||
+			!FCubusGeneratedTerrainRuntime::GetConfirmedSpawnWorldMeters(OutWorldMeters))
+		{
+			return false;
+		}
+		PublishPreviewSnapshotToRuntime();
+		UGameplayStatics::OpenLevel(this, GameplayLevelName);
+		return true;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Spawn", meta = (DisplayName = "Has Confirmed Generated Spawn"))
+	bool HasConfirmedGeneratedSpawn() const { return FCubusGeneratedTerrainRuntime::HasConfirmedSpawn(); }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Spawn", meta = (DisplayName = "Get Confirmed Generated Spawn"))
+	bool GetConfirmedGeneratedSpawn(FVector2D& OutWorldMeters) const
+	{
+		return FCubusGeneratedTerrainRuntime::GetConfirmedSpawnWorldMeters(OutWorldMeters);
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Spawn", meta = (DisplayName = "Get Confirmed Generated Spawn Height"))
+	bool GetConfirmedGeneratedSpawnHeight(float& OutHeightMeters) const
+	{
+		return FCubusGeneratedTerrainRuntime::TryGetConfirmedSpawnSurfaceHeightMeters(OutHeightMeters);
+	}
+
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation|Spawn", meta = (DisplayName = "Enter Generated World"))
+	bool EnterGeneratedWorld()
+	{
+		return Stage == ECubusGenerationLoaderStage::Complete && FCubusGeneratedTerrainRuntime::HasConfirmedSpawn();
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Diagnostics")
+	int32 GetGeneratedTerrainTileCount() const { return TerrainTiles.Num(); }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Diagnostics")
+	int32 GetDrainageSegmentCount() const { return DrainageSegments.Num(); }
+
+	UFUNCTION(BlueprintPure, Category = "Cubus|Generation|Diagnostics")
+	bool HasProductionGlobalDem() const { return GeneratedGlobalDem.IsValid() && GeneratedGlobalDem->IsValid(); }
+
+	UFUNCTION(BlueprintCallable, Category = "Cubus|Generation|Diagnostics")
+	bool GetGeneratedHeightMeters(double WorldXmeters, double WorldYmeters, float& OutHeightMeters) const;
+
+	/** The exact footprint used by both the 2D and 3D generation previews. */
+	FBox2D GetGenerationPreviewBoundsMeters() const { return GetGenerationBoundsMeters(); }
+
+	bool GetLivePreviewHeightField(int32 Resolution, TArray<float>& OutHeights, TArray<uint8>& OutValid) const;
+
+	UPROPERTY(BlueprintAssignable, Category = "Cubus|Generation|Events")
+	FCubusGenerationStageChanged OnStageChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Cubus|Generation|Events")
+	FCubusGenerationProgressChanged OnProgressChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Cubus|Generation|Events")
+	FCubusGenerationFinished OnGenerationFinished;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
+	bool bTravelToGameplayWhenComplete = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
+	FName GameplayLevelName = TEXT("Lvl_ThirdPerson");
+
+	/** Production mode: generate the same 500 km real-DEM island used by the editor terrain controller. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM")
+	bool bUseProductionRealDemWorld = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (ClampMin = "33", ClampMax = "8193"))
+	int32 ProductionDemResolution = 4097;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (ClampMin = "10000.0", Units = "m"))
+	double ProductionWorldSizeMeters = 500000.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (Units = "m"))
+	float ProductionOceanLevelMeters = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (Units = "m"))
+	float ProductionOceanFloorMeters = -1000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (ClampMin = "1000.0", Units = "m"))
+	float ProductionCoastBandMeters = 45000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (Units = "m"))
+	float ProductionBaseLandElevationMeters = 180.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (ClampMin = "0.05", ClampMax = "4.0"))
+	float ProductionReliefScale = 1.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Production DEM", meta = (ClampMin = "0.0", Units = "m"))
+	float ProductionCoastWarpMeters = 12000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation", meta = (ClampMin = "0.5", UIMin = "1.0"))
+	FVector2D GenerationSizeKm = FVector2D(4.0, 4.0);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation")
+	int32 WorkItemsPerTick = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Preview", meta = (ClampMin = "64", ClampMax = "2048"))
+	int32 PreviewTextureResolution = 768;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Preview")
+	bool bPreviewHillshade = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Preview", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float PreviewHillshadeStrength = 0.72f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Terrain", meta = (ClampMin = "0.25"))
+	float DEMSampleSpacingMeters = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Terrain", meta = (ClampMin = "64.0"))
+	float DEMTileSizeMeters = 512.0f;
+
+	/** Legacy small-raster refinement only. Deliberately bypassed by production real-DEM mode for now. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Experimental")
+	bool bEnableExperimentalTerrainRefinement = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Drainage", meta = (ClampMin = "2.0"))
+	float DrainageCellSizeMeters = 8.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Drainage", meta = (ClampMin = "0.001"))
+	float StreamSourceAreaSquareKm = 0.20f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Erosion", meta = (ClampMin = "1", ClampMax = "12"))
+	int32 ErosionIterations = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Erosion", meta = (ClampMin = "5.0", ClampMax = "60.0"))
+	float ErosionTalusAngleDegrees = 33.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Deposition", meta = (ClampMin = "1", ClampMax = "8"))
+	int32 DepositionIterations = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cubus|Generation|Fine Erosion", meta = (ClampMin = "1", ClampMax = "8"))
+	int32 FineErosionIterations = 3;
+
+protected:
+	virtual void BeginPlay() override;
+
+private:
+	void ResetSession();
+	void BuildSettings();
+	void BuildWorkQueues();
+	void BeginStage(ECubusGenerationLoaderStage NewStage);
+	void BeginRuntimeTerrainLoading();
+	void ProcessRuntimeTerrainLoading();
+	void UpdateRuntimeLoadingProgress(float InStageProgress, float StageIndex);
+	void FinishCurrentPipeline();
+
+	void ProcessStructuralDEM();
+	void ProcessDrainage();
+	void ProcessTerrainCarving();
+	void ProcessErosion();
+	void ProcessDeposition();
+	void ProcessFineErosion();
+	void StartProductionGlobalDemBuild();
+	void PollProductionGlobalDemBuild();
+	void RebuildPreviewFromGlobalDem();
+
+	FBox2D GetGenerationBoundsMeters() const;
+	void SetWorkProgress(int32 CompletedItems, int32 TotalItems);
+
+	void EnsurePreviewTexture();
+	void ClearPreview();
+	void UploadPreview();
+	void PaintTileToPreview(const FCubusTerrainRasterTile& Tile);
+	void RebuildTerrainPreview(bool bOverlayDrainage);
+	void DrawDrainageSegmentsToPreview(const TArray<FCubusTerrainDrainageSegment>& Segments);
+	FColor HeightToPreviewColor(float NormalizedHeight, float Hillshade) const;
+	FIntPoint WorldToPreviewPixel(const FVector2D& WorldMeters) const;
+	FVector2D PreviewPixelToWorld(int32 PixelX, int32 PixelY) const;
+	void DrawPreviewLine(FIntPoint Start, FIntPoint End, const FColor& Color, int32 RadiusPixels);
+
+	ECubusGenerationLoaderStage Stage = ECubusGenerationLoaderStage::WaitingForSeed;
+	float StageProgress = 0.0f;
+	float OverallProgress = 0.0f;
+	int32 WorldSeed = 0;
+	int32 CurrentWorkIndex = 0;
+
+	FCubusTerrainRasterSettings RasterSettings;
+	FCubusTerrainDrainageSettings DrainageSettings;
+	FCubusTerrainCarvingSettings CarvingSettings;
+	FCubusTerrainErosionSettings ErosionSettings;
+	FCubusTerrainDepositionSettings DepositionSettings;
+	FCubusTerrainErosionSettings FineErosionSettings;
+
+	TSharedPtr<CubusLandscapeEvolution::FGlobalDem, ESPMode::ThreadSafe> GeneratedGlobalDem;
+	TFuture<FCubusProductionDemBuildResult> ProductionDemFuture;
+	uint64 GenerationSessionSerial = 0;
+	uint64 ProductionDemBuildSessionSerial = 0;
+	bool bProductionDemBuildInFlight = false;
+	bool bDiscardProductionDemBuildResult = false;
+
+	TArray<FIntPoint> TerrainTileQueue;
+	TArray<FIntPoint> DrainageRegionQueue;
+	TMap<FIntPoint, FCubusTerrainRasterTile> TerrainTiles;
+	TArray<FCubusTerrainDrainageSegment> DrainageSegments;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> PreviewTexture = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ACubusWorldGenerationPreviewActor> GeneratedTerrainPreviewActor = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ACubusBlockWorldActor> RuntimeBlockWorld = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ACubusTerrainLodWorldActor> RuntimeLodWorld = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ACubusSpawnStreamingPawn> RuntimeStreamingPawn = nullptr;
+
+	TArray<float> PreviewHeightMeters;
+	TArray<FColor> PreviewPixels;
+};

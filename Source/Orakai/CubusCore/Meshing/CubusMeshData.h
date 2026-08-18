@@ -6,8 +6,9 @@
 /**
  * Engine-independent output produced by a Cubus mesher.
  *
- * This structure contains everything required to submit one mesh section
- * to a UProceduralMeshComponent.
+ * UV0 is also the density-material payload channel. Density meshes pack four
+ * material-array slice IDs into UV0 and place the corresponding normalized
+ * blend weights in VertexColors RGBA.
  */
 struct ORAKAI_API FCubusMeshData
 {

@@ -1,0 +1,9 @@
+name: Biome ecology v17 archive
+on:
+  workflow_dispatch:
+jobs:
+  archived:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Archived patch marker
+        run: echo "Biome ecology v17 source patch already applied."

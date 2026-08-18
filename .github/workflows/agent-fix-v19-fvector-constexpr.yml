@@ -1,0 +1,10 @@
+name: Archived v19 FVector constexpr compile fix
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  archived:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Compile fix already applied in 3ac798469e28259af2a84ee900a4accc9e38cf87"

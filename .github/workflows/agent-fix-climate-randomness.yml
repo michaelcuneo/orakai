@@ -1,0 +1,102 @@
+name: Fix climate distribution and snow
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Make climate provinces unbiased and snow climate-driven
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              s = p.read_text(encoding='utf-8')
+              if new in s:
+                  return False
+              count = s.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected one anchor, found {count}')
+              p.write_text(s.replace(old, new, 1), encoding='utf-8')
+              return True
+
+          biome_cpp = 'Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp'
+          old_climate = '''\tconst float BiomeX = WorldX + static_cast<float>(Settings.BiomeOffsetX);\n\tconst float BiomeY = WorldY + static_cast<float>(Settings.BiomeOffsetY);\n\tconst float ClimateFrequency = Settings.Frequency * 0.28f;\n\tconst float WarpFrequency = ClimateFrequency * 0.38f;\n\tconst float WarpAmplitude = FMath::Clamp(0.12f / ClimateFrequency, 64.0f, 320.0f);\n\tconst float WarpedX = BiomeX + SampleFbm(BiomeX + 3527.0f, BiomeY - 1871.0f, WarpFrequency, 3, 0.5f) * WarpAmplitude;\n\tconst float WarpedY = BiomeY + SampleFbm(BiomeX - 6173.0f, BiomeY + 2593.0f, WarpFrequency, 3, 0.5f) * WarpAmplitude;\n\tconst float MacroMoisture = SampleFbm(WarpedX + 4219.0f, WarpedY - 1877.0f, ClimateFrequency * 0.72f, 4, 0.52f);\n\tconst float MacroTemperature = SampleFbm(WarpedX - 8111.0f, WarpedY + 3203.0f, ClimateFrequency * 0.50f, 3, 0.5f);\n\tconst float LocalHumidity = SampleFbm(WarpedX + 1013.0f, WarpedY + 6427.0f, Settings.Frequency * 1.15f, 2, 0.45f);\n'''
+          new_climate = '''\tconst float BiomeX = WorldX + static_cast<float>(Settings.BiomeOffsetX);\n\tconst float BiomeY = WorldY + static_cast<float>(Settings.BiomeOffsetY);\n\n\t/*\n\t * Climate is geographical, not a reward for travelling away from the\n\t * origin. A broad seeded province establishes the regional climate, a\n\t * second independent scale prevents kilometre-wide monotony, and a weak\n\t * local field breaks up perfectly uniform province interiors. Terrain is\n\t * applied afterwards as a modifier rather than deciding the climate.\n\t */\n\tconst float ClimateProvinceFrequency = Settings.Frequency * 0.18f;\n\tconst float ClimateRegionalFrequency = Settings.Frequency * 0.62f;\n\tconst float ClimateLocalFrequency = Settings.Frequency * 1.55f;\n\tconst float WarpFrequency = ClimateProvinceFrequency * 0.55f;\n\tconst float WarpAmplitude = FMath::Clamp(0.18f / ClimateProvinceFrequency, 96.0f, 520.0f);\n\tconst float WarpedX = BiomeX + SampleFbm(BiomeX + 3527.0f, BiomeY - 1871.0f, WarpFrequency, 3, 0.5f) * WarpAmplitude;\n\tconst float WarpedY = BiomeY + SampleFbm(BiomeX - 6173.0f, BiomeY + 2593.0f, WarpFrequency, 3, 0.5f) * WarpAmplitude;\n\n\tconst float ProvinceMoisture = SampleFbm(WarpedX + 4219.0f, WarpedY - 1877.0f, ClimateProvinceFrequency * 0.95f, 4, 0.52f);\n\tconst float RegionalMoisture = SampleFbm(WarpedX - 11549.0f, WarpedY + 9011.0f, ClimateRegionalFrequency * 0.90f, 3, 0.50f);\n\tconst float LocalHumidity = SampleFbm(WarpedX + 1013.0f, WarpedY + 6427.0f, ClimateLocalFrequency, 2, 0.45f);\n\n\tconst float ProvinceTemperature = SampleFbm(WarpedX - 8111.0f, WarpedY + 3203.0f, ClimateProvinceFrequency * 0.78f, 4, 0.52f);\n\tconst float RegionalTemperature = SampleFbm(WarpedX + 14831.0f, WarpedY - 10427.0f, ClimateRegionalFrequency * 0.82f, 3, 0.50f);\n\tconst float LocalTemperature = SampleFbm(WarpedX - 2791.0f, WarpedY - 15317.0f, ClimateLocalFrequency * 0.72f, 2, 0.45f);\n'''
+          replace_once(biome_cpp, old_climate, new_climate, 'climate field')
+
+          old_ecology = '''\tconst float OrographicMoisture = Windwardness * Ecology.FoothillWeight * 0.13f;\n\tconst float DrainageMoisture = Result.Drainage * 0.16f + Result.RiverInfluence * 0.26f;\n\tconst float ExposureDrying = Result.Exposure * 0.13f + Result.RockExposure * 0.08f;\n\tResult.Moisture = FMath::Clamp(0.50f + MacroMoisture * 0.34f + LocalHumidity * 0.07f + OrographicMoisture + DrainageMoisture - ExposureDrying, 0.0f, 1.0f);\n\tconst float ElevationCooling = FMath::Clamp((SurfaceWorldZ - Settings.RockyMinimumWorldZ) / 120.0f, -0.18f, 0.52f);\n\tResult.Temperature = FMath::Clamp(0.52f + MacroTemperature * 0.34f - ElevationCooling - Result.Exposure * 0.07f + Result.Drainage * 0.035f, 0.0f, 1.0f);\n'''
+          new_ecology = '''\tconst float OrographicMoisture = Windwardness * Ecology.FoothillWeight * 0.13f;\n\tconst float DrainageMoisture = Result.Drainage * 0.16f + Result.RiverInfluence * 0.26f;\n\tconst float ExposureDrying = Result.Exposure * 0.13f + Result.RockExposure * 0.08f;\n\tResult.Moisture = FMath::Clamp(\n\t\t0.50f +\n\t\tProvinceMoisture * 0.26f +\n\t\tRegionalMoisture * 0.18f +\n\t\tLocalHumidity * 0.08f +\n\t\tOrographicMoisture +\n\t\tDrainageMoisture -\n\t\tExposureDrying,\n\t\t0.0f,\n\t\t1.0f\n\t);\n\n\t/*\n\t * Do not warm low terrain merely because it is below the old rocky-height\n\t * threshold. The seeded climate is authoritative at sea level; elevation\n\t * only cools terrain above sea level using a bounded lapse response. This\n\t * allows cold tundra and warm lowlands to occur anywhere in the world.\n\t */\n\tconst float ElevationAboveSeaLevel = FMath::Max(0.0f, SurfaceWorldZ - Settings.HydrologySettings.SeaLevel);\n\tconst float ElevationCooling = FMath::Clamp(ElevationAboveSeaLevel / 180.0f, 0.0f, 1.0f) * 0.44f;\n\tResult.Temperature = FMath::Clamp(\n\t\t0.50f +\n\t\tProvinceTemperature * 0.32f +\n\t\tRegionalTemperature * 0.20f +\n\t\tLocalTemperature * 0.08f -\n\t\tElevationCooling -\n\t\tResult.Exposure * 0.05f +\n\t\tResult.Drainage * 0.02f,\n\t\t0.0f,\n\t\t1.0f\n\t);\n'''
+          replace_once(biome_cpp, old_ecology, new_ecology, 'climate response')
+
+          density_cpp = 'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp'
+          old_clamp = '''\tSettings.SnowMaterialId = FMath::Max(1, Settings.SnowMaterialId);\n\tSettings.RockSlopeThreshold = FMath::Max(0.0f, Settings.RockSlopeThreshold);\n'''
+          new_clamp = '''\tSettings.SnowMaterialId = FMath::Max(1, Settings.SnowMaterialId);\n\tSettings.BiomeSnowMaterialId = FMath::Max(1, Settings.BiomeSnowMaterialId);\n\tSettings.RockSlopeThreshold = FMath::Max(0.0f, Settings.RockSlopeThreshold);\n'''
+          replace_once(density_cpp, old_clamp, new_clamp, 'biome snow material clamp')
+
+          old_material = '''\tconst FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);\n\tif (LandmarkSample.IsInside())\n\t{\n\t\tColumn.SurfaceMaterialId = FMath::Max(1, Settings.LandmarkSettings.SurfaceMaterialId);\n\t}\n\telse if (Column.Slope >= Settings.RockSlopeThreshold)\n\t{\n\t\tColumn.SurfaceMaterialId = Settings.RockMaterialId;\n\t}\n\telse\n\t{\n\t\tColumn.SurfaceMaterialId = Settings.BiomeSettings.bEnabled\n\t\t\t? Column.BiomeSample.SurfaceMaterialId\n\t\t\t: Settings.SurfaceMaterialId;\n\t\tif (Column.SurfaceVoxelHeight >= Settings.SnowMinimumHeight && Column.SurfaceMaterialId == Settings.SurfaceMaterialId)\n\t\t{\n\t\t\tColumn.SurfaceMaterialId = Settings.SnowMaterialId;\n\t\t}\n\t}\n'''
+          new_material = '''\tconst FCubusLandmarkSample LandmarkSample = FCubusLandmarkField::Sample(TerrainX, TerrainY, Settings.LandmarkSettings);\n\tif (LandmarkSample.IsInside())\n\t{\n\t\tColumn.SurfaceMaterialId = FMath::Max(1, Settings.LandmarkSettings.SurfaceMaterialId);\n\t}\n\telse\n\t{\n\t\tColumn.SurfaceMaterialId = Column.Slope >= Settings.RockSlopeThreshold\n\t\t\t? Settings.RockMaterialId\n\t\t\t: (Settings.BiomeSettings.bEnabled ? Column.BiomeSample.SurfaceMaterialId : Settings.SurfaceMaterialId);\n\n\t\tif (Settings.BiomeSettings.bEnabled)\n\t\t{\n\t\t\t/*\n\t\t\t * Snow/ice follows the local climate, not a global world-Z cutoff.\n\t\t\t * Temperature already contains the elevation lapse response, so a\n\t\t\t * sufficiently cold lowland can freeze while a warm mountain can stay\n\t\t\t * bare. Moisture controls accumulation and steep slopes shed snow.\n\t\t\t */\n\t\t\tconst float Coldness = 1.0f - SmoothStep(0.28f, 0.46f, Column.BiomeSample.Temperature);\n\t\t\tconst float MoistureSupport = FMath::Lerp(\n\t\t\t\t0.62f,\n\t\t\t\t1.0f,\n\t\t\t\tSmoothStep(0.16f, 0.50f, Column.BiomeSample.Moisture)\n\t\t\t);\n\t\t\tconst float SnowRetention = 1.0f - SmoothStep(\n\t\t\t\tSettings.RockSlopeThreshold * 0.85f,\n\t\t\t\tFMath::Max(Settings.RockSlopeThreshold * 1.55f, Settings.RockSlopeThreshold + 0.01f),\n\t\t\t\tColumn.Slope\n\t\t\t);\n\t\t\tconst float SnowSuitability = Coldness * MoistureSupport * SnowRetention;\n\n\t\t\tif (SnowSuitability >= 0.42f)\n\t\t\t{\n\t\t\t\tColumn.SurfaceMaterialId = Settings.BiomeSnowMaterialId;\n\t\t\t}\n\t\t}\n\t\telse if (Column.SurfaceVoxelHeight >= Settings.SnowMinimumHeight && Column.SurfaceMaterialId == Settings.SurfaceMaterialId)\n\t\t{\n\t\t\t/* Preserve the legacy fixed-height rule only for non-biome worlds. */\n\t\t\tColumn.SurfaceMaterialId = Settings.SnowMaterialId;\n\t\t}\n\t}\n'''
+          replace_once(density_cpp, old_material, new_material, 'climate snow rule')
+
+          volume_cpp = 'Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.cpp'
+          old_wire = '''\tDensitySettings.SnowMaterialId = TerrainSnowMaterialId;\n\n\tDensitySettings.RockSlopeThreshold = TerrainRockSlopeThreshold;\n\n\tDensitySettings.SnowMinimumHeight = static_cast<float>(TerrainSnowMinimumHeight);\n'''
+          new_wire = '''\tDensitySettings.SnowMaterialId = TerrainSnowMaterialId;\n\tDensitySettings.BiomeSnowMaterialId = TerrainSnowMaterialId;\n\n\tDensitySettings.RockSlopeThreshold = TerrainRockSlopeThreshold;\n\n\tDensitySettings.SnowMinimumHeight = static_cast<float>(TerrainSnowMinimumHeight);\n\tDensitySettings.BiomeSnowMinimumHeight = static_cast<float>(TerrainSnowMinimumHeight);\n'''
+          replace_once(volume_cpp, old_wire, new_wire, 'density biome snow wiring')
+
+          seeds_h = 'Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h'
+          old_version = '''    // Bumped to 12: mountain ridge shoulders and bounded local relief replace\n    // the version-eleven terrain response that could form narrow air spikes.\n    static constexpr uint32 CurrentGenerationVersion = 12;\n'''
+          new_version = '''    // Bumped to 13: seeded multiscale climate provinces replace the warm-lowland\n    // bias, and biome snow/ice is now driven by local climate rather than world Z.\n    static constexpr uint32 CurrentGenerationVersion = 13;\n'''
+          replace_once(seeds_h, old_version, new_version, 'generation version')
+
+          biome_tests = 'Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp'
+          old_test_anchor = '''    TestTrue(TEXT("Biome sample exposes normalized exposure"), First.Exposure >= 0.0f && First.Exposure <= 1.0f);\n\n    const FCubusBiomeSample Cliff = FCubusBiomeField::Sample(\n'''
+          new_test_anchor = '''    TestTrue(TEXT("Biome sample exposes normalized exposure"), First.Exposure >= 0.0f && First.Exposure <= 1.0f);\n\n    float MinimumLowlandTemperature = 1.0f;\n    float MaximumLowlandTemperature = 0.0f;\n    for (int32 SampleY = -4096; SampleY <= 4096; SampleY += 512)\n    {\n        for (int32 SampleX = -4096; SampleX <= 4096; SampleX += 512)\n        {\n            const FCubusBiomeSample ClimateSample = FCubusBiomeField::Sample(\n                static_cast<float>(SampleX),\n                static_cast<float>(SampleY),\n                Settings.HydrologySettings.SeaLevel,\n                0.10f,\n                Settings\n            );\n            MinimumLowlandTemperature = FMath::Min(MinimumLowlandTemperature, ClimateSample.Temperature);\n            MaximumLowlandTemperature = FMath::Max(MaximumLowlandTemperature, ClimateSample.Temperature);\n        }\n    }\n\n    TestTrue(TEXT("Seeded lowlands include genuinely cold climate"), MinimumLowlandTemperature < 0.38f);\n    TestTrue(TEXT("Seeded lowlands include genuinely warm climate"), MaximumLowlandTemperature > 0.62f);\n    TestTrue(TEXT("Climate varies substantially without relying on elevation"),\n        MaximumLowlandTemperature - MinimumLowlandTemperature > 0.30f);\n\n    const FCubusBiomeSample Cliff = FCubusBiomeField::Sample(\n'''
+          replace_once(biome_tests, old_test_anchor, new_test_anchor, 'lowland climate coverage test')
+
+          density_tests = 'Source/Orakai/CubusCore/Tests/CubusTerrainDensityFieldTests.cpp'
+          insert_before = '''IMPLEMENT_SIMPLE_AUTOMATION_TEST(\n    FCubusTerrainDensitySeedDomainTest,\n'''
+          climate_snow_test = '''IMPLEMENT_SIMPLE_AUTOMATION_TEST(\n    FCubusTerrainDensityClimateSnowTest,\n    "Orakai.Cubus.Density.NativeTerrain.ClimateSnow",\n    EAutomationTestFlags::EditorContext |\n    EAutomationTestFlags::EngineFilter\n)\n\nbool FCubusTerrainDensityClimateSnowTest::RunTest(\n    const FString& Parameters\n)\n{\n    (void)Parameters;\n\n    FCubusTerrainDensitySettings Settings;\n    Settings.bUseHeightTerrain = false;\n    Settings.FlatSurfaceWorldZ = Settings.BiomeSettings.HydrologySettings.SeaLevel;\n    Settings.bGenerateVolumetricGeology = false;\n    Settings.bGenerateCaves = false;\n    Settings.BiomeSettings.bEnabled = true;\n    Settings.BiomeSettings.BiomeOffsetX = 1387;\n    Settings.BiomeSettings.BiomeOffsetY = -2911;\n    Settings.BiomeSettings.PlainsSurfaceMaterialId = 11;\n    Settings.BiomeSettings.ForestSurfaceMaterialId = 17;\n    Settings.BiomeSettings.RockySurfaceMaterialId = 23;\n    Settings.BiomeSettings.WetlandSurfaceMaterialId = 31;\n    Settings.RockSlopeThreshold = 1.25f;\n    Settings.BiomeSnowMaterialId = 91;\n\n    const FCubusTerrainDensityField DensityField(Settings);\n\n    bool bFoundColdLowland = false;\n    for (int32 SampleY = -8192; SampleY <= 8192 && !bFoundColdLowland; SampleY += 256)\n    {\n        for (int32 SampleX = -8192; SampleX <= 8192; SampleX += 256)\n        {\n            const float WorldX = static_cast<float>(SampleX);\n            const float WorldY = static_cast<float>(SampleY);\n            const FCubusBiomeSample Biome = DensityField.SampleSurfaceBiome(WorldX, WorldY);\n            if (Biome.Temperature > 0.28f || Biome.Moisture < 0.16f)\n            {\n                continue;\n            }\n\n            const FCubusDensitySample SurfaceSample = DensityField.SampleContinuous(\n                FVector(WorldX + 0.5, WorldY + 0.5, static_cast<double>(Settings.FlatSurfaceWorldZ))\n            );\n\n            TestTrue(TEXT("A cold lowland surface remains solid"), SurfaceSample.IsSolid());\n            TestEqual(TEXT("Cold lowland climate receives the biome snow material"), SurfaceSample.MaterialId, 91);\n            bFoundColdLowland = true;\n            break;\n        }\n    }\n\n    TestTrue(TEXT("The seeded climate produces at least one cold lowland test site"), bFoundColdLowland);\n    return true;\n}\n\n'''
+          p = Path(density_tests)
+          s = p.read_text(encoding='utf-8')
+          if 'FCubusTerrainDensityClimateSnowTest' not in s:
+              if s.count(insert_before) != 1:
+                  raise RuntimeError(f'climate snow test anchor: expected one anchor, found {s.count(insert_before)}')
+              p.write_text(s.replace(insert_before, climate_snow_test + insert_before, 1), encoding='utf-8')
+
+          PY
+
+          git diff --check
+          grep -n 'ClimateProvinceFrequency' Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp
+          grep -n 'SnowSuitability' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
+          grep -n 'CurrentGenerationVersion = 13' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
+          grep -n 'BiomeSnowMaterialId = TerrainSnowMaterialId' Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.cpp
+          grep -n 'genuinely cold climate' Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp
+          grep -n 'FCubusTerrainDensityClimateSnowTest' Source/Orakai/CubusCore/Tests/CubusTerrainDensityFieldTests.cpp
+
+          if git diff --quiet; then
+            echo 'Climate distribution fix already applied.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            Source/Orakai/CubusCore/Generation/CubusBiomeField.cpp \
+            Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp \
+            Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h \
+            Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.cpp \
+            Source/Orakai/CubusCore/Tests/CubusBiomeFieldTests.cpp \
+            Source/Orakai/CubusCore/Tests/CubusTerrainDensityFieldTests.cpp
+          git commit -m 'Make climate distribution seed-driven and snow ecological'
+          git push origin HEAD:agent/density-meshing

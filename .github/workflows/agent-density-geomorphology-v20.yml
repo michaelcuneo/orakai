@@ -1,0 +1,8 @@
+name: Archived density geomorphology v20 runner
+on:
+  workflow_dispatch:
+jobs:
+  archived:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'v20 density geomorphology was applied directly to source; this runner is archived.'

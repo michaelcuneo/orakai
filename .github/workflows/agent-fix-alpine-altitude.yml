@@ -1,0 +1,138 @@
+name: Fix alpine altitude and snowline
+on:
+  push:
+    branches:
+      - agent/density-meshing
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/density-meshing
+          fetch-depth: 0
+      - name: Restore altitude-gated snow and real alpine relief
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if new in text:
+                  return False
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected exactly one anchor, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+              return True
+
+          terrain_h = 'Source/Orakai/CubusCore/Generation/CubusTerrainForm.h'
+          replace_once(
+              terrain_h,
+              '''    float MountainThreshold = 0.30f;\n    float MountainBlend = 0.20f;\n''',
+              '''    float MountainThreshold = 0.30f;\n    float MountainBlend = 0.20f;\n\n    /** Broad vertical scale for mountain systems; does not amplify local ridge detail. */\n    float MountainElevationScale = 2.60f;\n''',
+              'terrain elevation setting'
+          )
+
+          terrain_cpp = 'Source/Orakai/CubusCore/Generation/CubusTerrainForm.cpp'
+          replace_once(
+              terrain_cpp,
+              '''    Settings.MountainBlend = FMath::Clamp(Settings.MountainBlend, 0.001f, 1.0f);\n\n    // RegionFrequency is an author-facing regional-detail frequency. The\n''',
+              '''    Settings.MountainBlend = FMath::Clamp(Settings.MountainBlend, 0.001f, 1.0f);\n    Settings.MountainElevationScale = FMath::Clamp(Settings.MountainElevationScale, 1.0f, 4.0f);\n\n    // RegionFrequency is an author-facing regional-detail frequency. The\n''',
+              'terrain elevation clamp'
+          )
+          replace_once(
+              terrain_cpp,
+              '''    const float RangeUplift =\n        Settings.RidgeAmplitude *\n        (\n            FoothillBelt * 0.78f +\n            RangeCore * (1.08f + MajorRidge * 0.92f)\n        ) *\n        (0.82f + PeakRhythm * 0.38f);\n''',
+              '''    /*\n     * Mountain altitude must come from the broad range mass, not from sharper\n     * ridge detail. Scaling only this kilometre-scale uplift creates a real\n     * lowland -> foothill -> alpine vertical hierarchy without reintroducing\n     * the unsupported needle peaks removed in generation v12.\n     */\n    const float RangeUplift =\n        Settings.RidgeAmplitude * Settings.MountainElevationScale *\n        (\n            FoothillBelt * 0.78f +\n            RangeCore * (1.08f + MajorRidge * 0.92f)\n        ) *\n        (0.82f + PeakRhythm * 0.38f);\n''',
+              'broad mountain uplift'
+          )
+
+          density_h = 'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h'
+          density_text = Path(density_h).read_text(encoding='utf-8')
+          density_text = density_text.replace('    float SnowMinimumHeight = 34.0f;\n', '    float SnowMinimumHeight = 72.0f;\n', 1)
+          density_text = density_text.replace('    float BiomeSnowMinimumHeight = 34.0f;\n', '    float BiomeSnowMinimumHeight = 72.0f;\n', 1)
+          Path(density_h).write_text(density_text, encoding='utf-8')
+
+          for actor_h in [
+              'Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.h',
+              'Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.h',
+          ]:
+              p = Path(actor_h)
+              text = p.read_text(encoding='utf-8')
+              text = text.replace('int32 TerrainSnowMinimumHeight = 34;', 'int32 TerrainSnowMinimumHeight = 72;', 1)
+              p.write_text(text, encoding='utf-8')
+
+          density_cpp = 'Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp'
+          old_snow = '''\t\tif (Settings.BiomeSettings.bEnabled)\n\t\t{\n\t\t\t/*\n\t\t\t * Snow/ice follows the local climate, not a global world-Z cutoff.\n\t\t\t * Temperature already contains the elevation lapse response, so a\n\t\t\t * sufficiently cold lowland can freeze while a warm mountain can stay\n\t\t\t * bare. Moisture controls accumulation and steep slopes shed snow.\n\t\t\t */\n\t\t\tconst float Coldness = 1.0f - SmoothStep(0.28f, 0.46f, Column.BiomeSample.Temperature);\n\t\t\tconst float MoistureSupport = FMath::Lerp(\n\t\t\t\t0.62f,\n\t\t\t\t1.0f,\n\t\t\t\tSmoothStep(0.16f, 0.50f, Column.BiomeSample.Moisture)\n\t\t\t);\n\t\t\tconst float SnowRetention = 1.0f - SmoothStep(\n\t\t\t\tSettings.RockSlopeThreshold * 0.85f,\n\t\t\t\tFMath::Max(Settings.RockSlopeThreshold * 1.55f, Settings.RockSlopeThreshold + 0.01f),\n\t\t\t\tColumn.Slope\n\t\t\t);\n\t\t\tconst float SnowSuitability = Coldness * MoistureSupport * SnowRetention;\n\n\t\t\tif (SnowSuitability >= 0.42f)\n\t\t\t{\n\t\t\t\tColumn.SurfaceMaterialId = Settings.BiomeSnowMaterialId;\n\t\t\t}\n\t\t}\n\t\telse if (Column.SurfaceVoxelHeight >= Settings.SnowMinimumHeight && Column.SurfaceMaterialId == Settings.SurfaceMaterialId)\n\t\t{\n\t\t\t/* Preserve the legacy fixed-height rule only for non-biome worlds. */\n\t\t\tColumn.SurfaceMaterialId = Settings.SnowMaterialId;\n\t\t}\n'''
+          new_snow = '''\t\t/*\n\t\t * Snow is an alpine altitude band. Climate may describe the ecology,\n\t\t * but it is never allowed to put snow on low ground. The structural\n\t\t * floor scales with the authored mountain amplitude so legacy worlds\n\t\t * carrying the old 34 m default cannot accidentally become snowy\n\t\t * lowlands after the mountain vertical scale is increased.\n\t\t */\n\t\tconst float StructuralSnowFloor =\n\t\t\tSettings.BaseHeight + FMath::Max(64.0f, Settings.RidgeAmplitude * 4.0f);\n\t\tconst float ConfiguredSnowLine = Settings.BiomeSettings.bEnabled\n\t\t\t? Settings.BiomeSnowMinimumHeight\n\t\t\t: Settings.SnowMinimumHeight;\n\t\tconst float SnowLine = FMath::Max(ConfiguredSnowLine, StructuralSnowFloor);\n\t\tconst float SnowRetention = 1.0f - SmoothStep(\n\t\t\tSettings.RockSlopeThreshold * 0.95f,\n\t\t\tFMath::Max(Settings.RockSlopeThreshold * 1.70f, Settings.RockSlopeThreshold + 0.01f),\n\t\t\tColumn.Slope\n\t\t);\n\n\t\tif (Column.SurfaceVoxelHeight >= SnowLine && SnowRetention >= 0.30f)\n\t\t{\n\t\t\tColumn.SurfaceMaterialId = Settings.BiomeSettings.bEnabled\n\t\t\t\t? Settings.BiomeSnowMaterialId\n\t\t\t\t: Settings.SnowMaterialId;\n\t\t}\n'''
+          replace_once(density_cpp, old_snow, new_snow, 'altitude snow rule')
+
+          seeds_h = 'Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h'
+          replace_once(
+              seeds_h,
+              '''    // Bumped to 13: seeded multiscale climate provinces replace the warm-lowland\n    // bias, and biome snow/ice is now driven by local climate rather than world Z.\n    static constexpr uint32 CurrentGenerationVersion = 13;\n''',
+              '''    // Bumped to 14: broad mountain mass now creates a genuine alpine elevation\n    // range, and snow/ice is strictly altitude-gated above the alpine snowline.\n    static constexpr uint32 CurrentGenerationVersion = 14;\n''',
+              'generation version 14'
+          )
+
+          density_tests = 'Source/Orakai/CubusCore/Tests/CubusTerrainDensityFieldTests.cpp'
+          old_test = '''IMPLEMENT_SIMPLE_AUTOMATION_TEST(\n    FCubusTerrainDensityClimateSnowTest,\n    "Orakai.Cubus.Density.NativeTerrain.ClimateSnow",\n    EAutomationTestFlags::EditorContext |\n    EAutomationTestFlags::EngineFilter\n)\n\nbool FCubusTerrainDensityClimateSnowTest::RunTest(\n    const FString& Parameters\n)\n{\n    (void)Parameters;\n\n    FCubusTerrainDensitySettings Settings;\n    Settings.bUseHeightTerrain = false;\n    Settings.FlatSurfaceWorldZ = Settings.BiomeSettings.HydrologySettings.SeaLevel;\n    Settings.bGenerateVolumetricGeology = false;\n    Settings.bGenerateCaves = false;\n    Settings.BiomeSettings.bEnabled = true;\n    Settings.BiomeSettings.BiomeOffsetX = 1387;\n    Settings.BiomeSettings.BiomeOffsetY = -2911;\n    Settings.BiomeSettings.PlainsSurfaceMaterialId = 11;\n    Settings.BiomeSettings.ForestSurfaceMaterialId = 17;\n    Settings.BiomeSettings.RockySurfaceMaterialId = 23;\n    Settings.BiomeSettings.WetlandSurfaceMaterialId = 31;\n    Settings.RockSlopeThreshold = 1.25f;\n    Settings.BiomeSnowMaterialId = 91;\n\n    const FCubusTerrainDensityField DensityField(Settings);\n\n    bool bFoundColdLowland = false;\n    for (int32 SampleY = -8192; SampleY <= 8192 && !bFoundColdLowland; SampleY += 256)\n    {\n        for (int32 SampleX = -8192; SampleX <= 8192; SampleX += 256)\n        {\n            const float WorldX = static_cast<float>(SampleX);\n            const float WorldY = static_cast<float>(SampleY);\n            const FCubusBiomeSample Biome = DensityField.SampleSurfaceBiome(WorldX, WorldY);\n            if (Biome.Temperature > 0.28f || Biome.Moisture < 0.16f)\n            {\n                continue;\n            }\n\n            const FCubusDensitySample SurfaceSample = DensityField.SampleContinuous(\n                FVector(WorldX + 0.5, WorldY + 0.5, static_cast<double>(Settings.FlatSurfaceWorldZ))\n            );\n\n            TestTrue(TEXT("A cold lowland surface remains solid"), SurfaceSample.IsSolid());\n            TestEqual(TEXT("Cold lowland climate receives the biome snow material"), SurfaceSample.MaterialId, 91);\n            bFoundColdLowland = true;\n            break;\n        }\n    }\n\n    TestTrue(TEXT("The seeded climate produces at least one cold lowland test site"), bFoundColdLowland);\n    return true;\n}\n\n'''
+          new_test = '''IMPLEMENT_SIMPLE_AUTOMATION_TEST(\n    FCubusTerrainDensityAltitudeSnowTest,\n    "Orakai.Cubus.Density.NativeTerrain.AltitudeSnow",\n    EAutomationTestFlags::EditorContext |\n    EAutomationTestFlags::EngineFilter\n)\n\nbool FCubusTerrainDensityAltitudeSnowTest::RunTest(\n    const FString& Parameters\n)\n{\n    (void)Parameters;\n\n    FCubusTerrainDensitySettings LowSettings;\n    LowSettings.bUseHeightTerrain = false;\n    LowSettings.FlatSurfaceWorldZ = LowSettings.BiomeSettings.HydrologySettings.SeaLevel;\n    LowSettings.bGenerateVolumetricGeology = false;\n    LowSettings.bGenerateCaves = false;\n    LowSettings.BiomeSettings.bEnabled = true;\n    LowSettings.BiomeSettings.BiomeOffsetX = 1387;\n    LowSettings.BiomeSettings.BiomeOffsetY = -2911;\n    LowSettings.BiomeSettings.PlainsSurfaceMaterialId = 11;\n    LowSettings.BiomeSettings.ForestSurfaceMaterialId = 17;\n    LowSettings.BiomeSettings.RockySurfaceMaterialId = 23;\n    LowSettings.BiomeSettings.WetlandSurfaceMaterialId = 31;\n    LowSettings.RockSlopeThreshold = 1.25f;\n    LowSettings.BiomeSnowMaterialId = 91;\n    LowSettings.BiomeSnowMinimumHeight = 72.0f;\n\n    const FVector2D Site(128.0f, -256.0f);\n    const FCubusTerrainDensityField LowField(LowSettings);\n    const FCubusDensitySample LowSurface = LowField.SampleContinuous(\n        FVector(Site.X + 0.5, Site.Y + 0.5, static_cast<double>(LowSettings.FlatSurfaceWorldZ))\n    );\n\n    TestTrue(TEXT("Lowland altitude remains solid"), LowSurface.IsSolid());\n    TestNotEqual(TEXT("Lowland altitude never receives alpine snow"), LowSurface.MaterialId, 91);\n\n    FCubusTerrainDensitySettings AlpineSettings = LowSettings;\n    AlpineSettings.FlatSurfaceWorldZ = 104.0f;\n    const FCubusTerrainDensityField AlpineField(AlpineSettings);\n    const FCubusDensitySample AlpineSurface = AlpineField.SampleContinuous(\n        FVector(Site.X + 0.5, Site.Y + 0.5, static_cast<double>(AlpineSettings.FlatSurfaceWorldZ))\n    );\n\n    TestTrue(TEXT("Alpine altitude remains solid"), AlpineSurface.IsSolid());\n    TestEqual(TEXT("Alpine altitude receives the snow material"), AlpineSurface.MaterialId, 91);\n    return true;\n}\n\n'''
+          replace_once(density_tests, old_test, new_test, 'altitude snow regression test')
+
+          terrain_tests = 'Source/Orakai/CubusCore/Tests/CubusTerrainFormTests.cpp'
+          replace_once(
+              terrain_tests,
+              '''    int32 LongestConnectedRange = 0;\n''',
+              '''    int32 LongestConnectedRange = 0;\n    float MaximumAlpineHeight = -MAX_flt;\n''',
+              'alpine height diagnostic declaration'
+          )
+          replace_once(
+              terrain_tests,
+              '''            MountainMask[RangeIndex(GridX, GridY)] =\n                Sample.MountainCore > 0.35f ? 1u : 0u;\n            bFoundPlain |= Sample.PlainsWeight > 0.65f;\n''',
+              '''            MountainMask[RangeIndex(GridX, GridY)] =\n                Sample.MountainCore > 0.35f ? 1u : 0u;\n            MaximumAlpineHeight = FMath::Max(MaximumAlpineHeight, Sample.Height);\n            bFoundPlain |= Sample.PlainsWeight > 0.65f;\n''',
+              'alpine height sampling'
+          )
+          replace_once(
+              terrain_tests,
+              '''    TestTrue(\n        TEXT("A connected mountain range spans at least 2.4 kilometres"),\n        LongestConnectedRange >= 2400\n    );\n''',
+              '''    TestTrue(\n        TEXT("A connected mountain range spans at least 2.4 kilometres"),\n        LongestConnectedRange >= 2400\n    );\n    TestTrue(\n        TEXT("Mountain systems reach a genuine alpine altitude band"),\n        MaximumAlpineHeight >= Settings.BaseHeight + Settings.RidgeAmplitude * 5.0f\n    );\n''',
+              'alpine altitude assertion'
+          )
+
+          PY
+
+          git diff --check
+          grep -n 'MountainElevationScale = 2.60f' Source/Orakai/CubusCore/Generation/CubusTerrainForm.h
+          grep -n 'Settings.RidgeAmplitude \* Settings.MountainElevationScale' Source/Orakai/CubusCore/Generation/CubusTerrainForm.cpp
+          grep -n 'StructuralSnowFloor' Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp
+          grep -n 'TerrainSnowMinimumHeight = 72' Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.h
+          grep -n 'CurrentGenerationVersion = 14' Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h
+          grep -n 'FCubusTerrainDensityAltitudeSnowTest' Source/Orakai/CubusCore/Tests/CubusTerrainDensityFieldTests.cpp
+          grep -n 'genuine alpine altitude band' Source/Orakai/CubusCore/Tests/CubusTerrainFormTests.cpp
+
+          if git diff --quiet; then
+            echo 'Alpine altitude correction already applied.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            Source/Orakai/CubusCore/Generation/CubusTerrainForm.h \
+            Source/Orakai/CubusCore/Generation/CubusTerrainForm.cpp \
+            Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.h \
+            Source/Orakai/CubusCore/Generation/CubusTerrainDensityField.cpp \
+            Source/Orakai/CubusCore/Generation/CubusGenerationSeeds.h \
+            Source/Orakai/CubusCore/Actors/CubusBlockWorldActor.h \
+            Source/Orakai/CubusCore/Actors/CubusVoxelVolumeActor.h \
+            Source/Orakai/CubusCore/Tests/CubusTerrainDensityFieldTests.cpp \
+            Source/Orakai/CubusCore/Tests/CubusTerrainFormTests.cpp
+          git commit -m 'Restore alpine altitude snow bands'
+          git push origin HEAD:agent/density-meshing
