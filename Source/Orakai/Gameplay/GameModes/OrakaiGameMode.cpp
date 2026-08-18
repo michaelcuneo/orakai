@@ -40,6 +40,11 @@ void AOrakaiGameMode::StartPlay()
     }
 
     Super::StartPlay();
+
+    // The 500 km DEM remains globally sampleable, but Cubus itself starts with
+    // only the tiny spawn-area window. The ordinary gameplay view distance is
+    // restored after the real character is possessed.
+    ConfigureGeneratedWorldBootstrap();
 }
 
 void AOrakaiGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
@@ -72,7 +77,85 @@ void AOrakaiGameMode::Tick(const float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
     (void)DeltaSeconds;
+
+    if (!bGeneratedBootstrapConfigured && FCubusGeneratedTerrainRuntime::IsActive())
+    {
+        ConfigureGeneratedWorldBootstrap();
+    }
+
     TickGeneratedWorldSpawn();
+}
+
+void AOrakaiGameMode::ConfigureGeneratedWorldBootstrap()
+{
+    if (bGeneratedBootstrapConfigured || !FCubusGeneratedTerrainRuntime::IsActive())
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!IsValid(World))
+    {
+        return;
+    }
+
+    for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
+    {
+        ACubusBlockWorldActor* BlockWorld = *Iterator;
+        if (!IsValid(BlockWorld))
+        {
+            continue;
+        }
+
+        GeneratedGameplayHorizontalViewRadius = BlockWorld->GetClientHorizontalViewDistance();
+        GeneratedGameplayVerticalViewRadius = BlockWorld->GetClientVerticalViewDistance();
+
+        // Spawn staging intentionally materialises only a compact local patch.
+        // Radius one is enough to give collision and immediate surroundings,
+        // while the coarse LOD actor provides the broader visual context.
+        BlockWorld->SetClientViewDistance(1, 1, false);
+        bGeneratedBootstrapConfigured = true;
+
+        UE_LOG(LogTemp, Display,
+            TEXT("Cubus generated-world bootstrap: local radius=1/1 chunks; gameplay radius saved=%d/%d. Global 500 km DEM remains sample-only."),
+            GeneratedGameplayHorizontalViewRadius,
+            GeneratedGameplayVerticalViewRadius);
+        return;
+    }
+}
+
+void AOrakaiGameMode::PromoteGeneratedWorldStreaming()
+{
+    if (!bGeneratedBootstrapConfigured)
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!IsValid(World))
+    {
+        return;
+    }
+
+    for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
+    {
+        ACubusBlockWorldActor* BlockWorld = *Iterator;
+        if (!IsValid(BlockWorld))
+        {
+            continue;
+        }
+
+        BlockWorld->SetClientViewDistance(
+            GeneratedGameplayHorizontalViewRadius,
+            GeneratedGameplayVerticalViewRadius,
+            false);
+
+        UE_LOG(LogTemp, Display,
+            TEXT("Cubus generated-world streaming promoted after spawn: gameplay radius=%d/%d chunks; coarse LOD continues outward asynchronously."),
+            GeneratedGameplayHorizontalViewRadius,
+            GeneratedGameplayVerticalViewRadius);
+        return;
+    }
 }
 
 void AOrakaiGameMode::TickGeneratedWorldSpawn()
@@ -150,9 +233,6 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
 
     if (!StreamingPawn->GetActorLocation().Equals(ProposedFocusLocation, 1.0))
     {
-        // BlockWorld can deliberately hold its tracked pawn during the first
-        // support pass. The spawn marker is authoritative for this transient
-        // pawn, so release/update that hold whenever the player moves the marker.
         if (IsValid(BlockWorld))
         {
             BlockWorld->ReleaseHeldPawnAtLocation(StreamingPawn, ProposedFocusLocation);
@@ -197,6 +277,9 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
             break;
         }
     }
+
+    // Only the useful near coarse context is required to enter the world.
+    // LOD3-LOD6 continue building after possession; they no longer block spawn.
     if (!IsValid(LodWorld) || !LodWorld->IsPreSpawnVisualCoverageReady())
     {
         return;
@@ -251,6 +334,11 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     StreamingPawn->Destroy();
     SpawnStreamingPawn.Reset();
 
+    // We are safely standing on the compact local terrain now. Expand the
+    // gameplay window around the real player; far terrain is still streamed,
+    // never instantiated across the full 500 km domain.
+    PromoteGeneratedWorldStreaming();
+
     FInputModeGameOnly GameplayInputMode;
     PlayerController->SetInputMode(GameplayInputMode);
     PlayerController->SetShowMouseCursor(false);
@@ -263,7 +351,7 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     PendingGeneratedPlayer.Reset();
 
     UE_LOG(LogTemp, Display,
-        TEXT("Cubus generated character %s created in Lvl_ThirdPerson after selected gameplay area was ready at %s"),
+        TEXT("Cubus generated character %s created in Lvl_ThirdPerson after compact selected gameplay area was ready at %s"),
         *GetNameSafe(GeneratedCharacter),
         *FinalSpawnLocation.ToCompactString());
 }
