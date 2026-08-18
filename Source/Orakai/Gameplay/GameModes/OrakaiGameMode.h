@@ -12,11 +12,12 @@ class ACubusSpawnStreamingPawn;
 /**
  * Third-person GameMode with an explicit generated-world spawn lifecycle.
  *
- * When the world-generation Loader is present, the real player character is
- * withheld from map entry. The Loader remains in the current world, performs
- * DEM generation followed by support chunks, the full gameplay chunk pass and
- * LOD1-LOD6, and only then lets the existing WBP unlock spawn selection.
- * Confirming the WBP's SPAWN action creates and possesses the real character.
+ * The 500 km DEM remains a cheap, deterministic global source surface. It is
+ * never materialised as 500 km of Cubus chunks. During spawn selection we keep
+ * only a deliberately small local voxel window resident around the selected
+ * location, plus the first couple of coarse visual LOD rings. After the real
+ * character is possessed, the normal player view distance is restored and the
+ * remaining coarse rings continue streaming outward in the background.
  */
 UCLASS()
 class AOrakaiGameMode : public AGameModeBase
@@ -33,11 +34,14 @@ protected:
 
 private:
     void TickGeneratedWorldSpawn();
+    void ConfigureGeneratedWorldBootstrap();
+    void PromoteGeneratedWorldStreaming();
 
     TWeakObjectPtr<APlayerController> PendingGeneratedPlayer;
-
-    // Retained for source compatibility with the earlier promotion path. The
-    // Loader now owns the temporary streaming-focus pawn used before SPAWN.
     TWeakObjectPtr<ACubusSpawnStreamingPawn> SpawnStreamingPawn;
+
+    int32 GeneratedGameplayHorizontalViewRadius = 4;
+    int32 GeneratedGameplayVerticalViewRadius = 2;
+    bool bGeneratedBootstrapConfigured = false;
     bool bGeneratedSpawnCompleted = false;
 };
