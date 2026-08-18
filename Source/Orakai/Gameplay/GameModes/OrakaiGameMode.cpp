@@ -40,10 +40,6 @@ void AOrakaiGameMode::StartPlay()
     }
 
     Super::StartPlay();
-
-    // The 500 km DEM remains globally sampleable, but Cubus itself starts with
-    // only the tiny spawn-area window. The ordinary gameplay view distance is
-    // restored after the real character is possessed.
     ConfigureGeneratedWorldBootstrap();
 }
 
@@ -109,10 +105,6 @@ void AOrakaiGameMode::ConfigureGeneratedWorldBootstrap()
 
         GeneratedGameplayHorizontalViewRadius = BlockWorld->GetClientHorizontalViewDistance();
         GeneratedGameplayVerticalViewRadius = BlockWorld->GetClientVerticalViewDistance();
-
-        // Spawn staging intentionally materialises only a compact local patch.
-        // Radius one is enough to give collision and immediate surroundings,
-        // while the coarse LOD actor provides the broader visual context.
         BlockWorld->SetClientViewDistance(1, 1, false);
         bGeneratedBootstrapConfigured = true;
 
@@ -137,6 +129,15 @@ void AOrakaiGameMode::PromoteGeneratedWorldStreaming()
         return;
     }
 
+    for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(World); Iterator; ++Iterator)
+    {
+        if (IsValid(*Iterator))
+        {
+            Iterator->SetMaximumVisibleLod(6);
+            break;
+        }
+    }
+
     for (TActorIterator<ACubusBlockWorldActor> Iterator(World); Iterator; ++Iterator)
     {
         ACubusBlockWorldActor* BlockWorld = *Iterator;
@@ -151,7 +152,7 @@ void AOrakaiGameMode::PromoteGeneratedWorldStreaming()
             false);
 
         UE_LOG(LogTemp, Display,
-            TEXT("Cubus generated-world streaming promoted after spawn: gameplay radius=%d/%d chunks; coarse LOD continues outward asynchronously."),
+            TEXT("Cubus generated-world streaming promoted after spawn: gameplay radius=%d/%d chunks; full coarse LOD visibility restored."),
             GeneratedGameplayHorizontalViewRadius,
             GeneratedGameplayVerticalViewRadius);
         return;
@@ -186,6 +187,17 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         if (IsValid(*Iterator))
         {
             BlockWorld = *Iterator;
+            break;
+        }
+    }
+
+    ACubusTerrainLodWorldActor* LodWorld = nullptr;
+    for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(World); Iterator; ++Iterator)
+    {
+        if (IsValid(*Iterator))
+        {
+            LodWorld = *Iterator;
+            LodWorld->SetMaximumVisibleLod(2);
             break;
         }
     }
@@ -225,7 +237,7 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         PlayerController->Possess(StreamingPawn);
 
         UE_LOG(LogTemp, Display,
-            TEXT("Cubus gameplay preload focus created at proposed spawn %.1fm, %.1fm"),
+            TEXT("Cubus gameplay preload focus created at proposed spawn %.1fm, %.1fm; only LOD1-LOD2 visible during staging"),
             ProposedWorldMeters.X,
             ProposedWorldMeters.Y);
         return;
@@ -268,18 +280,6 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
         return;
     }
 
-    ACubusTerrainLodWorldActor* LodWorld = nullptr;
-    for (TActorIterator<ACubusTerrainLodWorldActor> Iterator(World); Iterator; ++Iterator)
-    {
-        if (IsValid(*Iterator))
-        {
-            LodWorld = *Iterator;
-            break;
-        }
-    }
-
-    // Only the useful near coarse context is required to enter the world.
-    // LOD3-LOD6 continue building after possession; they no longer block spawn.
     if (!IsValid(LodWorld) || !LodWorld->IsPreSpawnVisualCoverageReady())
     {
         return;
@@ -334,9 +334,6 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     StreamingPawn->Destroy();
     SpawnStreamingPawn.Reset();
 
-    // We are safely standing on the compact local terrain now. Expand the
-    // gameplay window around the real player; far terrain is still streamed,
-    // never instantiated across the full 500 km domain.
     PromoteGeneratedWorldStreaming();
 
     FInputModeGameOnly GameplayInputMode;
@@ -351,7 +348,7 @@ void AOrakaiGameMode::TickGeneratedWorldSpawn()
     PendingGeneratedPlayer.Reset();
 
     UE_LOG(LogTemp, Display,
-        TEXT("Cubus generated character %s created in Lvl_ThirdPerson after compact selected gameplay area was ready at %s"),
+        TEXT("Cubus generated character %s created after compact local terrain plus LOD1-LOD2 were ready at %s"),
         *GetNameSafe(GeneratedCharacter),
         *FinalSpawnLocation.ToCompactString());
 }
