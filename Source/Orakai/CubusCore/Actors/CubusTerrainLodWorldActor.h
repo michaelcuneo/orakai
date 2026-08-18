@@ -82,26 +82,18 @@ public:
 	float GetInitialVisualCoverageProgress() const;
 
 	/**
-	 * Pre-spawn readiness covers the complete DEM-derived clipmap, LOD1 through
-	 * LOD6. With the generated world centred during staging, the outer tiers are
-	 * the broad world representation retained while a selected area is promoted.
+	 * Spawn only waits for the useful nearby coarse context. LOD1 and LOD2 are
+	 * enough to surround the compact voxel spawn window; LOD3-LOD6 are allowed
+	 * to continue building asynchronously after the character enters the world.
 	 */
 	bool IsPreSpawnVisualCoverageReady() const
 	{
-		return IsTierWindowResident(Lod1Runtime) &&
-			IsTierWindowResident(Lod2Runtime) &&
-			IsTierWindowResident(Lod3Runtime) &&
-			IsTierWindowResident(Lod4Runtime) &&
-			IsTierWindowResident(Lod5Runtime) &&
-			IsTierWindowResident(Lod6Runtime);
+		return IsTierWindowResident(Lod1Runtime) && IsTierWindowResident(Lod2Runtime);
 	}
 
 	float GetPreSpawnVisualCoverageProgress() const
 	{
-		const FCubusTerrainLodTierRuntime* Tiers[] = {
-			&Lod1Runtime, &Lod2Runtime, &Lod3Runtime,
-			&Lod4Runtime, &Lod5Runtime, &Lod6Runtime
-		};
+		const FCubusTerrainLodTierRuntime* Tiers[] = {&Lod1Runtime, &Lod2Runtime};
 		int32 RequiredCount = 0;
 		int32 ReadyCount = 0;
 		for (const FCubusTerrainLodTierRuntime* Tier : Tiers)
@@ -115,6 +107,35 @@ public:
 		return RequiredCount > 0
 			? static_cast<float>(ReadyCount) / static_cast<float>(RequiredCount)
 			: 0.0f;
+	}
+
+	/**
+	 * LOD tiles may be built ahead of the player, but the spawn screen only
+	 * needs a limited visible horizon. This toggles already-created components;
+	 * GameMode reapplies it while staging so newly uploaded far tiles are hidden
+	 * on the next frame. Pass 6 after possession to expose the full clipmap.
+	 */
+	void SetMaximumVisibleLod(const int32 InMaximumVisibleLod)
+	{
+		MaximumVisibleLod = FMath::Clamp(InMaximumVisibleLod, 0, 6);
+		FCubusTerrainLodTierRuntime* Tiers[] = {
+			&Lod1Runtime, &Lod2Runtime, &Lod3Runtime,
+			&Lod4Runtime, &Lod5Runtime, &Lod6Runtime
+		};
+		for (FCubusTerrainLodTierRuntime* Tier : Tiers)
+		{
+			const bool bVisible = Tier->LodLevel <= MaximumVisibleLod;
+			for (TPair<FIntVector, TObjectPtr<UProceduralMeshComponent>>& Pair : Tier->TileComponents)
+			{
+				if (IsValid(Pair.Value))
+				{
+					Pair.Value->SetVisibility(bVisible);
+					Pair.Value->SetHiddenInGame(!bVisible);
+					Pair.Value->SetRenderInMainPass(bVisible);
+					Pair.Value->SetRenderInDepthPass(bVisible);
+				}
+			}
+		}
 	}
 
 protected:
@@ -218,6 +239,7 @@ private:
 	FCubusTerrainLodTierRuntime Lod5Runtime;
 	FCubusTerrainLodTierRuntime Lod6Runtime;
 
+	int32 MaximumVisibleLod = 6;
 	float TimeUntilStreamingUpdate = 0.0f;
 	int32 NextLodBuildTierIndex = 0;
 	int32 NextLodUploadTierIndex = 0;
