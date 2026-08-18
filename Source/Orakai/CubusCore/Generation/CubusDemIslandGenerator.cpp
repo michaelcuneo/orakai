@@ -15,6 +15,7 @@ namespace
 {
 constexpr uint32 DemMagic = 0x4d454443u;
 constexpr uint32 DemVersion = 1u;
+constexpr int32 CoastKnotCount = 256;
 
 struct FHeader
 {
@@ -28,24 +29,21 @@ struct FHeader
 	float MeanElevationM = 0.0f;
 };
 
-struct FCoastFeature
-{
-	FVector2D A = FVector2D::ZeroVector;
-	FVector2D B = FVector2D::ZeroVector;
-	float RadiusM = 10000.0f;
-	bool bAddsLand = false;
-};
-
+/**
+ * Closed polar coastline spline. The radii are not arbitrary bay/peninsula
+ * primitives: they are extracted from the already-composed real DEM around the
+ * outer part of the island, then smoothed into a continuous curve. Small
+ * kilometre-scale roughness is added only after the real terrain has decided
+ * the broad and medium coastline direction.
+ */
 struct FCoastShape
 {
-	float AxisXM = 200000.0f;
-	float AxisYM = 170000.0f;
-	float Exponent = 2.4f;
+	TArray<float> RadiusM;
+	float MeanRadiusM = 225000.0f;
+	float MinimumRadiusM = 180000.0f;
+	float MaximumRadiusM = 245000.0f;
+	float FineRoughnessM = 4000.0f;
 	float RotationRad = 0.0f;
-	int32 PeninsulaCount = 0;
-	int32 BayCount = 0;
-	int32 InletCount = 0;
-	TArray<FCoastFeature> Features;
 };
 
 uint32 Hash(uint32 V)
@@ -99,136 +97,208 @@ float Fbm(double X, double Y, const int32 Seed)
 	return Weight > 0.0f ? Sum / Weight : 0.0f;
 }
 
-FVector2D Rotate2D(const FVector2D& V, const float AngleRad)
+float SamplePyramidReliefM(
+	const CubusDemPyramid::FResult& Pyramid,
+	const FSettings& Settings,
+	const FVector2D& WorldM)
 {
-	const float C = FMath::Cos(AngleRad);
-	const float S = FMath::Sin(AngleRad);
-	return FVector2D(V.X * C - V.Y * S, V.X * S + V.Y * C);
+	const int32 R = Settings.Resolution;
+	if (R < 2 || Pyramid.ReliefM.Num() != R * R)
+	{
+		return 0.0f;
+	}
+
+	const double Half = Settings.WorldSizeMeters * 0.5;
+	const double U = FMath::Clamp((WorldM.X + Half) / Settings.WorldSizeMeters, 0.0, 1.0) * static_cast<double>(R - 1);
+	const double V = FMath::Clamp((WorldM.Y + Half) / Settings.WorldSizeMeters, 0.0, 1.0) * static_cast<double>(R - 1);
+	const int32 X0 = FMath::Clamp(FMath::FloorToInt(U), 0, R - 1);
+	const int32 Y0 = FMath::Clamp(FMath::FloorToInt(V), 0, R - 1);
+	const int32 X1 = FMath::Min(X0 + 1, R - 1);
+	const int32 Y1 = FMath::Min(Y0 + 1, R - 1);
+	const float Fx = static_cast<float>(U - X0);
+	const float Fy = static_cast<float>(V - Y0);
+	const float A = FMath::Lerp(Pyramid.ReliefM[Y0 * R + X0], Pyramid.ReliefM[Y0 * R + X1], Fx);
+	const float B = FMath::Lerp(Pyramid.ReliefM[Y1 * R + X0], Pyramid.ReliefM[Y1 * R + X1], Fx);
+	return FMath::Lerp(A, B, Fy);
 }
 
-double SuperellipseRadiusM(const float AngleRad, const FCoastShape& Shape)
+void NormalizeSignal(TArray<float>& Signal)
 {
-	const double C = FMath::Abs(FMath::Cos(AngleRad));
-	const double S = FMath::Abs(FMath::Sin(AngleRad));
-	const double P = Shape.Exponent;
-	const double Denominator = FMath::Pow(
-		FMath::Pow(C / FMath::Max(1.0f, Shape.AxisXM), P) +
-		FMath::Pow(S / FMath::Max(1.0f, Shape.AxisYM), P),
-		1.0 / P);
-	return Denominator > UE_DOUBLE_SMALL_NUMBER ? 1.0 / Denominator : FMath::Min(Shape.AxisXM, Shape.AxisYM);
+	if (Signal.IsEmpty()) return;
+
+	double Mean = 0.0;
+	for (const float Value : Signal) Mean += Value;
+	Mean /= Signal.Num();
+
+	double Variance = 0.0;
+	for (const float Value : Signal)
+	{
+		const double D = static_cast<double>(Value) - Mean;
+		Variance += D * D;
+	}
+	const double StdDev = FMath::Sqrt(Variance / FMath::Max(1, Signal.Num()));
+	const double Scale = FMath::Max(1.0, StdDev);
+	for (float& Value : Signal)
+	{
+		Value = FMath::Clamp(static_cast<float>((Value - Mean) / Scale), -2.5f, 2.5f);
+	}
 }
 
-FVector2D ShorePointWorld(const float LocalAngleRad, const FCoastShape& Shape)
+TArray<float> SmoothCircularSignal(const TArray<float>& Input, const int32 Passes)
 {
-	const double R = SuperellipseRadiusM(LocalAngleRad, Shape);
-	const FVector2D Local(FMath::Cos(LocalAngleRad) * R, FMath::Sin(LocalAngleRad) * R);
-	return Rotate2D(Local, Shape.RotationRad);
+	TArray<float> Current = Input;
+	TArray<float> Next;
+	Next.SetNumUninitialized(Input.Num());
+	const int32 Count = Input.Num();
+	if (Count < 3) return Current;
+
+	for (int32 Pass = 0; Pass < Passes; ++Pass)
+	{
+		for (int32 I = 0; I < Count; ++I)
+		{
+			const int32 Prev = (I - 1 + Count) % Count;
+			const int32 NextIndex = (I + 1) % Count;
+			Next[I] = Current[Prev] * 0.22f + Current[I] * 0.56f + Current[NextIndex] * 0.22f;
+		}
+		Swap(Current, Next);
+	}
+	return Current;
 }
 
-FVector2D RadialWorld(const float LocalAngleRad, const FCoastShape& Shape)
+float CatmullRom(const float P0, const float P1, const float P2, const float P3, const float T)
 {
-	return Rotate2D(FVector2D(FMath::Cos(LocalAngleRad), FMath::Sin(LocalAngleRad)), Shape.RotationRad).GetSafeNormal();
+	const float T2 = T * T;
+	const float T3 = T2 * T;
+	return 0.5f * (
+		2.0f * P1 +
+		(-P0 + P2) * T +
+		(2.0f * P0 - 5.0f * P1 + 4.0f * P2 - P3) * T2 +
+		(-P0 + 3.0f * P1 - 3.0f * P2 + P3) * T3);
 }
 
-float SignedCapsuleInsideM(const FVector2D& P, const FCoastFeature& Feature)
+float CoastRadiusAtAngleM(const FCoastShape& Shape, float AngleRad)
 {
-	const FVector2D Segment = Feature.B - Feature.A;
-	const double SegmentLengthSq = Segment.SizeSquared();
-	const double T = SegmentLengthSq > UE_DOUBLE_SMALL_NUMBER
-		? FMath::Clamp(FVector2D::DotProduct(P - Feature.A, Segment) / SegmentLengthSq, 0.0, 1.0)
-		: 0.0;
-	const FVector2D Closest = Feature.A + Segment * T;
-	return Feature.RadiusM - static_cast<float>(FVector2D::Distance(P, Closest));
+	const int32 Count = Shape.RadiusM.Num();
+	if (Count < 4) return Shape.MeanRadiusM;
+
+	AngleRad -= Shape.RotationRad;
+	while (AngleRad < 0.0f) AngleRad += 2.0f * PI;
+	while (AngleRad >= 2.0f * PI) AngleRad -= 2.0f * PI;
+
+	const float KnotPosition = AngleRad / (2.0f * PI) * static_cast<float>(Count);
+	const int32 I1 = FMath::FloorToInt(KnotPosition) % Count;
+	const float T = KnotPosition - static_cast<float>(FMath::FloorToInt(KnotPosition));
+	const int32 I0 = (I1 - 1 + Count) % Count;
+	const int32 I2 = (I1 + 1) % Count;
+	const int32 I3 = (I1 + 2) % Count;
+	return FMath::Clamp(
+		CatmullRom(Shape.RadiusM[I0], Shape.RadiusM[I1], Shape.RadiusM[I2], Shape.RadiusM[I3], T),
+		Shape.MinimumRadiusM,
+		Shape.MaximumRadiusM);
 }
 
-FCoastShape BuildCoastShape(const FSettings& Settings)
+FCoastShape BuildCoastShape(
+	const FSettings& Settings,
+	const CubusDemPyramid::FResult& Pyramid)
 {
 	FCoastShape Shape;
 	FRandomStream Random(Settings.Seed ^ 0x4c8a91d3);
 	const float Half = static_cast<float>(Settings.WorldSizeMeters * 0.5);
 
-	Shape.AxisXM = Half * Random.FRandRange(0.76f, 0.90f);
-	Shape.AxisYM = Half * Random.FRandRange(0.62f, 0.82f);
-	Shape.Exponent = Random.FRandRange(1.9f, 2.65f);
+	// Keep the island large. Most seeds now occupy roughly 450-480 km of the
+	// 500 km domain, while the DEM-driven curve is still free to pull real bays
+	// and sounds substantially inward.
+	Shape.MeanRadiusM = Half * Random.FRandRange(0.90f, 0.94f);
+	Shape.MinimumRadiusM = Half * 0.70f;
+	Shape.MaximumRadiusM = Half * 0.960f;
+	Shape.FineRoughnessM = FMath::Clamp(Settings.WarpMeters * 0.36f, 2800.0f, 6000.0f);
 	Shape.RotationRad = Random.FRandRange(-PI, PI);
-	Shape.PeninsulaCount = Random.RandRange(5, 8);
-	Shape.BayCount = Random.RandRange(7, 11);
-	Shape.InletCount = Random.RandRange(2, 5);
-	Shape.Features.Reserve(Shape.PeninsulaCount + Shape.BayCount + Shape.InletCount);
 
-	const auto AddDistributedFeatures = [&Shape, &Random](const int32 Count, const bool bAddsLand,
-		const float MinLengthM, const float MaxLengthM, const float MinRadiusM, const float MaxRadiusM,
-		const float PhaseOffset, const float MaxTangentialFraction)
+	TArray<float> TerrainSignal;
+	TArray<float> RadialTrendSignal;
+	TerrainSignal.SetNumUninitialized(CoastKnotCount);
+	RadialTrendSignal.SetNumUninitialized(CoastKnotCount);
+
+	for (int32 I = 0; I < CoastKnotCount; ++I)
 	{
-		if (Count <= 0) return;
-		const float Sector = 2.0f * PI / static_cast<float>(Count);
-		for (int32 I = 0; I < Count; ++I)
-		{
-			const float LocalAngle = PhaseOffset + (I + 0.5f) * Sector + Random.FRandRange(-0.34f, 0.34f) * Sector;
-			const FVector2D Radial = RadialWorld(LocalAngle, Shape);
-			const FVector2D Tangent(-Radial.Y, Radial.X);
-			const FVector2D Shore = ShorePointWorld(LocalAngle, Shape);
-			const float LengthM = Random.FRandRange(MinLengthM, MaxLengthM);
-			const float RadiusM = Random.FRandRange(MinRadiusM, MaxRadiusM);
-			const float BendM = Random.FRandRange(-MaxTangentialFraction, MaxTangentialFraction) * LengthM;
+		const float Angle = Shape.RotationRad + 2.0f * PI * static_cast<float>(I) / static_cast<float>(CoastKnotCount);
+		const FVector2D Direction(FMath::Cos(Angle), FMath::Sin(Angle));
 
-			FCoastFeature Feature;
-			Feature.bAddsLand = bAddsLand;
-			Feature.RadiusM = RadiusM;
-			if (bAddsLand)
-			{
-				Feature.A = Shore - Radial * RadiusM * 1.7f;
-				Feature.B = Shore + Radial * LengthM + Tangent * BendM;
-			}
-			else
-			{
-				Feature.A = Shore + Radial * RadiusM * 1.8f;
-				Feature.B = Shore - Radial * LengthM + Tangent * BendM;
-			}
-			Shape.Features.Add(Feature);
-		}
-	};
+		// Read a real terrain transect through the outer 30% of the island. The
+		// weighted mean says whether this side is broadly high/low terrain; the
+		// outward trend says whether the sampled landform is still climbing toward
+		// the edge (headland/ridge) or falling away (bay/valley).
+		const float R0 = Half * 0.70f;
+		const float R1 = Half * 0.78f;
+		const float R2 = Half * 0.86f;
+		const float R3 = Half * 0.94f;
+		const float Z0 = SamplePyramidReliefM(Pyramid, Settings, Direction * R0);
+		const float Z1 = SamplePyramidReliefM(Pyramid, Settings, Direction * R1);
+		const float Z2 = SamplePyramidReliefM(Pyramid, Settings, Direction * R2);
+		const float Z3 = SamplePyramidReliefM(Pyramid, Settings, Direction * R3);
 
-	const float Scale = Half / 250000.0f;
-	AddDistributedFeatures(Shape.PeninsulaCount, true,
-		22000.0f * Scale, 62000.0f * Scale, 8500.0f * Scale, 22000.0f * Scale,
-		Random.FRandRange(0.0f, 2.0f * PI), 0.42f);
-	AddDistributedFeatures(Shape.BayCount, false,
-		18000.0f * Scale, 52000.0f * Scale, 10000.0f * Scale, 28000.0f * Scale,
-		Random.FRandRange(0.0f, 2.0f * PI), 0.38f);
-	AddDistributedFeatures(Shape.InletCount, false,
-		42000.0f * Scale, 90000.0f * Scale, 4500.0f * Scale, 10500.0f * Scale,
-		Random.FRandRange(0.0f, 2.0f * PI), 0.55f);
+		TerrainSignal[I] = Z0 * 0.10f + Z1 * 0.20f + Z2 * 0.35f + Z3 * 0.35f;
+		RadialTrendSignal[I] = (Z3 - Z2) * 0.55f + (Z2 - Z1) * 0.30f + (Z1 - Z0) * 0.15f;
+	}
+
+	NormalizeSignal(TerrainSignal);
+	NormalizeSignal(RadialTrendSignal);
+
+	// Three scales all come from the same real DEM signal. The broad component
+	// carries long persistent curves; medium carries bays/headlands; the residual
+	// keeps shorter bends without ever introducing a new straight primitive.
+	TArray<float> Broad = SmoothCircularSignal(TerrainSignal, 22);
+	TArray<float> Medium = SmoothCircularSignal(TerrainSignal, 7);
+	TArray<float> Trend = SmoothCircularSignal(RadialTrendSignal, 5);
+	NormalizeSignal(Broad);
+	NormalizeSignal(Medium);
+	NormalizeSignal(Trend);
+
+	Shape.RadiusM.SetNumUninitialized(CoastKnotCount);
+	float SumRadius = 0.0f;
+	float MinRadius = TNumericLimits<float>::Max();
+	float MaxRadius = TNumericLimits<float>::Lowest();
+	for (int32 I = 0; I < CoastKnotCount; ++I)
+	{
+		const float BroadOffsetM = Broad[I] * Half * 0.070f;
+		const float MediumOffsetM = (Medium[I] - Broad[I]) * Half * 0.048f;
+		const float TrendOffsetM = Trend[I] * Half * 0.030f;
+		const float ResidualOffsetM = (TerrainSignal[I] - Medium[I]) * Half * 0.012f;
+		const float Radius = FMath::Clamp(
+			Shape.MeanRadiusM + BroadOffsetM + MediumOffsetM + TrendOffsetM + ResidualOffsetM,
+			Shape.MinimumRadiusM,
+			Shape.MaximumRadiusM);
+		Shape.RadiusM[I] = Radius;
+		SumRadius += Radius;
+		MinRadius = FMath::Min(MinRadius, Radius);
+		MaxRadius = FMath::Max(MaxRadius, Radius);
+	}
+	Shape.MeanRadiusM = SumRadius / static_cast<float>(CoastKnotCount);
+	Shape.MinimumRadiusM = MinRadius;
+	Shape.MaximumRadiusM = MaxRadius;
 	return Shape;
 }
 
 float CoastSignedDistanceM(const FVector2D& WorldM, const FSettings& Settings, const FCoastShape& Shape)
 {
-	const double BroadScale = FMath::Max(60000.0, Settings.WorldSizeMeters * 0.17);
-	const float WarpAmplitude = FMath::Clamp(Settings.WarpMeters, 0.0f, static_cast<float>(Settings.WorldSizeMeters * 0.04));
-	const FVector2D Warped(
-		WorldM.X + Fbm(WorldM.X / BroadScale, WorldM.Y / BroadScale, Settings.Seed ^ 0x51d7348d) * WarpAmplitude,
-		WorldM.Y + Fbm(WorldM.X / (BroadScale * 1.13), WorldM.Y / (BroadScale * 1.13), Settings.Seed ^ 0x94d049bb) * WarpAmplitude);
+	const float RadiusM = static_cast<float>(WorldM.Size());
+	const float AngleRad = FMath::Atan2(static_cast<float>(WorldM.Y), static_cast<float>(WorldM.X));
+	const float CoastRadiusM = CoastRadiusAtAngleM(Shape, AngleRad);
 
-	const FVector2D Local = Rotate2D(Warped, -Shape.RotationRad);
-	const double P = Shape.Exponent;
-	const double Super = FMath::Pow(
-		FMath::Pow(FMath::Abs(Local.X) / FMath::Max(1.0f, Shape.AxisXM), P) +
-		FMath::Pow(FMath::Abs(Local.Y) / FMath::Max(1.0f, Shape.AxisYM), P),
-		1.0 / P);
-	float DistanceM = static_cast<float>((1.0 - Super) * FMath::Min(Shape.AxisXM, Shape.AxisYM));
+	// The spline carries the geography. These are only small shoreline-scale
+	// perturbations, so they roughen an existing curve rather than inventing
+	// separate bays or chopping straight cuts through it.
+	const float RoughnessScaleM = FMath::Max(1600.0f, static_cast<float>(Settings.WorldSizeMeters * 0.014));
+	const float Fine = Fbm(
+		WorldM.X / RoughnessScaleM,
+		WorldM.Y / RoughnessScaleM,
+		Settings.Seed ^ 0x51d7348d) * Shape.FineRoughnessM;
+	const float Micro = Fbm(
+		WorldM.X / (RoughnessScaleM * 0.38),
+		WorldM.Y / (RoughnessScaleM * 0.38),
+		Settings.Seed ^ 0x94d049bb) * Shape.FineRoughnessM * 0.34f;
 
-	DistanceM += Fbm(WorldM.X / 85000.0, WorldM.Y / 85000.0, Settings.Seed ^ 0x7f4a7c15) * 15000.0f;
-	DistanceM += Fbm(WorldM.X / 31000.0, WorldM.Y / 31000.0, Settings.Seed ^ 0x1ce4e5b9) * 4500.0f;
-
-	for (const FCoastFeature& Feature : Shape.Features)
-	{
-		const float FeatureInsideM = SignedCapsuleInsideM(Warped, Feature);
-		DistanceM = Feature.bAddsLand
-			? FMath::Max(DistanceM, FeatureInsideM)
-			: FMath::Min(DistanceM, -FeatureInsideM);
-	}
-	return DistanceM;
+	return CoastRadiusM + Fine + Micro - RadiusM;
 }
 
 float ReadNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* Name, const float DefaultValue)
@@ -429,13 +499,12 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 	OutDem.ProvinceId.Init(static_cast<uint8>(CubusLandscapeEvolution::EProvinceType::StablePlain), CellCount);
 	OutDem.BoundaryType.Init(static_cast<uint8>(CubusLandscapeEvolution::EBoundaryType::Stable), CellCount);
 
-	const FCoastShape CoastShape = BuildCoastShape(Settings);
-	const float CoastTransitionM = FMath::Clamp(Settings.CoastBandM, 3500.0f, static_cast<float>(Settings.WorldSizeMeters * 0.03));
+	const FCoastShape CoastShape = BuildCoastShape(Settings, Pyramid);
+	const float CoastTransitionM = FMath::Clamp(Settings.CoastBandM * 0.18f, 2500.0f, static_cast<float>(Settings.WorldSizeMeters * 0.016));
 	UE_LOG(LogTemp, Display,
-		TEXT("Cubus coastline: %.0f x %.0f km parent axes, rotation %.0f deg, %d peninsulas, %d bays, %d deep inlets, %.1f km shore transition"),
-		CoastShape.AxisXM * 2.0f / 1000.0f, CoastShape.AxisYM * 2.0f / 1000.0f,
-		FMath::RadiansToDegrees(CoastShape.RotationRad), CoastShape.PeninsulaCount, CoastShape.BayCount,
-		CoastShape.InletCount, CoastTransitionM / 1000.0f);
+		TEXT("Cubus terrain-following coastline: %d spline knots, radius min/mean/max %.0f / %.0f / %.0f km, fine roughness %.1f km, %.1f km shore transition"),
+		CoastShape.RadiusM.Num(), CoastShape.MinimumRadiusM / 1000.0f, CoastShape.MeanRadiusM / 1000.0f,
+		CoastShape.MaximumRadiusM / 1000.0f, CoastShape.FineRoughnessM / 1000.0f, CoastTransitionM / 1000.0f);
 
 	const int32 R = OutDem.Resolution;
 	const double HalfWorld = Settings.WorldSizeMeters * 0.5;
@@ -451,9 +520,9 @@ bool FGenerator::Generate(const FSettings& Settings, CubusLandscapeEvolution::FG
 		float Elevation = Settings.OceanFloorM;
 		if (CoastDistanceM >= 0.0f)
 		{
-			// Pyramid.ReliefM is now a real broad land surface above a robust lowland
-			// reference, not a signed mean-centred residual. Do not clamp negative
-			// residuals to sea level; that clamp created the enormous flat shelves.
+			// Pyramid.ReliefM is a real broad land surface above a robust lowland
+			// reference. The coastline follows that same composed real terrain instead
+			// of intersecting it with separate geometric bay/capsule cuts.
 			const float InteriorHeight = Settings.BaseLandElevationM + Pyramid.ReliefM[Cell];
 			const float InlandT = Smooth01(CoastDistanceM / CoastTransitionM);
 			Elevation = FMath::Lerp(Settings.OceanLevelM + 0.5f, InteriorHeight, InlandT);
