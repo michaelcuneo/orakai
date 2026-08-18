@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Tasks/Task.h"
+#include "ProceduralMeshComponent.h"
 
 #include "CubusCore/Generation/CubusTerrainDensityField.h"
 #include "CubusCore/Meshing/CubusMeshData.h"
@@ -11,7 +12,6 @@
 #include "CubusTerrainLodWorldActor.generated.h"
 
 class ACubusBlockWorldActor;
-class UProceduralMeshComponent;
 class USceneComponent;
 class UMaterialInterface;
 
@@ -81,11 +81,6 @@ public:
 	bool IsInitialVisualCoverageReady() const;
 	float GetInitialVisualCoverageProgress() const;
 
-	/**
-	 * Spawn only waits for the useful nearby coarse context. LOD1 and LOD2 are
-	 * enough to surround the compact voxel spawn window; LOD3-LOD6 are allowed
-	 * to continue building asynchronously after the character enters the world.
-	 */
 	bool IsPreSpawnVisualCoverageReady() const
 	{
 		return IsTierWindowResident(Lod1Runtime) && IsTierWindowResident(Lod2Runtime);
@@ -109,12 +104,6 @@ public:
 			: 0.0f;
 	}
 
-	/**
-	 * LOD tiles may be built ahead of the player, but the spawn screen only
-	 * needs a limited visible horizon. This toggles already-created components;
-	 * GameMode reapplies it while staging so newly uploaded far tiles are hidden
-	 * on the next frame. Pass 6 after possession to expose the full clipmap.
-	 */
 	void SetMaximumVisibleLod(const int32 InMaximumVisibleLod)
 	{
 		MaximumVisibleLod = FMath::Clamp(InMaximumVisibleLod, 0, 6);
